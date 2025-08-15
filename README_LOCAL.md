@@ -6,6 +6,48 @@ way (no network calls during tests by default).
 
 Prerequisites
 - Python 3.11+ (recommended)
+## Quick start (PowerShell helper)
+
+If you want a one-command local startup (no GitHub auth), use the provided
+PowerShell helper in `tools/quick_start.ps1` which starts the server,
+waits for the port and opens the OpenAPI UI in your browser.
+
+From PowerShell:
+
+```powershell
+# run the helper (defaults to port 8002)
+.\tools\quick_start.ps1
+
+# run on a different port
+.\tools\quick_start.ps1 -Port 8000
+```
+
+Notes:
+- This helper uses the local Python and uvicorn in your PATH — ensure the
+   virtualenv is activated if you're using one.
+- To stop the server, run `Stop-Process -Id <PID>` (the helper prints the PID).
+
+Developer quick commands
+------------------------
+
+If you want a one-command flow that starts the server, runs tests, and then
+stops the server locally, use the helper in `tools/run_server_and_tests.ps1`:
+
+```powershell
+.\tools\run_server_and_tests.ps1
+```
+
+To keep your local work isolated before pushing, create a branch and commit
+the changes locally:
+
+```powershell
+git checkout -b fix/quick-start
+git add -A
+git commit -m "Add quick start and import test cleanup"
+git status --short
+```
+
+
 - pip
 
 Quick start (local)
