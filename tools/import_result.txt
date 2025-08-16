@@ -1,2 +1,2 @@
 sys.path[0]=c:\Users\Hi\Desktop\루시아 에이전트\2
-OK app=<fastapi.applications.FastAPI object at 0x00000205D3A8DA90>
+OK app=<fastapi.applications.FastAPI object at 0x00000183AEEA1450>
