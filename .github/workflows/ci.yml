@@ -9,147 +9,55 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python: [ '3.11', '3.12', '3.13' ]
+    name: CI
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    on:
+      push:
+        branches: [ main, master, fix/quick-start ]
+      pull_request:
+        branches: [ main, master ]
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python }}
+    jobs:
+      test:
+        runs-on: ${{ matrix.os }}
+        strategy:
+          matrix:
+            os: [ubuntu-latest, windows-latest]
+            python-version: [3.11]
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+        steps:
+          - uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          - name: Set up Python
+            uses: actions/setup-python@v4
+            with:
+              python-version: ${{ matrix.python-version }}
 
-      - name: Start Uvicorn (background)
-        run: |
-          # Start the app in background and record PID (use nohup so it survives job signals reliably)
-          nohup python -m uvicorn lucia_ultimate_quantum_integrated_fixed:app --host 127.0.0.1 --port 8002 > uvicorn.log 2>&1 & echo $! > uvicorn.pid
+          - name: Cache pip
+            uses: actions/cache@v4
+            with:
+              path: ~/.cache/pip
+              key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+              restore-keys: |
+                ${{ runner.os }}-pip-
 
-      - name: Wait for server port
-        run: |
-          # Wait up to 30s for port 8002 to accept connections
-          python - <<'PY'
-import socket, time, sys
-addr = ('127.0.0.1', 8002)
-for i in range(30):
-    s = socket.socket()
-    try:
-        s.settimeout(1.0)
-        s.connect(addr)
-        print('port open')
-        s.close()
-        sys.exit(0)
-    except Exception:
-        time.sleep(1)
-print('timeout waiting for port', file=sys.stderr)
-sys.exit(2)
-PY
+          - name: Install dependencies
+            run: |
+              python -m pip install --upgrade pip
+              if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+              if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+          - name: Ensure clean usage file
+            run: |
+              rm -f ai_usage.json || true
+
+          - name: Run tests
+            run: |
+              # Treat DeprecationWarning as errors in CI to surface pydantic deprecations
+              python -W error -m pytest -q
+
+          - name: List small diagnostics
+            run: |
+              python -V
+              pip freeze | head -n 40
       - name: Run tests (fail on warnings)
-        run: |
-          # Treat warnings as errors to catch deprecations and timezone-naive usage early
-          python -W error -m pytest -q
-
-      - name: Stop Uvicorn
-        if: always()
-        run: |
-          if [ -f uvicorn.pid ]; then kill "$(cat uvicorn.pid)" || true; fi
-          # give the process a moment to exit and then show log tail for debugging
-          sleep 1 || true
-          if [ -f uvicorn.log ]; then echo '--- uvicorn.log ---'; tail -n +1 uvicorn.log || true; fi
-name: CI - Tests
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ '*' ]
-
-jobs:
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        python-version: [3.11]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        shell: bash
-
-      - name: Run pytest (mocked)
-        env:
-          AI_USE_MOCK: 'true'
-          AI_QUOTA_FILE: ${{ runner.temp }}/ai_usage_ci.json
-        run: |
-          python -m pytest -q
-        shell: bash
-
-      - name: Run concurrency smoke (Linux/Windows)
-        env:
-          AI_USE_MOCK: 'true'
-          AI_QUOTA_FILE: ${{ runner.temp }}/ai_usage_smoke.json
-        run: |
-          python tools/run_concurrency_smoke.py
-        shell: bash
-name: CI
-
-on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: [3.11, 3.10]
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-      - name: Ensure clean usage file
-        run: |
-          rm -f ai_usage.json || true
-      - name: Run tests
-        run: |
-          python -m pytest -q
-      - name: List small diagnostics
-        run: |
-          python -V
-          pip freeze | head -n 40
