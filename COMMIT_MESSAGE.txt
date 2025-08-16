@@ -1,0 +1,3 @@
+Automated cleanup: remove diagnostics, add safe sitecustomize, fix endpoints
+
+See CLEANUP.md for details.

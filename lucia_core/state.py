@@ -1,3 +1,11 @@
+class SystemState:
+    def __init__(self):
+        self.psi = 0.5
+        self.threat_level = 0
+        self.security_level = 5
+
+
+state = SystemState()
 from dataclasses import dataclass, field
 import numpy as np
 

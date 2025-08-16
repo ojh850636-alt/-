@@ -29,6 +29,14 @@ try:
     import requests
 except Exception:
     requests = None
+import warnings
+
+# Suppress Pydantic v2 deprecation messages about `.dict()` to keep CI logs clean.
+try:
+    from pydantic.errors import PydanticDeprecatedSince20
+    warnings.filterwarnings("ignore", category=PydanticDeprecatedSince20)
+except Exception:
+    warnings.filterwarnings("ignore", message=r".*The `dict` method is deprecated.*")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lucia.server")
@@ -516,12 +524,13 @@ async def websocket_endpoint(ws: WebSocket):
         logger.exception("ws error")
 
 
+from lucia_core.schemas import FileActionRequest
+
+
 @app.post("/file")
-async def file_endpoint(payload: Dict[str, Any]):
-    action = payload.get("action")
-    filename = payload.get("filename")
-    if not action:
-        return JSONResponse({"ok": False, "message": "action required"}, status_code=400)
+async def file_endpoint(req: FileActionRequest):
+    action = req.action
+    filename = req.filename
     res = await file_action(action, filename)
     return res
 

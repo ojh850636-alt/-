@@ -14,7 +14,7 @@ from lucia_core import (
 import uvicorn
 from datetime import datetime, timezone
 from fastapi import Request
-from pydantic import BaseModel
+from fastapi import Request
 import ai_quota
 
 load_dotenv()
@@ -47,13 +47,18 @@ def simulate_step():
     return {'psi': psi, 'entanglement': ent, 'emotion': emo, 'sensor': ev}
 
 
-class ChatRequest(BaseModel):
-    text: str
-    use_stub: bool = False
-
-
 @app.post('/ai/chat')
-def ai_chat(req: ChatRequest):
+async def ai_chat(request: Request):
+    # Read raw JSON body to avoid creating a Pydantic model instance which
+    # can trigger `.dict()` calls under certain FastAPI internals.
+    try:
+        payload = await request.json()
+    except Exception:
+        # if body cannot be parsed, fall back to empty dict
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
     # Reserve a call first
     ok = ai_quota.reserve_call()
     if not ok:
@@ -63,10 +68,10 @@ def ai_chat(req: ChatRequest):
     # call provider; if provider fails, rollback and return error
     try:
         # allow forcing stub via flag
-        if req.use_stub:
+        if payload.get('use_stub'):
             resp = {'provider': 'stub', 'ok': True, 'text': 'stubbed response'}
         else:
-            resp = ai_quota.call_provider({'text': req.text})
+            resp = ai_quota.call_provider({'text': payload.get('text')})
         return {'ok': True, 'response': resp}
     except Exception as e:
         ai_quota.rollback_call()

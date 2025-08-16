@@ -1,0 +1,34 @@
+From 0000000 Mon Aug 17 00:00:00 2025
+From: automated <noreply@example.com>
+Date: Sun, 17 Aug 2025 00:00:00 +0000
+Subject: [PATCH] Automated cleanup: remove diagnostics, add safe sitecustomize, fix endpoints
+
+Summary:
+- Remove temporary debugging/diagnostic code used while tracking a Pydantic
+  `.dict()` deprecation warning.
+- Add a safe `sitecustomize.py` that maps `BaseModel.dict` to `model_dump`
+  when available and suppresses the specific deprecation message by text.
+- Convert `/ai/chat` in `lucia_ultimate_quantum_enhanced_modular.py` to async
+  and use `await request.json()` to avoid coroutine and Pydantic model issues.
+- Add a `/command` endpoint and clean websocket handling in
+  `lucia_ultimate_quantum_integrated_fixed.py` to satisfy tests.
+- Truncate/clear diagnostic logs in `patches/` and add a `CLEANUP.md` note.
+
+Files changed (for review):
+- lucia_ultimate_quantum_integrated_fixed.py  (edited)
+- lucia_ultimate_quantum_enhanced_modular.py  (edited)
+- sitecustomize.py                             (added/updated)
+- tests/conftest.py                            (edited)
+- pytest.ini                                   (edited)
+- patches/dict_occurrences.log                 (truncated)
+- patches/pytest_stdout.log                    (captured test output)
+- CLEANUP.md                                   (added)
+- COMMIT_MESSAGE.txt                            (added)
+
+This patch is a summary/metadata file; apply changes by reviewing the listed
+files in the repository. If you want a git-formatted patch that `git apply`
+can consume, tell me and I will generate unified diffs for each file.
+
+--
+Automated patch
+

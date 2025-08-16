@@ -11,7 +11,17 @@ if (-not (Test-Path $qs)) {
 }
 
 Write-Output "Starting local server (background)..."
-$proc = Start-Process -FilePath pwsh -ArgumentList "-NoProfile -NoLogo -Command \"& '$qs' -Port $Port\"" -PassThru
+# choose available PowerShell executable (prefer pwsh, fallback to powershell)
+$pwshCmd = Get-Command pwsh -ErrorAction SilentlyContinue
+if ($pwshCmd) { $exePath = $pwshCmd.Path } else {
+    $psCmd = Get-Command powershell -ErrorAction SilentlyContinue
+    if ($psCmd) { $exePath = $psCmd.Path } else {
+        Write-Error "Neither 'pwsh' nor 'powershell' was found in PATH. Install PowerShell or adjust PATH."
+        exit 1
+    }
+}
+
+$proc = Start-Process -FilePath $exePath -ArgumentList '-NoProfile','-NoLogo','-File',$qs,'-Port',$Port -PassThru
 Start-Sleep -Seconds $WaitSeconds
 
 Write-Output "Running pytest..."
