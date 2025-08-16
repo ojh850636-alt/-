@@ -1,3 +1,44 @@
+# Lucia - Cleaned Minimal Server
+
+Quick start and developer notes for the cleaned Lucia FastAPI app used in tests.
+
+Quickstart
+- Create a virtualenv and install dependencies:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+- Run the app (development):
+
+```powershell
+python -m uvicorn lucia_ultimate_quantum_integrated_fixed:app --reload
+```
+
+Run tests
+
+```powershell
+python -m pytest -q
+```
+
+Docker
+
+Build and run locally:
+
+```powershell
+docker build -t lucia-cleaned .
+docker run -p 8000:8000 lucia-cleaned
+```
+
+CI
+
+This repository includes a GitHub Actions workflow that installs dependencies and runs the test suite on push and pull_request.
+
+Notes
+
+- The `patches/` directory is intentionally ignored and kept as local diagnostic artifacts by developers.
 Lucia Minimal FileOps Server
 
 Quick start
