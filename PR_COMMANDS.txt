@@ -1,0 +1,8 @@
+# If you have GitHub CLI installed (example):
+# gh pr create --base main --head ojh850636-alt:fix/quick-start --title "fix: modularize and add quick-start" --body-file PR_BODY.md
+
+# Manual web steps:
+# 1) Go to https://github.com/<your-repo>/pulls
+# 2) Click "New pull request"
+# 3) Choose branch: compare=fix/quick-start  base=main
+# 4) Paste the contents of PR_BODY.md into the description and create the PR
