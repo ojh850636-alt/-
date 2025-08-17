@@ -14,14 +14,13 @@ env/
 .idea/
 .env
 __pycache__/
-downloads/
 *.pyc
-.idea/
-.vscode/
-.env
+
+# Keep downloads directory tracked via .gitkeep
+!/downloads/.gitkeep
+
 # AI quota and webhook logs
 ai_usage.json
 ai_usage_*.json
-tools/webhook_events.log
-tools/store_keys.log
+tools/*.log
 

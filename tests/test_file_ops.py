@@ -7,7 +7,7 @@ import requests
 CLIENT = None
 try:
     from fastapi.testclient import TestClient
-    import lucia_ultimate_quantum_integrated as server
+    import lucia_ultimate_quantum_integrated_fixed as server
     CLIENT = TestClient(server.app)
 except Exception:
     CLIENT = None

@@ -2,12 +2,12 @@ Title: Fix/quick-start — cleanup, tests, CI, Docker
 
 Summary
 
-This PR prepares the repository for a clearer quick-start experience and CI testing:
+This PR prepares the repository for a clearer quick-start experience and CI testing.
 
 - Removes historical diagnostic patch/log artifacts from tracking and ignores the `patches/` directory.
-- Adds a `README.md` with quick start, run, test and Docker instructions.
+- Adds a `README.md` with quick-start, run, test, and Docker instructions.
 - Adds a `Dockerfile` for local containerized runs.
-- Simplifies the GitHub Actions CI workflow to a single clear matrix (Linux/Windows, Python 3.11).
+- Simplifies the GitHub Actions CI workflow to a single matrix (Linux/Windows, Python 3.11).
 - Adds a `Makefile` to simplify local developer tasks (run, test, docker-build, docker-run).
 
 Why
@@ -17,7 +17,7 @@ These changes tidy the repo, make it easier to run locally and in CI, and reduce
 Testing
 
 - All tests pass locally (pytest) when run in the repo root.
-- CI workflow runs tests and treats DeprecationWarning as errors to catch pydantic deprecations early.
+- CI workflow runs tests and treats DeprecationWarning as errors so pydantic deprecations fail fast.
 
 Notes for reviewer
 

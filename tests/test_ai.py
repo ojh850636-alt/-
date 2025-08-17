@@ -6,7 +6,8 @@ import json
 CLIENT = None
 try:
     from fastapi.testclient import TestClient
-    import lucia_ultimate_quantum_integrated as server
+    # Tests should target the cleaned, test-friendly server entrypoint.
+    import lucia_ultimate_quantum_integrated_fixed as server
     CLIENT = TestClient(server.app)
 except Exception:
     CLIENT = None

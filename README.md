@@ -58,7 +58,7 @@ python -m pip install -r requirements.txt
 3. Run server
 
 ```powershell
-python -m uvicorn lucia_ultimate_quantum_integrated:app --host 127.0.0.1 --port 8002
+python -m uvicorn lucia_ultimate_quantum_integrated_fixed:app --host 127.0.0.1 --port 8002
 ```
 
 Open http://127.0.0.1:8002/ to use the UI.
@@ -98,7 +98,7 @@ python -m pip install openai
 ```powershell
 $env:OPENAI_API_KEY = 'sk-...'
 $env:ENABLE_AI = 'true'
-python -m uvicorn lucia_ultimate_quantum_integrated:app --host 127.0.0.1 --port 8002
+python -m uvicorn lucia_ultimate_quantum_integrated_fixed:app --host 127.0.0.1 --port 8002
 ```
 
 If `OPENAI_API_KEY` or the OpenAI package is missing the server will continue to run and the `/ai/chat` endpoint will return a safe stub response.
@@ -170,4 +170,41 @@ Set-Location 'C:\Users\Hi\Desktop\루시아 에이전트\2'
 ```
 
 If you hit a PowerShell `-File` error when invoking the helper, ensure you provide the correct (root-relative or absolute) path to the script.
+
+## Local dev & checks
+
+These helper commands make it easy to run the project's tests, linter and an optional Docker build locally.
+
+PowerShell helper:
+
+```powershell
+# run all checks (tests + ruff + optional docker build)
+.
+tools\run_all.ps1
+
+# skip docker build
+.
+tools\run_all.ps1 -SkipDocker
+```
+
+Python helper script:
+
+```bash
+python tools/dev_checks.py
+```
+
+Manual commands:
+
+```powershell
+# run tests
+C:/Users/Hi/AppData/Local/Programs/Python/Python313/python.exe -m pytest -q
+
+# run ruff autofix
+C:/Users/Hi/AppData/Local/Programs/Python/Python313/python.exe -m ruff . --fix
+
+# build docker image (if docker installed)
+docker build -t lucia-app .
+```
+
+If you run into permission or environment issues, run the commands manually to capture the full console output and paste it here for debugging.
 

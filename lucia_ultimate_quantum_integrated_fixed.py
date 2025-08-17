@@ -72,6 +72,37 @@ DOWNLOADS = Path("downloads")
 DOWNLOADS.mkdir(exist_ok=True)
 
 
+def _ai_status_info():
+    """Return a small dict describing AI availability and configured providers."""
+    enabled_flag = os.getenv('ENABLE_AI', 'false').lower() in ('1', 'true', 'yes')
+    # quick probe for installed package
+    try:
+        import importlib
+        ai_package = importlib.util.find_spec('openai') is not None
+    except Exception:
+        ai_package = False
+    groq_available = bool(os.getenv('GROQ_API_KEY') and os.getenv('GROQ_API_URL'))
+    openrouter_available = bool(os.getenv('OPENROUTER_API_KEY') and os.getenv('OPENROUTER_URL'))
+    return {
+        'enabled_flag': enabled_flag,
+        'ai_package': ai_package,
+        'ai_available': False,
+        'openai_api_key_present': bool(os.getenv('OPENAI_API_KEY')),
+        'groq_available': groq_available,
+        'openrouter_available': openrouter_available,
+    }
+
+
+@app.get('/ai/status')
+async def ai_status():
+    return _ai_status_info()
+
+
+@app.get('/health')
+async def health():
+    return JSONResponse({'ok': True, 'uptime_seconds': (datetime.now(timezone.utc) - server_stats['start_time']).total_seconds()})
+
+
 async def execute_command(command: Dict[str, Any]) -> Dict[str, Any]:
     return await dispatcher.execute_command(command)
 
@@ -95,18 +126,10 @@ async def ai_chat(request: Request):
     if payload.get('use_stub'):
         return JSONResponse({'ok': True, 'response': 'stubbed response'}, status_code=200)
 
-    # Simulated provider error before reserve
-    if payload.get('mock_error'):
-        try:
-            from datetime import datetime as _dt, timezone as _tz
-            import json as _json
-            _logp = Path(__file__).parent / 'tools' / 'webhook_events.log'
-            with open(_logp, 'a', encoding='utf-8') as _lf:
-                _lf.write(_json.dumps({'time': _dt.now(_tz.utc).isoformat(), 'action': 'endpoint_detected_mock_error_before_reserve', 'prompt': prompt}, ensure_ascii=False) + '\n')
-        except Exception:
-            pass
-        ai_quota.webhook_quota_exceeded({'prompt': prompt, 'reason': 'simulated provider error before reserve'})
-        return JSONResponse({'ok': False, 'message': 'simulated provider error (endpoint)'}, status_code=500)
+    # Note: provider errors (including mock_error) are handled by the provider
+    # adapter (ai_providers) and will raise from `ai_quota.call_provider` when
+    # appropriate; we avoid simulating an error before quota reservation here so
+    # that the endpoint's rollback logic can be exercised by tests.
 
     # try to reserve quota
     try:
@@ -225,6 +248,73 @@ async def command_endpoint(request: Request):
         return JSONResponse(result)
     except Exception as e:
         return JSONResponse({'ok': False, 'message': str(e)}, status_code=500)
+
+
+@app.post('/file')
+async def file_endpoint(request: Request):
+    """Compatibility /file endpoint used by tests.
+    Accepts JSON payloads with an 'action' key: create_python, create_html,
+    create_text, list, download, delete. Delegates to lucia_core.file_ops.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+
+    action = payload.get('action')
+    try:
+        if action == 'create_python':
+            res = await file_ops.handle_create_python()
+            return JSONResponse(res)
+        if action == 'create_html':
+            res = await file_ops.handle_create_html()
+            return JSONResponse(res)
+        if action == 'create_text':
+            res = await file_ops.handle_create_text()
+            return JSONResponse(res)
+        if action == 'list':
+            res = await file_ops.handle_list_files()
+            return JSONResponse(res)
+        if action == 'download':
+            filename = payload.get('filename')
+            if not filename:
+                return JSONResponse({'ok': False, 'message': 'missing filename'}, status_code=400)
+            return JSONResponse(await file_ops.handle_download(filename))
+        if action == 'delete':
+            filename = payload.get('filename')
+            if not filename:
+                return JSONResponse({'ok': False, 'message': 'missing filename'}, status_code=400)
+            return JSONResponse(await file_ops.handle_delete(filename))
+    except Exception as e:
+        return JSONResponse({'ok': False, 'message': str(e)}, status_code=500)
+
+    return JSONResponse({'ok': False, 'message': 'unknown action'}, status_code=400)
+
+
+@app.post('/quantum/run')
+async def quantum_run(request: Request):
+    """Simple guarded quantum stub used by tests.
+    If payload indicates an explicit 'use_stub' or quantum backend unavailable,
+    return a simulated response. Otherwise perform a tiny simulated run.
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    circuit = payload.get('circuit') or payload.get('program') or ''
+
+    use_stub = bool(payload.get('use_stub'))
+    if use_stub or not os.getenv('ENABLE_QUANTUM', 'false').lower() in ('1', 'true', 'yes'):
+        stub = f"(quantum-stub) simulated result for circuit: {str(circuit)[:120]}"
+        return JSONResponse({'ok': True, 'response': stub})
+
+    # In future this would delegate to a quantum backend; for now return stub
+    stub = f"(quantum-stub) simulated result for circuit: {str(circuit)[:120]}"
+    return JSONResponse({'ok': True, 'response': stub})
 
 
 if __name__ == "__main__":
