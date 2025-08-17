@@ -44,4 +44,8 @@ Files changed (quick list)
 - PR_BODY_DRAFT.md -> PR_BODY_FINAL.md (this file)
 - tools/collect_test_artifacts.py
 
+CI
+
+This PR adds a GitHub Actions workflow `.github/workflows/ci.yml` that runs the project's test-suite on push and pull request events. It helps ensure the refactor and provider changes are verified automatically on CI.
+
 If you want, I can also prepare the PR description with more granular commit/file lists.
