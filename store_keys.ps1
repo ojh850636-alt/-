@@ -83,9 +83,12 @@ function ValidateKey([string]$k, [string]$v) {
 Write-Host "Press Enter to keep an existing value where shown (value will be masked)."
 
 # Prefill from CLI params if provided (supports scripts that pass values without NonInteractive)
-if ($OpenAIKey) { $openai = $OpenAIKey }
-if ($XAIKey) { $xai = $XAIKey }
-if ($GroqKey) { $groq = $GroqKey }
+# Use $PSBoundParameters so an explicitly provided empty string (e.g. -OpenAIKey "") is respected
+if ($PSBoundParameters.ContainsKey('OpenAIKey')) { $openai = $OpenAIKey }
+if ($PSBoundParameters.ContainsKey('XAIKey')) { $xai = $XAIKey }
+if ($PSBoundParameters.ContainsKey('GroqKey')) { $groq = $GroqKey }
+if ($PSBoundParameters.ContainsKey('Port')) { $port = $Port }
+if ($PSBoundParameters.ContainsKey('LocalIP')) { $localip = $LocalIP }
 
 # Collect keys (prefill with existing masked values when no param provided)
 # OPENAI

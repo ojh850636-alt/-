@@ -20,6 +20,14 @@ param(
     [string]$LocalIP = $env:LOCAL_IP
 )
 
+# Respect explicitly passed empty string parameters (e.g. -OpenAIKey "") by
+# checking $PSBoundParameters rather than truthiness.
+if ($PSBoundParameters.ContainsKey('OpenAIKey')) { $OpenAIKey = $OpenAIKey }
+if ($PSBoundParameters.ContainsKey('XAIKey')) { $XAIKey = $XAIKey }
+if ($PSBoundParameters.ContainsKey('GroqKey')) { $GroqKey = $GroqKey }
+if ($PSBoundParameters.ContainsKey('Port')) { $Port = $Port }
+if ($PSBoundParameters.ContainsKey('LocalIP')) { $LocalIP = $LocalIP }
+
 if (-not $Port) { $Port = 8002 }
 if (-not $LocalIP) { $LocalIP = '127.0.0.1' }
 

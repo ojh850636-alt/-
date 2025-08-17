@@ -102,3 +102,23 @@ CI
 
 A GitHub Actions workflow is included at `.github/workflows/ci.yml` which runs
 pytest and the concurrency smoke script on push/PR (Ubuntu + Windows).
+
+Safe helper invocation examples (PowerShell)
+
+1) Non-interactive writer (CI-friendly) using explicit empty keys:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "./tools/write_env_noninteractive.ps1" -OpenAIKey '' -XAIKey '' -GroqKey '' -Port 8002 -LocalIP '127.0.0.1'
+```
+
+2) Using environment variables in CI (recommended):
+
+```powershell
+$env:OPENAI_API_KEY=''; $env:XAI_API_KEY=''; $env:GROQ_API_KEY=''; powershell -NoProfile -ExecutionPolicy Bypass -File "./tools/write_env_noninteractive.ps1"
+```
+
+3) Interactive helper (developer machine):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "./store_keys.ps1"
+```
