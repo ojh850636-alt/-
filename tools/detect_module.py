@@ -15,12 +15,12 @@ try:
             else:
                 out.append(f"{i + 1:04d}: <no line>")
         occ = [
-            (i + 1, l) for i, l in enumerate(src) if ".dict(" in l or "req.dict" in l
+            (i + 1, line) for i, line in enumerate(src) if ".dict(" in line or "req.dict" in line
         ]
         out.append("---OCCURRENCES .dict ---")
         if occ:
-            for ln, l in occ:
-                out.append(f"{ln}: {l}")
+            for ln, line in occ:
+                out.append(f"{ln}: {line}")
         else:
             out.append("<none>")
     except Exception as e:

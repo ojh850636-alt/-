@@ -86,7 +86,7 @@ class LuciaAutoInstaller:
                     major, minor = result.stdout.split()[1].split(".")[:2]
                     if int(major) >= 3 and int(minor) >= 8:
                         return cmd
-            except:
+            except Exception as e:
                 continue
         return None
 
@@ -108,14 +108,14 @@ class LuciaAutoInstaller:
                 check=True,
             )
             self.print_success("pip 사용 가능")
-        except:
+        except Exception as e:
             self.print_error("pip이 설치되지 않았습니다!")
             sys.exit(1)
 
         try:
             subprocess.run(["npm", "--version"], capture_output=True, check=True)
             self.print_success("npm 사용 가능")
-        except:
+        except Exception as e:
             self.print_error("npm이 필요합니다. https://nodejs.org/에서 설치하세요.")
             sys.exit(1)
 
@@ -167,7 +167,7 @@ class LuciaAutoInstaller:
                         cmd = f"{activate_cmd} {self.python_cmd} -m pip install {pkg}"
                         subprocess.run(cmd, shell=True, check=True)
                         self.print_success(f"{pkg} 설치 완료")
-                    except:
+                    except Exception as e:
                         self.print_warning(f"{pkg} 설치 건너뛰기 (선택적)")
             return True
         except Exception as e:
@@ -234,7 +234,7 @@ try:
     from openai import OpenAI
     openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     OPENAI_AVAILABLE = bool(os.getenv("OPENAI_API_KEY"))
-except:
+except ImportError:
     OPENAI_AVAILABLE = False
     openai_client = None
 
@@ -242,7 +242,7 @@ try:
     from groq import Groq
     groq_client = Groq(api_key=os.getenv("GROK_API_KEY"))
     GROK_AVAILABLE = bool(os.getenv("GROK_API_KEY"))
-except:
+except ImportError:
     GROK_AVAILABLE = False
     groq_client = None
 
@@ -289,8 +289,8 @@ def get_system_info():
             "gpu": "RTX 4080 - 38°C",
             "network": "1Gbps"
         }
-    except:
-        return {"cpu": "N/A", "memory": "N/A", "gpu": "N/A", "network": "N/A"}
+            except Exception as e:
+                return {"cpu": "N/A", "memory": "N/A", "gpu": "N/A", "network": "N/A"}
 
 def parse_natural_language(text: str):
     text = text.lower().strip()
@@ -365,7 +365,7 @@ async def execute_command(command_data: dict):
                         volume = interface.QueryInterface(IAudioEndpointVolume)
                         volume.SetMasterVolumeLevelScalar(value / 100.0, None)
                         return {"ok": True, "message": f"볼륨 {value}% 설정"}
-                    except:
+                    except Exception as e:
                         return {"ok": False, "message": "볼륨 제어 실패"}
         elif cmd_type == "unknown" and (GROK_AVAILABLE or OPENAI_AVAILABLE):
             text = command_data.get("text")
@@ -875,7 +875,7 @@ Terminal=true
             s.close()
             self.print_success(f"로컬 IP: {self.local_ip}")
             return True
-        except:
+        except Exception as e:
             self.local_ip = "localhost"
             self.print_warning("IP 확인 실패, localhost 사용")
             return True
@@ -890,7 +890,7 @@ Terminal=true
             qr.make_image().save(INSTALL_DIR / "server_qr.png")
             self.print_success(f"QR 코드 생성: {INSTALL_DIR / 'server_qr.png'}")
             return True
-        except:
+        except Exception as e:
             self.print_warning("QR 코드 생성 실패")
             return False
 

@@ -22,13 +22,13 @@ with out.open("w", encoding="utf-8") as f:
                     f.write(f"{i:04d}: {line}\n")
                 # search for .dict occurrences
                 occurrences = [
-                    (i + 1, l)
-                    for i, l in enumerate(lines)
-                    if ".dict(" in l or "req.dict" in l
+                    (i + 1, line)
+                    for i, line in enumerate(lines)
+                    if ".dict(" in line or "req.dict" in line
                 ]
                 f.write("\nOCCURRENCES OF .dict(:\n")
-                for ln, l in occurrences:
-                    f.write(f"{ln}: {l}\n")
+                for ln, line in occurrences:
+                    f.write(f"{ln}: {line}\n")
             except Exception as e:
                 f.write("inspect.getsource failed: %r\n" % e)
         except Exception as e:

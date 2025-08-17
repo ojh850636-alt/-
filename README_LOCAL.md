@@ -76,6 +76,21 @@ To run the cleaned runner locally:
 
    set PORT=8000; python lucia_ultimate_quantum_integrated_fixed.py
 
+Try it (alternative)
+---------------------
+
+You can also run the test-friendly app via the new `lucia_app` entrypoint:
+
+```powershell
+# install uvicorn once
+python -m pip install uvicorn
+# run via the small helper
+python run_uvicorn.py
+``` 
+
+To create a PR, open `PR_BODY.md`, copy the contents and paste into a new
+pull request description on GitHub for branch `fix/quick-start`.
+
 Notes
 - Tests and CI set `AI_USE_MOCK=true` to avoid network calls. To enable a real
   provider, set provider-specific environment variables and keys and edit

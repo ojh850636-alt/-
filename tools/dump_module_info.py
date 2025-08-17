@@ -10,7 +10,7 @@ try:
     out.append(
         "\n".join(f"{i + 1:04d}: {line}" for i, line in enumerate(src[59:91], start=60))
     )
-    occ = [(i + 1, l) for i, l in enumerate(src) if ".dict(" in l or "req.dict" in l]
+    occ = [(i + 1, line) for i, line in enumerate(src) if ".dict(" in line or "req.dict" in line]
     out.append("\nOCCURRENCES:")
     out.append(str(occ))
 except Exception as e:

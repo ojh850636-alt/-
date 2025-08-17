@@ -178,7 +178,7 @@ class LuciaEnhancedQuantumControl:
                     major, minor = int(version_parts[0]), int(version_parts[1])
                     if major >= 3 and minor >= 8:
                         return cmd
-            except:
+            except Exception as e:
                 continue
         return None
 
@@ -196,11 +196,11 @@ class LuciaEnhancedQuantumControl:
                     ip = method()
                     if ip and not ip.startswith('127.') and ip != self.local_ip:
                         return ip
-                except:
+                except Exception as e:
                     continue
                     
             return self.local_ip
-        except:
+        except Exception as e:
             return self.local_ip
 
     def _get_ip_via_dns(self):
@@ -251,7 +251,7 @@ class LuciaEnhancedQuantumControl:
             subprocess.run([self.python_cmd, '-m', 'pip', '--version'], 
                          capture_output=True, check=True)
             self.print_success("pip 사용 가능")
-        except:
+        except Exception as e:
             self.print_error("pip이 설치되지 않았습니다!")
             return False
             
@@ -298,7 +298,7 @@ class LuciaEnhancedQuantumControl:
             try:
                 shutil.move(str(self.install_dir), str(backup_dir))
                 self.print_warning(f"기존 설치를 {backup_dir}로 백업했습니다")
-            except:
+            except Exception as e:
                 shutil.rmtree(self.install_dir, ignore_errors=True)
             
         # 디렉토리 생성
