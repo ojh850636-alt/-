@@ -70,9 +70,12 @@ function MaskValue([string]$v) {
 }
 
 function ValidateKey([string]$k, [string]$v) {
+    # Defensive: coerce to string and handle nulls to avoid parser/runtime issues
+    if ($null -eq $v) { $v = '' } else { $v = [string]$v }
     if (-not $v) { return $true } # empty is allowed (user may disable)
     if ($v -match '\s') { Write-Host "Value for $k contains whitespace/newline; unlikely valid."; return $false }
-    if ($v -match '["\']') { Write-Host "Value for $k contains quote characters; please enter the raw key without quotes."; return $false }
+    # Avoid regex patterns with embedded quotes which can sometimes cause parser issues
+    if (($v.IndexOf('"') -ge 0) -or ($v.IndexOf("'") -ge 0)) { Write-Host "Value for $k contains quote characters; please enter the raw key without quotes."; return $false }
     if ($v.Length -lt 20) { Write-Host "Value for $k looks too short (<20 chars); please verify."; return $false }
     return $true
 }
