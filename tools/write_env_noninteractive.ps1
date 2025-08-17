@@ -32,8 +32,9 @@ $logPath = Join-Path $logDir 'store_keys.log'
 function Validate-SecretValue($k, $v) {
     if (-not $v) { return $true }
     if ($v -match '\s') { Write-Host "[ERROR] $k contains whitespace"; return $false }
-    # Match either a double-quote or single-quote safely using a double-quoted string for the pattern
-    if ($v -match "[\"']") { Write-Host "[ERROR] $k contains quote characters"; return $false }
+    # Avoid regex/quote patterns which can be fragile in different PowerShell invocation contexts.
+    # Use IndexOf to detect quote characters safely.
+    if (($v.IndexOf('"') -ge 0) -or ($v.IndexOf("'") -ge 0)) { Write-Host "[ERROR] $k contains quote characters"; return $false }
     if ($v.Length -lt 8) { Write-Host "[WARN] $k looks short" }
     return $true
 }
