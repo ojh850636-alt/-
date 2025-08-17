@@ -1,18 +1,18 @@
 import logging
-import ssl
-import time
 import warnings
 
-logger = logging.getLogger('lucia_core.comms')
+logger = logging.getLogger("lucia_core.comms")
 
 try:
     from paho.mqtt.client import Client, MQTTv5
+
     PAHO_AVAILABLE = True
 except Exception:
     PAHO_AVAILABLE = False
 
+
 class SecureMQTTLayer:
-    def __init__(self, broker_ip='localhost', port=8883):
+    def __init__(self, broker_ip="localhost", port=8883):
         self.broker_ip = broker_ip
         self.port = port
         self.connected = False
@@ -26,7 +26,7 @@ class SecureMQTTLayer:
                     warnings.filterwarnings(
                         "ignore",
                         category=DeprecationWarning,
-                        message=r".*Callback API version.*"
+                        message=r".*Callback API version.*",
                     )
                     self.client = Client(protocol=MQTTv5)
             except Exception:
@@ -34,12 +34,12 @@ class SecureMQTTLayer:
         else:
             self.client = None
 
-    def send_command(self, command, token, topic='lucia/command', priority=1):
+    def send_command(self, command, token, topic="lucia/command", priority=1):
         logger.info(f"(sim) MQTT send {topic}: {command} (token={token[:8]})")
         return True
 
     def emergency_all(self):
-        self.send_command('LAUNCH_EMERGENCY', 'simtoken', 'lucia/drone')
+        self.send_command("LAUNCH_EMERGENCY", "simtoken", "lucia/drone")
 
     def patrol_normal(self):
-        self.send_command('SCAN', 'simtoken', 'lucia/cctv')
+        self.send_command("SCAN", "simtoken", "lucia/cctv")

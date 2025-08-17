@@ -1,16 +1,15 @@
 import threading
 import time
-from pathlib import Path
 
 
 def test_concurrent_reserve_and_rollback(tmp_path, monkeypatch):
     """Spawn multiple threads that reserve, some roll back, and verify final counts."""
     # configure quota storage and limits
-    quota_file = tmp_path / 'ai_quota_concurrent.json'
-    monkeypatch.setenv('AI_QUOTA_FILE', str(quota_file))
+    quota_file = tmp_path / "ai_quota_concurrent.json"
+    monkeypatch.setenv("AI_QUOTA_FILE", str(quota_file))
     # allow up to 5 calls per minute
-    monkeypatch.setenv('AI_MAX_CALLS_PER_MINUTE', '5')
-    monkeypatch.setenv('AI_DAILY_CALL_LIMIT', '1000')
+    monkeypatch.setenv("AI_MAX_CALLS_PER_MINUTE", "5")
+    monkeypatch.setenv("AI_DAILY_CALL_LIMIT", "1000")
 
     import ai_quota
 
@@ -55,14 +54,21 @@ def test_concurrent_reserve_and_rollback(tmp_path, monkeypatch):
 
     # load persisted usage
     import json
+
     data = {}
     if quota_file.exists():
-        with open(quota_file, 'r', encoding='utf-8') as f:
+        with open(quota_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
     # daily counter should equal the number of successful workers (errors rolled back)
-    daily = int(data.get('daily', 0))
-    assert daily == success_workers, f"daily={daily} expected {success_workers} (reserved_count={reserved_count})"
+    daily = int(data.get("daily", 0))
+    assert daily == success_workers, (
+        f"daily={daily} expected {success_workers} (reserved_count={reserved_count})"
+    )
 
     # reserved_count reported by threads should match
-    assert reserved_count == success_workers + error_workers or reserved_count == success_workers or reserved_count >= success_workers
+    assert (
+        reserved_count == success_workers + error_workers
+        or reserved_count == success_workers
+        or reserved_count >= success_workers
+    )

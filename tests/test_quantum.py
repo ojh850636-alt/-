@@ -6,11 +6,12 @@ CLIENT = None
 try:
     from fastapi.testclient import TestClient
     import lucia_ultimate_quantum_integrated_fixed as server
+
     CLIENT = TestClient(server.app)
 except Exception:
     CLIENT = None
 
-BASE = os.getenv('LUCIA_BASE', 'http://127.0.0.1:8002')
+BASE = os.getenv("LUCIA_BASE", "http://127.0.0.1:8002")
 
 
 def _post(path, json_payload):
@@ -20,8 +21,7 @@ def _post(path, json_payload):
 
 
 def test_quantum_stub():
-    r = _post('/quantum/run', {'circuit': 'H;MEAS'})
+    r = _post("/quantum/run", {"circuit": "H;MEAS"})
     assert r.status_code == 200
     j = r.json()
-    assert j.get('ok') is True
-    
+    assert j.get("ok") is True

@@ -1,4 +1,6 @@
-import subprocess, sys, textwrap
+import subprocess
+import sys
+import textwrap
 
 script = textwrap.dedent(r"""
 import sys
@@ -11,19 +13,24 @@ m = importlib.import_module('lucia_ultimate_quantum_enhanced_modular')
 print('imported', m)
 """)
 
-p = subprocess.Popen([sys.executable, "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+p = subprocess.Popen(
+    [sys.executable, "-c", script],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+    text=True,
+)
 try:
     out, err = p.communicate(timeout=8)
 except subprocess.TimeoutExpired:
     p.kill()
     out, err = p.communicate()
-    print('timeout')
-    print('stdout:', out)
-    print('stderr:', err)
+    print("timeout")
+    print("stdout:", out)
+    print("stderr:", err)
     sys.exit(2)
 
-print('returncode', p.returncode)
-print('stdout:', out)
-print('stderr:', err)
+print("returncode", p.returncode)
+print("stdout:", out)
+print("stderr:", err)
 if p.returncode != 0:
     sys.exit(1)

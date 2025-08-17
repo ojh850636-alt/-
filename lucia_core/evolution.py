@@ -1,7 +1,7 @@
 import logging
-from datetime import datetime
 
-logger = logging.getLogger('lucia_core.evolution')
+logger = logging.getLogger("lucia_core.evolution")
+
 
 class EvolutionaryEngine:
     def __init__(self):
@@ -15,9 +15,11 @@ class EvolutionaryEngine:
         if self.exp >= self.level * 100:
             self.level += 1
             self.exp = 0
-            self.branches['defense'] += 1
+            self.branches["defense"] += 1
             self.defense += 200
             logger.info(f"진화 발생! 레벨: {self.level}")
 
     def status(self):
-        return f"Lv:{self.level} | EXP:{self.exp}/{self.level*100} | 방어:{self.defense}"
+        return (
+            f"Lv:{self.level} | EXP:{self.exp}/{self.level * 100} | 방어:{self.defense}"
+        )

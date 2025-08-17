@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from lucia_ultimate_quantum_integrated_fixed import app

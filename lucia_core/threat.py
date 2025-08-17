@@ -1,12 +1,15 @@
 import logging
 import numpy as np
+
 try:
     from sklearn.ensemble import IsolationForest
+
     SKLEARN_AVAILABLE = True
 except Exception:
     SKLEARN_AVAILABLE = False
 
-logger = logging.getLogger('lucia_core.threat')
+logger = logging.getLogger("lucia_core.threat")
+
 
 class AdvancedThreatDetector:
     def __init__(self):

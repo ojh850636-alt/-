@@ -2,13 +2,15 @@ import random
 import logging
 from typing import Tuple
 
-logger = logging.getLogger('lucia_core.quantum')
+logger = logging.getLogger("lucia_core.quantum")
 
 try:
     from qiskit import QuantumCircuit, Aer, execute
+
     QISKIT_AVAILABLE = True
 except Exception:
     QISKIT_AVAILABLE = False
+
 
 class QuantumConsciousnessCore:
     def __init__(self, qubits: int = 8):
@@ -17,15 +19,17 @@ class QuantumConsciousnessCore:
         self.entanglement = 0.0
         # if qiskit is available, build a simple circuit lazily
         self._qc = None
-        logger.info(f'QuantumConsciousnessCore initialized (qubits={qubits}, qiskit={QISKIT_AVAILABLE})')
+        logger.info(
+            f"QuantumConsciousnessCore initialized (qubits={qubits}, qiskit={QISKIT_AVAILABLE})"
+        )
 
     def _ensure_circuit(self):
         if QISKIT_AVAILABLE and self._qc is None:
             self._qc = QuantumCircuit(self.qubits, self.qubits)
             try:
                 self._qc.h(range(self.qubits))
-                for i in range(self.qubits-1):
-                    self._qc.cx(i, i+1)
+                for i in range(self.qubits - 1):
+                    self._qc.cx(i, i + 1)
                 self._qc.measure_all()
             except Exception:
                 # fallback: mark as unavailable
@@ -36,7 +40,7 @@ class QuantumConsciousnessCore:
         try:
             if QISKIT_AVAILABLE:
                 self._ensure_circuit()
-                backend = Aer.get_backend('qasm_simulator')
+                backend = Aer.get_backend("qasm_simulator")
                 result = execute(self._qc, backend, shots=1).result()
                 counts = list(result.get_counts().keys())
                 if counts:

@@ -16,26 +16,16 @@ import sys
 import subprocess
 import platform
 import socket
-import time
-import urllib.request
 import json
-import base64
-import numpy as np
-import asyncio
-import websockets
 import logging
-from datetime import datetime
 from pathlib import Path
-import uuid
-import shutil
-import zipfile
-import io
-import requests
 
 # 설치 디렉토리 및 설정
 INSTALL_DIR = Path.home() / "LuciaUltimateControl"
 VENV_DIR = INSTALL_DIR / ".venv"
-ACTIVATE_SCRIPT = VENV_DIR / ("Scripts" if platform.system() == "Windows" else "bin") / "activate"
+ACTIVATE_SCRIPT = (
+    VENV_DIR / ("Scripts" if platform.system() == "Windows" else "bin") / "activate"
+)
 DESKTOP = Path.home() / "Desktop"
 LOG_FILE = INSTALL_DIR / "lucia.log"
 SERVER_PORT = 8000
@@ -44,13 +34,11 @@ FRONTEND_PORT = 3000
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
 )
 logger = logging.getLogger("LuciaUltimateControl")
+
 
 class LuciaAutoInstaller:
     def __init__(self):
@@ -66,12 +54,12 @@ class LuciaAutoInstaller:
             "numpy==2.0.1",
             "sounddevice==0.5.0",
             "python-dotenv==1.0.1",
-            "qrcode==7.4.2"
+            "qrcode==7.4.2",
         ]
         self.optional_packages = [
             "faster-whisper==1.0.0",
             "openai==1.35.10",
-            "pycaw==20230407" if self.system == "Windows" else None
+            "pycaw==20230407" if self.system == "Windows" else None,
         ]
         self.node_version = "16"
         self.local_ip = None
@@ -89,11 +77,13 @@ class LuciaAutoInstaller:
         logger.warning(f"⚠️ {message}")
 
     def get_python_command(self):
-        for cmd in ['python3', 'python', 'py']:
+        for cmd in ["python3", "python", "py"]:
             try:
-                result = subprocess.run([cmd, '--version'], capture_output=True, text=True)
-                if result.returncode == 0 and '3.' in result.stdout:
-                    major, minor = result.stdout.split()[1].split('.')[:2]
+                result = subprocess.run(
+                    [cmd, "--version"], capture_output=True, text=True
+                )
+                if result.returncode == 0 and "3." in result.stdout:
+                    major, minor = result.stdout.split()[1].split(".")[:2]
                     if int(major) >= 3 and int(minor) >= 8:
                         return cmd
             except:
@@ -103,19 +93,27 @@ class LuciaAutoInstaller:
     def check_requirements(self):
         self.print_step(1, "시스템 요구사항 확인")
         if not self.python_cmd:
-            self.print_error("Python 3.8+가 필요합니다. https://www.python.org/downloads/에서 설치하세요.")
+            self.print_error(
+                "Python 3.8+가 필요합니다. https://www.python.org/downloads/에서 설치하세요."
+            )
             sys.exit(1)
-        self.print_success(f"Python 발견: {subprocess.run([self.python_cmd, '--version'], capture_output=True, text=True).stdout.strip()}")
+        self.print_success(
+            f"Python 발견: {subprocess.run([self.python_cmd, '--version'], capture_output=True, text=True).stdout.strip()}"
+        )
 
         try:
-            subprocess.run([self.python_cmd, '-m', 'pip', '--version'], capture_output=True, check=True)
+            subprocess.run(
+                [self.python_cmd, "-m", "pip", "--version"],
+                capture_output=True,
+                check=True,
+            )
             self.print_success("pip 사용 가능")
         except:
             self.print_error("pip이 설치되지 않았습니다!")
             sys.exit(1)
 
         try:
-            subprocess.run(['npm', '--version'], capture_output=True, check=True)
+            subprocess.run(["npm", "--version"], capture_output=True, check=True)
             self.print_success("npm 사용 가능")
         except:
             self.print_error("npm이 필요합니다. https://nodejs.org/에서 설치하세요.")
@@ -129,7 +127,9 @@ class LuciaAutoInstaller:
             INSTALL_DIR.mkdir(exist_ok=True)
             (INSTALL_DIR / "orchestrator").mkdir(exist_ok=True)
             (INSTALL_DIR / "pc_agent").mkdir(exist_ok=True)
-            (INSTALL_DIR / "frontend" / "src" / "components").mkdir(exist_ok=True, parents=True)
+            (INSTALL_DIR / "frontend" / "src" / "components").mkdir(
+                exist_ok=True, parents=True
+            )
             (INSTALL_DIR / "frontend" / "src" / "utils").mkdir(exist_ok=True)
             (INSTALL_DIR / "frontend" / "src" / "styles").mkdir(exist_ok=True)
             (INSTALL_DIR / "frontend" / "public").mkdir(exist_ok=True)
@@ -142,7 +142,7 @@ class LuciaAutoInstaller:
     def setup_venv(self):
         self.print_step(3, "Python 가상환경 설정")
         try:
-            subprocess.run([self.python_cmd, '-m', 'venv', str(VENV_DIR)], check=True)
+            subprocess.run([self.python_cmd, "-m", "venv", str(VENV_DIR)], check=True)
             self.print_success("가상환경 생성 완료")
             return True
         except Exception as e:
@@ -152,7 +152,11 @@ class LuciaAutoInstaller:
     def install_python_packages(self):
         self.print_step(4, "Python 패키지 설치")
         try:
-            activate_cmd = f"{ACTIVATE_SCRIPT} && " if self.system != "Windows" else f"call {ACTIVATE_SCRIPT} && "
+            activate_cmd = (
+                f"{ACTIVATE_SCRIPT} && "
+                if self.system != "Windows"
+                else f"call {ACTIVATE_SCRIPT} && "
+            )
             for pkg in self.required_packages:
                 cmd = f"{activate_cmd} {self.python_cmd} -m pip install {pkg}"
                 subprocess.run(cmd, shell=True, check=True)
@@ -179,13 +183,13 @@ class LuciaAutoInstaller:
                 "version": "1.0.0",
                 "scripts": {
                     "start": "react-scripts start",
-                    "build": "react-scripts build"
+                    "build": "react-scripts build",
                 },
                 "dependencies": {
                     "react": "^18.3.1",
                     "react-dom": "^18.3.1",
-                    "react-scripts": "^5.0.1"
-                }
+                    "react-scripts": "^5.0.1",
+                },
             }
             with open(frontend_dir / "package.json", "w") as f:
                 json.dump(package_json, f, indent=2)
@@ -458,7 +462,9 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port={server_port})
 """.format(log_file=LOG_FILE, server_port=SERVER_PORT)
 
-            with open(INSTALL_DIR / "orchestrator" / "main.py", "w", encoding="utf-8") as f:
+            with open(
+                INSTALL_DIR / "orchestrator" / "main.py", "w", encoding="utf-8"
+            ) as f:
                 f.write(main_py)
 
             # pc_agent/agent.py
@@ -534,7 +540,9 @@ if __name__ == "__main__":
     asyncio.run(main())
 """.format(log_file=LOG_FILE, server_port=SERVER_PORT)
 
-            with open(INSTALL_DIR / "pc_agent" / "agent.py", "w", encoding="utf-8") as f:
+            with open(
+                INSTALL_DIR / "pc_agent" / "agent.py", "w", encoding="utf-8"
+            ) as f:
                 f.write(agent_py)
 
             # frontend/src/App.jsx
@@ -545,9 +553,16 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 {frontend_css}
 </style>
 """
-            with open(INSTALL_DIR / "frontend" / "src" / "App.jsx", "w", encoding="utf-8") as f:
-                f.write(app_jsx.format(
-                    frontend_code=open(INSTALL_DIR / "frontend" / "src" / "App.jsx").read() if (INSTALL_DIR / "frontend" / "src" / "App.jsx").exists() else """
+            with open(
+                INSTALL_DIR / "frontend" / "src" / "App.jsx", "w", encoding="utf-8"
+            ) as f:
+                f.write(
+                    app_jsx.format(
+                        frontend_code=open(
+                            INSTALL_DIR / "frontend" / "src" / "App.jsx"
+                        ).read()
+                        if (INSTALL_DIR / "frontend" / "src" / "App.jsx").exists()
+                        else """
 const LuciaUltimateControl = () => {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
@@ -738,7 +753,7 @@ const LuciaUltimateControl = () => {
 
 export default LuciaUltimateControl;
 """.format(server_port=SERVER_PORT),
-                    frontend_css="""
+                        frontend_css="""
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -752,8 +767,9 @@ export default LuciaUltimateControl;
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
-"""
-                ))
+""",
+                    )
+                )
 
             # frontend/public/index.html
             index_html = """
@@ -769,7 +785,11 @@ export default LuciaUltimateControl;
 </body>
 </html>
 """
-            with open(INSTALL_DIR / "frontend" / "public" / "index.html", "w", encoding="utf-8") as f:
+            with open(
+                INSTALL_DIR / "frontend" / "public" / "index.html",
+                "w",
+                encoding="utf-8",
+            ) as f:
                 f.write(index_html)
 
             # .env file
@@ -864,6 +884,7 @@ Terminal=true
         self.print_step(9, "QR 코드 생성")
         try:
             import qrcode
+
             qr = qrcode.QRCode()
             qr.add_data(f"http://{self.local_ip}:{SERVER_PORT}")
             qr.make_image().save(INSTALL_DIR / "server_qr.png")
@@ -898,7 +919,7 @@ Terminal=true
             self.create_shortcut,
             self.get_local_ip,
             self.create_qr_code,
-            self.start_services
+            self.start_services,
         ]
         for i, step in enumerate(steps, 1):
             if not step():
@@ -908,7 +929,7 @@ Terminal=true
 🎉 설치 완료!
 📁 위치: {INSTALL_DIR}
 📱 모바일 연결: http://{self.local_ip}:{SERVER_PORT}
-📸 QR 코드: {INSTALL_DIR / 'server_qr.png'}
+📸 QR 코드: {INSTALL_DIR / "server_qr.png"}
 🚀 실행: 바탕화면의 'Lucia Ultimate Control' 더블클릭
 💡 테스트 명령:
   - "마우스 500 300 클릭해"
@@ -916,6 +937,7 @@ Terminal=true
   - "크롬 열어줘"
   - "스크린샷 찍어줘"
 """)
+
 
 if __name__ == "__main__":
     installer = LuciaAutoInstaller()

@@ -1,9 +1,8 @@
-import os
-import time
 from fastapi.testclient import TestClient
 from lucia_ultimate_quantum_integrated_fixed import app, DOWNLOADS
 
 client = TestClient(app)
+
 
 def test_command_create_and_download(tmp_path):
     # ensure downloads dir is empty for test

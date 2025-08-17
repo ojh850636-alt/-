@@ -19,7 +19,7 @@ Timestamp: {datetime.now().isoformat()}
 if __name__ == "__main__":
     print("Hello from Lucia cleaned server")
 '''
-    async with aiofiles.open(str(filepath), 'w', encoding='utf-8') as f:
+    async with aiofiles.open(str(filepath), "w", encoding="utf-8") as f:
         await f.write(python_code)
     return {"ok": True, "filename": filename}
 
@@ -34,7 +34,7 @@ async def handle_create_html() -> Dict[str, Any]:
   <body><h1>Lucia Generated Page</h1></body>
 </html>
 """
-    async with aiofiles.open(str(filepath), 'w', encoding='utf-8') as f:
+    async with aiofiles.open(str(filepath), "w", encoding="utf-8") as f:
         await f.write(html_code)
     return {"ok": True, "filename": filename}
 
@@ -44,7 +44,7 @@ async def handle_create_text() -> Dict[str, Any]:
     filename = f"lucia_notes_{timestamp}.txt"
     filepath = DOWNLOADS / filename
     text = f"Lucia notes\nGenerated: {datetime.now().isoformat()}\n"
-    async with aiofiles.open(str(filepath), 'w', encoding='utf-8') as f:
+    async with aiofiles.open(str(filepath), "w", encoding="utf-8") as f:
         await f.write(text)
     return {"ok": True, "filename": filename}
 
@@ -54,7 +54,13 @@ async def handle_list_files() -> Dict[str, Any]:
     for p in DOWNLOADS.iterdir():
         if p.is_file():
             stat = p.stat()
-            files.append({"name": p.name, "size": stat.st_size, "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()})
+            files.append(
+                {
+                    "name": p.name,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                }
+            )
     return {"ok": True, "files": files}
 
 

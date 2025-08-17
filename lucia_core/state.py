@@ -9,6 +9,7 @@ state = SystemState()
 from dataclasses import dataclass, field
 import numpy as np
 
+
 @dataclass
 class SystemState:
     psi: float = 0.5
