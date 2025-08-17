@@ -293,8 +293,8 @@ try {
     if ($acl_choice -and $acl_choice.Substring(0,1).ToUpper() -eq 'Y') {
         try {
             $username = "$env:USERDOMAIN\$env:USERNAME"
-            # Build grant argument safely to avoid PowerShell parsing issues with ':' inside double-quoted strings
-            $grantArg = "${username}:(R,W)"
+            # Build grant argument safely to avoid PowerShell parsing issues with ':'; concatenate rather than use double-quoted interpolation
+            $grantArg = $username + ':(R,W)'
             icacls $envPath /inheritance:r /grant:r $grantArg /c | Out-Null
             Write-Host "Applied ACL restrictions to $envPath for $username"
             Add-Content -Path $logPath -Value "$(Get-Date -Format o) - ACL_APPLIED - $username" -Encoding UTF8
