@@ -1,8 +1,8 @@
 name: LUCIA AA C4 fast behavior gate
 
 on:
-  push:
-    branches: [lucia-aa-c4-sql-source-capture]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
