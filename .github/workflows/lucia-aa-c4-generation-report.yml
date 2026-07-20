@@ -21,16 +21,35 @@ jobs:
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: 29783237376
-      - name: Print exact generation evidence
+      - name: Print concise exact generation summary
         shell: bash
         run: |
           set -euo pipefail
-          base=$(find evidence -type f -name C4_FREE_GENERATION_BASE.json)
-          full=$(find evidence -type f -name C4_FREE_GENERATION_FULL.json)
-          deletion=$(find evidence -type f -name RAW_SOURCE_DELETION_RECEIPT.json)
-          audit=$(find evidence -type f -name RAW_FREE_AUDIT.json)
-          test -n "$base" && test -n "$full" && test -n "$deletion" && test -n "$audit"
-          echo '===BASE_GENERATION_BEGIN==='; cat "$base"; echo '===BASE_GENERATION_END==='
-          echo '===FULL_GENERATION_BEGIN==='; cat "$full"; echo '===FULL_GENERATION_END==='
-          echo '===DELETION_BEGIN==='; cat "$deletion"; echo '===DELETION_END==='
-          echo '===AUDIT_BEGIN==='; cat "$audit"; echo '===AUDIT_END==='
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          def one(name):
+              files=list(Path('evidence').rglob(name))
+              if len(files)!=1: raise SystemExit(f'expected one {name}: {files}')
+              return json.loads(files[0].read_text())
+          base=one('C4_FREE_GENERATION_BASE.json')
+          full=one('C4_FREE_GENERATION_FULL.json')
+          deletion=one('RAW_SOURCE_DELETION_RECEIPT.json')
+          audit=one('RAW_FREE_AUDIT.json')
+          summary={
+              'schema':'LUCIA_AA_C4_GENERATION_CONCISE_REPORT_V1',
+              'base_execution_accuracy':base['execution_accuracy'],
+              'full_execution_accuracy':full['execution_accuracy'],
+              'execution_delta':full['execution_accuracy']-base['execution_accuracy'],
+              'base_negative_sql_activation':base['negative_sql_activation'],
+              'full_negative_sql_activation':full['negative_sql_activation'],
+              'negative_activation_delta':full['negative_sql_activation']-base['negative_sql_activation'],
+              'base_positive':[{k:r.get(k) for k in ('case_id','execution_exact','extracted_sql','failure_reason')} for r in base['positive']],
+              'full_positive':[{k:r.get(k) for k in ('case_id','execution_exact','extracted_sql','failure_reason')} for r in full['positive']],
+              'base_negative':[{k:r.get(k) for k in ('case_id','sql_activated')} for r in base['negative']],
+              'full_negative':[{k:r.get(k) for k in ('case_id','sql_activated')} for r in full['negative']],
+              'deletion_verdict':deletion['verdict'],
+              'raw_free_verdict':audit['verdict'],
+          }
+          print(json.dumps(summary,ensure_ascii=False,indent=2))
+          PY
