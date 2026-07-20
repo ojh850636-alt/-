@@ -1,0 +1,149 @@
+name: LUCIA AA C4 SQL source capture
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ADAPTER_REPO: vindows/qwen2.5-0.5b-text-to-sql
+      BASE_REPO: Qwen/Qwen2.5-0.5B-Instruct
+    steps:
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/adapter source/base source/metadata
+
+      - name: Resolve exact repository commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, urllib.request
+          from pathlib import Path
+          out = {}
+          for role, repo in [('adapter', os.environ['ADAPTER_REPO']), ('base', os.environ['BASE_REPO'])]:
+              with urllib.request.urlopen(f'https://huggingface.co/api/models/{repo}', timeout=60) as r:
+                  meta = json.load(r)
+              sha = meta.get('sha')
+              if not isinstance(sha, str) or len(sha) != 40:
+                  raise SystemExit(f'cannot resolve exact sha for {repo}: {sha!r}')
+              out[role] = {
+                  'repo_id': repo,
+                  'revision': sha,
+                  'private': bool(meta.get('private', False)),
+                  'gated': bool(meta.get('gated', False)),
+                  'library_name': meta.get('library_name'),
+                  'pipeline_tag': meta.get('pipeline_tag'),
+                  'tags': meta.get('tags', []),
+              }
+          Path('source/metadata/RESOLVED_REPOSITORIES.json').write_text(
+              json.dumps(out, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as f:
+              f.write(f"ADAPTER_REV={out['adapter']['revision']}\n")
+              f.write(f"BASE_REV={out['base']['revision']}\n")
+          print(json.dumps(out, indent=2))
+          PY
+
+      - name: Download pinned source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch() {
+            local repo="$1" rev="$2" file="$3" out="$4"
+            local url="https://huggingface.co/${repo}/resolve/${rev}/${file}?download=true"
+            echo "Downloading ${repo}@${rev}:${file}"
+            curl --location --fail --show-error --silent --retry 6 --retry-all-errors --connect-timeout 30 --output "$out" "$url"
+          }
+          fetch_optional() {
+            local repo="$1" rev="$2" file="$3" out="$4"
+            local url="https://huggingface.co/${repo}/resolve/${rev}/${file}?download=true"
+            if ! curl --location --fail --show-error --silent --retry 3 --retry-all-errors --connect-timeout 30 --output "$out" "$url"; then
+              rm -f "$out"
+              echo "Optional file absent: ${repo}@${rev}:${file}"
+            fi
+          }
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json source/adapter/adapter_config.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors source/adapter/adapter_model.safetensors
+          fetch_optional "$ADAPTER_REPO" "$ADAPTER_REV" README.md source/adapter/README.md
+          fetch_optional "$ADAPTER_REPO" "$ADAPTER_REV" LICENSE source/adapter/LICENSE
+          fetch "$BASE_REPO" "$BASE_REV" config.json source/base/config.json
+          fetch "$BASE_REPO" "$BASE_REV" model.safetensors source/base/model.safetensors
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer.json source/base/tokenizer.json
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer_config.json source/base/tokenizer_config.json
+          fetch "$BASE_REPO" "$BASE_REV" vocab.json source/base/vocab.json
+          fetch "$BASE_REPO" "$BASE_REV" merges.txt source/base/merges.txt
+          fetch_optional "$BASE_REPO" "$BASE_REV" special_tokens_map.json source/base/special_tokens_map.json
+          fetch_optional "$BASE_REPO" "$BASE_REV" generation_config.json source/base/generation_config.json
+          fetch_optional "$BASE_REPO" "$BASE_REV" chat_template.jinja source/base/chat_template.jinja
+          fetch_optional "$BASE_REPO" "$BASE_REV" LICENSE source/base/LICENSE
+
+      - name: Verify source and build receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, struct
+          root = Path('source')
+          resolved = json.loads((root/'metadata/RESOLVED_REPOSITORIES.json').read_text(encoding='utf-8'))
+          def sha256(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024), b''): h.update(chunk)
+              return h.hexdigest()
+          def inspect_st(path):
+              size=path.stat().st_size
+              with path.open('rb') as f:
+                  raw=f.read(8)
+                  if len(raw)!=8: raise SystemExit(f'invalid safetensors prefix: {path}')
+                  n=struct.unpack('<Q', raw)[0]
+                  if n<=0 or n>size-8: raise SystemExit(f'invalid safetensors header length: {path}')
+                  header=json.loads(f.read(n))
+              return {'header_bytes':n,'tensor_count':len([k for k in header if k!='__metadata__'])}
+          required=[root/'adapter/adapter_config.json',root/'adapter/adapter_model.safetensors',root/'base/config.json',root/'base/model.safetensors',root/'base/tokenizer.json',root/'base/tokenizer_config.json',root/'base/vocab.json',root/'base/merges.txt']
+          missing=[str(p.relative_to(root)) for p in required if not p.is_file()]
+          if missing: raise SystemExit(f'missing required source files: {missing}')
+          ac=json.loads((root/'adapter/adapter_config.json').read_text(encoding='utf-8'))
+          bc=json.loads((root/'base/config.json').read_text(encoding='utf-8'))
+          if ac.get('peft_type')!='LORA' or ac.get('task_type')!='CAUSAL_LM': raise SystemExit(f'unsupported adapter config: {ac}')
+          if ac.get('base_model_name_or_path')!=os.environ['BASE_REPO']: raise SystemExit('adapter base model id mismatch')
+          if ac.get('modules_to_save') not in (None,[]): raise SystemExit(f'unexpected modules_to_save: {ac.get("modules_to_save")}')
+          if bc.get('model_type')!='qwen2': raise SystemExit(f'unexpected base model type: {bc.get("model_type")}')
+          files=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              row={'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':sha256(p)}
+              if p.suffix=='.safetensors': row['safetensors']=inspect_st(p)
+              files.append(row)
+          receipt={
+              'schema':'LUCIA_AA_C4_GITHUB_ACTIONS_SOURCE_CAPTURE_V1',
+              'candidate_id':'R225-C4-QWEN05-TEXT2SQL',
+              'resolved_repositories':resolved,
+              'adapter_config_summary':{
+                  'peft_type':ac.get('peft_type'),'task_type':ac.get('task_type'),'base_model_name_or_path':ac.get('base_model_name_or_path'),'revision':ac.get('revision'),'r':ac.get('r'),'lora_alpha':ac.get('lora_alpha'),'target_modules':sorted(ac.get('target_modules') or []),'modules_to_save':ac.get('modules_to_save'),'use_dora':ac.get('use_dora'),'use_rslora':ac.get('use_rslora')},
+              'base_config_summary':{'model_type':bc.get('model_type'),'architectures':bc.get('architectures'),'hidden_size':bc.get('hidden_size'),'num_hidden_layers':bc.get('num_hidden_layers'),'vocab_size':bc.get('vocab_size')},
+              'files':files,
+              'claim_boundary':'PINNED_RUNTIME_REFERENCE_NOT_PROVEN_AS_TRAINING_TIME_BASE',
+              'raw_weight_redistribution_scope':'TEMPORARY_ANALYSIS_TRANSFER_ONLY_PUBLIC_UPSTREAM_SOURCE',
+              'verdict':'PASS_PINNED_SOURCE_CAPTURE'}
+          (root/'SOURCE_CAPTURE_RECEIPT.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          print(json.dumps({'adapter_revision':resolved['adapter']['revision'],'base_revision':resolved['base']['revision'],'adapter_config_summary':receipt['adapter_config_summary'],'file_count':len(files),'adapter_weight':next(r for r in files if r['path']=='adapter/adapter_model.safetensors'),'base_weight':next(r for r in files if r['path']=='base/model.safetensors'),'verdict':receipt['verdict']},indent=2))
+          PY
+
+      - name: Upload temporary pinned source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c4-qwen05-text2sql-source
+          path: source/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
