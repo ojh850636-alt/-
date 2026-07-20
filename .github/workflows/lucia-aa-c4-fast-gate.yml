@@ -1,0 +1,108 @@
+name: LUCIA AA C4 fast behavior gate
+
+on:
+  push:
+    branches: [lucia-aa-c4-sql-source-capture]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ADAPTER_REPO: vindows/qwen2.5-0.5b-text-to-sql
+      ADAPTER_REV: 427e5eda47e6f5752fab024e54da34ab08d27a13
+      BASE_REPO: Qwen/Qwen2.5-0.5B-Instruct
+      BASE_REV: 7ae557604adf67be50417f59c2c2f167def9a775
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install 'transformers==4.57.1' 'peft==0.17.1' 'safetensors==0.7.0' 'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'accelerate==1.14.0'
+      - name: Download exact pinned source
+        shell: bash
+        env:
+          TRANSFORMERS_OFFLINE: '0'
+        run: |
+          set -euo pipefail
+          mkdir -p raw/base raw/adapter results
+          fetch(){ curl --location --fail --show-error --silent --retry 6 --retry-all-errors --connect-timeout 30 --output "$4" "https://huggingface.co/$1/resolve/$2/$3?download=true"; }
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json raw/adapter/adapter_config.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors raw/adapter/adapter_model.safetensors
+          for f in config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt; do fetch "$BASE_REPO" "$BASE_REV" "$f" "raw/base/$f"; done
+          for f in generation_config.json special_tokens_map.json chat_template.jinja; do fetch "$BASE_REPO" "$BASE_REV" "$f" "raw/base/$f" || rm -f "raw/base/$f"; done
+      - name: Patch only evaluation budget, not evidence rules
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('tools/lucia_aa_c4_actual_analysis.py')
+          s=p.read_text()
+          changes={
+            'plan = [("DISCOVERY", 32), ("CONFIRMATION", 20), ("OOD", 16)]':'plan = [("DISCOVERY", 4), ("CONFIRMATION", 8), ("OOD", 8)]',
+            'batch_size: int=8':'batch_size: int=16',
+            'reps=[c for c in cases if c["split"]=="CONFIRMATION"][:4]+[c for c in cases if c["split"]=="OOD"][:4]':'reps=[c for c in cases if c["split"]=="CONFIRMATION"][:2]+[c for c in cases if c["split"]=="OOD"][:2]',
+            'neg_reps=negatives[:4]':'neg_reps=negatives[:2]',
+            'max_new_tokens=64':'max_new_tokens=48',
+            'max_new_tokens=40':'max_new_tokens=32',
+          }
+          for old,new in changes.items():
+              if old not in s: raise SystemExit(f'missing patch target: {old}')
+              s=s.replace(old,new)
+          p.write_text(s)
+          Path('results/FAST_GATE_SCOPE.json').write_text('{"schema":"LUCIA_AA_C4_FAST_GATE_SCOPE_V1","positive_count":200,"confirmation_count":80,"ood_count":80,"discovery_count":40,"negative_count":40,"actual_generation_positive_per_condition":4,"actual_generation_negative_per_condition":2,"evidence_contract_unchanged":true}\n')
+          PY
+      - name: Run fast actual gate
+        shell: bash
+        run: python -B tools/lucia_aa_c4_actual_analysis.py --base-dir raw/base --adapter-dir raw/adapter --out-dir results
+      - name: Delete raw source
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf raw
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          r={'schema':'LUCIA_AA_C4_FAST_GATE_RAW_DELETION_V1','raw_root_exists_after':Path('raw').exists(),'verdict':'PASS_RAW_SOURCE_DELETED' if not Path('raw').exists() else 'FAIL'}
+          Path('results').mkdir(exist_ok=True)
+          Path('results/RAW_SOURCE_DELETION_RECEIPT.json').write_text(json.dumps(r,indent=2)+'\n')
+          if Path('raw').exists(): raise SystemExit('raw remains')
+          PY
+      - name: Audit raw-free results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          forbidden={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.gguf'}
+          bad=[p.as_posix() for p in Path('results').rglob('*') if p.is_file() and (p.suffix.lower() in forbidden or 'tokenizer' in p.name.lower())]
+          r={'schema':'LUCIA_AA_C4_FAST_GATE_RAW_FREE_AUDIT_V1','forbidden_files':bad,'verdict':'PASS_RAW_FREE_RESULTS' if not bad else 'FAIL'}
+          Path('results/RAW_FREE_AUDIT.json').write_text(json.dumps(r,indent=2)+'\n')
+          if bad: raise SystemExit(str(bad))
+          PY
+      - name: Upload fast raw-free gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c4-fast-gate-raw-free-evidence
+          path: results/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
