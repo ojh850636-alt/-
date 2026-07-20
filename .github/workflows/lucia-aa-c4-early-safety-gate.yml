@@ -1,0 +1,193 @@
+name: LUCIA AA C4 early safety gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install exact runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install \
+            'transformers==4.57.1' \
+            'peft==0.17.1' \
+            'safetensors==0.7.0' \
+            'huggingface-hub==0.36.0' \
+            'tokenizers==0.22.1' \
+            'accelerate==1.14.0'
+
+      - name: Download verified Adapter capsule
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-adapter-and-receipts
+          path: transport/adapter_receipts
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+
+      - name: Download verified Base metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-meta-tokenizer
+          path: transport/base_meta
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+
+      - name: Download verified Base part 00
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-00
+          path: transport/part00
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+
+      - name: Download verified Base part 01
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-01
+          path: transport/part01
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+
+      - name: Download verified Base part 02
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-02
+          path: transport/part02
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+
+      - name: Reassemble and independently verify source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p raw/base raw/adapter results
+          cp -r transport/adapter_receipts/adapter/. raw/adapter/
+          if [ -d transport/base_meta/base_meta ]; then
+            cp -r transport/base_meta/base_meta/. raw/base/
+          else
+            cp -r transport/base_meta/. raw/base/
+          fi
+          p0=$(find transport/part00 -type f -name 'model.safetensors.part-00' | head -1)
+          p1=$(find transport/part01 -type f -name 'model.safetensors.part-01' | head -1)
+          p2=$(find transport/part02 -type f -name 'model.safetensors.part-02' | head -1)
+          cat "$p0" "$p1" "$p2" > raw/base/model.safetensors
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, struct
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda:f.read(1024*1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+          split_manifest=next(Path('transport/adapter_receipts').rglob('BASE_SPLIT_MANIFEST.json'))
+          source_receipt=next(Path('transport/adapter_receipts').rglob('SOURCE_CAPTURE_RECEIPT.json'))
+          split=json.loads(split_manifest.read_text())
+          receipt=json.loads(source_receipt.read_text())
+          expected={row['path']:(row['size_bytes'],row['sha256']) for row in receipt['files']}
+          base=Path('raw/base/model.safetensors')
+          adapter=Path('raw/adapter/adapter_model.safetensors')
+          if base.stat().st_size!=split['original_size_bytes'] or sha(base)!=split['original_sha256']:
+              raise SystemExit('reassembled Base identity mismatch')
+          for key,path in {'base/model.safetensors':base,'adapter/adapter_model.safetensors':adapter,'adapter/adapter_config.json':Path('raw/adapter/adapter_config.json')}.items():
+              size,digest=expected[key]
+              if path.stat().st_size!=size or sha(path)!=digest:
+                  raise SystemExit(f'source mismatch: {key}')
+          for path in (base,adapter):
+              with path.open('rb') as f:
+                  n=struct.unpack('<Q',f.read(8))[0]
+                  json.loads(f.read(n))
+          result={
+              'schema':'LUCIA_AA_C4_EARLY_SAFETY_SOURCE_REASSEMBLY_V1',
+              'source_capture_run_id':29771037886,
+              'base_size_bytes':base.stat().st_size,
+              'base_sha256':sha(base),
+              'adapter_size_bytes':adapter.stat().st_size,
+              'adapter_sha256':sha(adapter),
+              'verdict':'PASS_EXACT_SOURCE_REASSEMBLED',
+          }
+          Path('results/SOURCE_REASSEMBLY.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          PY
+
+      - name: Run independent early safety Gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -B tools/c4_safety_gate.py \
+            --base-dir raw/base \
+            --adapter-dir raw/adapter \
+            --out-dir results
+
+      - name: Delete raw source and transport
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf raw transport
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          bad=[str(path) for path in (Path('raw'),Path('transport')) if path.exists()]
+          Path('results').mkdir(exist_ok=True)
+          Path('results/RAW_SOURCE_DELETION_RECEIPT.json').write_text(json.dumps({
+              'schema':'LUCIA_AA_C4_EARLY_SAFETY_RAW_DELETION_V1',
+              'remaining_roots':bad,
+              'verdict':'PASS_RAW_SOURCE_DELETED' if not bad else 'FAIL_RAW_SOURCE_REMAINS',
+          },indent=2,sort_keys=True)+'\n')
+          if bad:
+              raise SystemExit(str(bad))
+          PY
+
+      - name: Audit and upload raw-free safety evidence
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          forbidden={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.gguf'}
+          bad=[path.as_posix() for path in Path('results').rglob('*') if path.is_file() and (path.suffix.lower() in forbidden or 'tokenizer' in path.name.lower())]
+          Path('results/RAW_FREE_AUDIT.json').write_text(json.dumps({
+              'schema':'LUCIA_AA_C4_EARLY_SAFETY_RAW_FREE_AUDIT_V1',
+              'forbidden_files':bad,
+              'verdict':'PASS_RAW_FREE_RESULTS' if not bad else 'FAIL_FORBIDDEN_RESULTS',
+          },indent=2,sort_keys=True)+'\n')
+          if bad:
+              raise SystemExit(str(bad))
+          PY
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c4-early-safety-raw-free-evidence
+          path: results/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
