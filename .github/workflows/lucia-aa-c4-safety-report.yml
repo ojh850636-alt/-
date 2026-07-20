@@ -1,0 +1,40 @@
+name: LUCIA AA C4 safety Gate report
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download raw-free safety evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-early-safety-raw-free-evidence
+          path: evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29782177793
+      - name: Verify and print exact Gate JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate=$(find evidence -type f -name C4_EARLY_SAFETY_GATE.json)
+          delete_receipt=$(find evidence -type f -name RAW_SOURCE_DELETION_RECEIPT.json)
+          audit=$(find evidence -type f -name RAW_FREE_AUDIT.json)
+          test -n "$gate" && test -n "$delete_receipt" && test -n "$audit"
+          echo '===C4_EARLY_SAFETY_GATE_JSON_BEGIN==='
+          cat "$gate"
+          echo '===C4_EARLY_SAFETY_GATE_JSON_END==='
+          echo '===RAW_SOURCE_DELETION_RECEIPT_BEGIN==='
+          cat "$delete_receipt"
+          echo '===RAW_SOURCE_DELETION_RECEIPT_END==='
+          echo '===RAW_FREE_AUDIT_BEGIN==='
+          cat "$audit"
+          echo '===RAW_FREE_AUDIT_END==='
