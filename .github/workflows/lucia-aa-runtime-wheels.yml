@@ -1,0 +1,47 @@
+name: LUCIA AA exact runtime wheels
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wheels:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact no-deps wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir wheels
+          python -m pip download --no-deps --only-binary=:all: --dest wheels \
+            transformers==4.57.1 \
+            peft==0.17.1 \
+            huggingface-hub==0.36.0 \
+            tokenizers==0.22.1 \
+            accelerate==1.14.0
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          rows=[]
+          for p in sorted(Path('wheels').glob('*.whl')):
+              h=hashlib.sha256(p.read_bytes()).hexdigest()
+              rows.append({'file':p.name,'size_bytes':p.stat().st_size,'sha256':h})
+          if len(rows)!=5:
+              raise SystemExit(f'expected 5 wheels, got {len(rows)}')
+          Path('wheels/WHEEL_MANIFEST.json').write_text(json.dumps({'schema':'LUCIA_AA_EXACT_RUNTIME_WHEELS_V1','python':'3.13','wheels':rows},indent=2)+'\n')
+          print(json.dumps(rows,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-exact-runtime-wheels-py313
+          path: wheels/
+          if-no-files-found: error
+          retention-days: 1
