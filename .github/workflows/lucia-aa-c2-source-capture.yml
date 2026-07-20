@@ -1,0 +1,172 @@
+name: LUCIA AA C2 source capture
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CANDIDATE_ID: R224-C2-DISTILBERT-QNLI
+      ADAPTER_REPO: rambodazimi/distilbert-base-uncased-finetuned-LoRA-QNLI
+      ADAPTER_REV: feb03743cdfd46e4e429278272a0636df8c39d20
+      BASE_REPO: distilbert/distilbert-base-uncased
+      BASE_REV: 12040accade4e8a0f71eabdb258fecc2e7e948be
+      ADAPTER_SHA: da68fd17441fe935b60a3f24e65f16cdfe7910a108d6ac6256190f91099edc5a
+      ADAPTER_SIZE: '3552056'
+      BASE_SHA: 5e3f1108e3cb34ee048634875d8482665b65ac713291a7e32396fb18f6ff0063
+      BASE_SIZE: '267954768'
+    steps:
+      - name: Prepare directories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/adapter source/base source/adapter_tokenizer
+
+      - name: Download pinned source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          fetch() {
+            local repo="$1" rev="$2" file="$3" out="$4"
+            local url="https://huggingface.co/${repo}/resolve/${rev}/${file}?download=true"
+            echo "Downloading ${repo}@${rev}:${file}"
+            curl --location --fail --show-error --silent \
+              --retry 5 --retry-all-errors --connect-timeout 30 \
+              --output "$out" "$url"
+          }
+          fetch_optional() {
+            local repo="$1" rev="$2" file="$3" out="$4"
+            local url="https://huggingface.co/${repo}/resolve/${rev}/${file}?download=true"
+            if ! curl --location --fail --show-error --silent \
+              --retry 3 --retry-all-errors --connect-timeout 30 \
+              --output "$out" "$url"; then
+              rm -f "$out"
+              echo "Optional file absent: ${repo}@${rev}:${file}"
+            fi
+          }
+
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json source/adapter/adapter_config.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors source/adapter/adapter_model.safetensors
+
+          fetch "$BASE_REPO" "$BASE_REV" config.json source/base/config.json
+          fetch "$BASE_REPO" "$BASE_REV" model.safetensors source/base/model.safetensors
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer.json source/base/tokenizer.json
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer_config.json source/base/tokenizer_config.json
+          fetch "$BASE_REPO" "$BASE_REV" vocab.txt source/base/vocab.txt
+          fetch_optional "$BASE_REPO" "$BASE_REV" special_tokens_map.json source/base/special_tokens_map.json
+          fetch_optional "$BASE_REPO" "$BASE_REV" added_tokens.json source/base/added_tokens.json
+
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" tokenizer.json source/adapter_tokenizer/tokenizer.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" tokenizer_config.json source/adapter_tokenizer/tokenizer_config.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" vocab.txt source/adapter_tokenizer/vocab.txt
+          fetch_optional "$ADAPTER_REPO" "$ADAPTER_REV" special_tokens_map.json source/adapter_tokenizer/special_tokens_map.json
+          fetch_optional "$ADAPTER_REPO" "$ADAPTER_REV" added_tokens.json source/adapter_tokenizer/added_tokens.json
+
+      - name: Verify pinned identities and build receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, struct
+
+          root = Path('source')
+          expected = {
+              'adapter/adapter_model.safetensors': (os.environ['ADAPTER_SHA'], int(os.environ['ADAPTER_SIZE'])),
+              'base/model.safetensors': (os.environ['BASE_SHA'], int(os.environ['BASE_SIZE'])),
+          }
+          required = [
+              'adapter/adapter_config.json',
+              'adapter/adapter_model.safetensors',
+              'base/config.json',
+              'base/model.safetensors',
+              'base/tokenizer.json',
+              'base/tokenizer_config.json',
+              'base/vocab.txt',
+              'adapter_tokenizer/tokenizer.json',
+              'adapter_tokenizer/tokenizer_config.json',
+              'adapter_tokenizer/vocab.txt',
+          ]
+
+          def sha256(path: Path) -> str:
+              h = hashlib.sha256()
+              with path.open('rb') as f:
+                  for chunk in iter(lambda: f.read(1024 * 1024), b''):
+                      h.update(chunk)
+              return h.hexdigest()
+
+          for rel in required:
+              if not (root / rel).is_file():
+                  raise SystemExit(f'missing required file: {rel}')
+
+          files = []
+          for path in sorted(p for p in root.rglob('*') if p.is_file()):
+              rel = path.relative_to(root).as_posix()
+              size = path.stat().st_size
+              digest = sha256(path)
+              row = {'path': rel, 'size_bytes': size, 'sha256': digest}
+              if path.suffix == '.safetensors':
+                  with path.open('rb') as f:
+                      raw = f.read(8)
+                      if len(raw) != 8:
+                          raise SystemExit(f'invalid safetensors header: {rel}')
+                      header_len = struct.unpack('<Q', raw)[0]
+                      if header_len <= 0 or header_len > size - 8:
+                          raise SystemExit(f'invalid safetensors header length: {rel}')
+                      json.loads(f.read(header_len))
+                  row['safetensors_header_bytes'] = header_len
+              files.append(row)
+
+          for rel, (digest, size) in expected.items():
+              path = root / rel
+              actual_size = path.stat().st_size
+              actual_sha = sha256(path)
+              if actual_size != size:
+                  raise SystemExit(f'size mismatch {rel}: {actual_size} != {size}')
+              if actual_sha != digest:
+                  raise SystemExit(f'sha mismatch {rel}: {actual_sha} != {digest}')
+
+          config = json.loads((root / 'adapter/adapter_config.json').read_text(encoding='utf-8'))
+          receipt = {
+              'schema': 'LUCIA_AA_C2_GITHUB_ACTIONS_SOURCE_CAPTURE_V1',
+              'candidate_id': os.environ['CANDIDATE_ID'],
+              'adapter': {
+                  'repo_id': os.environ['ADAPTER_REPO'],
+                  'revision': os.environ['ADAPTER_REV'],
+                  'config': config,
+              },
+              'base': {
+                  'repo_id': os.environ['BASE_REPO'],
+                  'revision': os.environ['BASE_REV'],
+                  'claim_boundary': 'PINNED_RUNTIME_REFERENCE_NOT_PROVEN_AS_TRAINING_TIME_BASE',
+              },
+              'files': files,
+              'raw_weight_redistribution_scope': 'TEMPORARY_ANALYSIS_TRANSFER_ONLY_PUBLIC_UPSTREAM_SOURCE',
+              'verdict': 'PASS_PINNED_SOURCE_CAPTURE',
+          }
+          Path('source/SOURCE_CAPTURE_RECEIPT.json').write_text(
+              json.dumps(receipt, ensure_ascii=False, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps({
+              'file_count': len(files),
+              'target_modules': config.get('target_modules'),
+              'modules_to_save': config.get('modules_to_save'),
+              'verdict': receipt['verdict'],
+          }, indent=2))
+          PY
+
+      - name: Upload temporary source capsule artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c2-pinned-source-capsule
+          path: source/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
