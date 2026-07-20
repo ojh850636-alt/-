@@ -1,0 +1,118 @@
+name: LUCIA AA C4 full BASE FULL atlas
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  atlas:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install exact runtime
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install 'transformers==4.57.1' 'peft==0.17.1' 'safetensors==0.7.0' 'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'accelerate==1.14.0'
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-adapter-and-receipts
+          path: transport/adapter_receipts
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-meta-tokenizer
+          path: transport/base_meta
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-00
+          path: transport/part00
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-01
+          path: transport/part01
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+      - uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-base-weight-part-02
+          path: transport/part02
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29771037886
+      - name: Reassemble and verify source
+        run: |
+          set -euo pipefail
+          mkdir -p raw/base raw/adapter results
+          cp -r transport/adapter_receipts/adapter/. raw/adapter/
+          if [ -d transport/base_meta/base_meta ]; then cp -r transport/base_meta/base_meta/. raw/base/; else cp -r transport/base_meta/. raw/base/; fi
+          p0=$(find transport/part00 -type f -name 'model.safetensors.part-00'|head -1);p1=$(find transport/part01 -type f -name 'model.safetensors.part-01'|head -1);p2=$(find transport/part02 -type f -name 'model.safetensors.part-02'|head -1)
+          cat "$p0" "$p1" "$p2" > raw/base/model.safetensors
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          def sha(p):
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for c in iter(lambda:f.read(1024*1024),b''):h.update(c)
+              return h.hexdigest()
+          m=json.loads(next(Path('transport/adapter_receipts').rglob('BASE_SPLIT_MANIFEST.json')).read_text())
+          b=Path('raw/base/model.safetensors')
+          if b.stat().st_size!=m['original_size_bytes'] or sha(b)!=m['original_sha256']:raise SystemExit('Base mismatch')
+          Path('results/ARTIFACT_SOURCE_REASSEMBLY.json').write_text(json.dumps({'schema':'LUCIA_AA_C4_ATLAS_REASSEMBLY_V1','base_size_bytes':b.stat().st_size,'base_sha256':sha(b),'adapter_sha256':sha(Path('raw/adapter/adapter_model.safetensors')),'verdict':'PASS_EXACT_SOURCE_REASSEMBLED'},indent=2)+'\n')
+          PY
+      - name: Run full BASE FULL atlas
+        run: python -B tools/lucia_aa_c4_atlas_only.py --base-dir raw/base --adapter-dir raw/adapter --out-dir results --core-script tools/lucia_aa_c4_actual_analysis.py
+      - name: Delete raw transport and source
+        if: always()
+        run: |
+          rm -rf raw transport
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          bad=[str(p) for p in (Path('raw'),Path('transport')) if p.exists()]
+          Path('results').mkdir(exist_ok=True)
+          Path('results/RAW_SOURCE_DELETION_RECEIPT.json').write_text(json.dumps({'schema':'LUCIA_AA_C4_ATLAS_RAW_DELETION_V1','remaining_roots':bad,'verdict':'PASS_RAW_SOURCE_DELETED' if not bad else 'FAIL'},indent=2)+'\n')
+          if bad:raise SystemExit(str(bad))
+          PY
+      - name: Raw-free audit
+        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          bad=[p.as_posix() for p in Path('results').rglob('*') if p.is_file() and (p.suffix.lower() in {'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.gguf'} or 'tokenizer' in p.name.lower())]
+          Path('results/RAW_FREE_AUDIT.json').write_text(json.dumps({'schema':'LUCIA_AA_C4_ATLAS_RAW_FREE_AUDIT_V1','forbidden_files':bad,'verdict':'PASS_RAW_FREE_RESULTS' if not bad else 'FAIL'},indent=2)+'\n')
+          if bad:raise SystemExit(str(bad))
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c4-full-atlas-raw-free-evidence
+          path: results/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
