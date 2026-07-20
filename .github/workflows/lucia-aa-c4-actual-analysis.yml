@@ -1,0 +1,165 @@
+name: LUCIA AA C4 actual SQL analysis
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      ADAPTER_REPO: vindows/qwen2.5-0.5b-text-to-sql
+      ADAPTER_REV: 427e5eda47e6f5752fab024e54da34ab08d27a13
+      BASE_REPO: Qwen/Qwen2.5-0.5B-Instruct
+      BASE_REV: 7ae557604adf67be50417f59c2c2f167def9a775
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TRANSFORMERS_OFFLINE: '1'
+    steps:
+      - name: Checkout analysis code only
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install exact runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install \
+            'transformers==4.57.1' \
+            'peft==0.17.1' \
+            'safetensors==0.7.0' \
+            'huggingface-hub==0.36.0' \
+            'tokenizers==0.22.1' \
+            'accelerate==1.14.0'
+
+      - name: Download exact pinned source
+        shell: bash
+        env:
+          TRANSFORMERS_OFFLINE: '0'
+        run: |
+          set -euo pipefail
+          mkdir -p raw/base raw/adapter results
+          fetch() {
+            local repo="$1" rev="$2" file="$3" out="$4"
+            curl --location --fail --show-error --silent \
+              --retry 6 --retry-all-errors --connect-timeout 30 \
+              --output "$out" \
+              "https://huggingface.co/${repo}/resolve/${rev}/${file}?download=true"
+          }
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json raw/adapter/adapter_config.json
+          fetch "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors raw/adapter/adapter_model.safetensors
+          fetch "$BASE_REPO" "$BASE_REV" config.json raw/base/config.json
+          fetch "$BASE_REPO" "$BASE_REV" model.safetensors raw/base/model.safetensors
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer.json raw/base/tokenizer.json
+          fetch "$BASE_REPO" "$BASE_REV" tokenizer_config.json raw/base/tokenizer_config.json
+          fetch "$BASE_REPO" "$BASE_REV" vocab.json raw/base/vocab.json
+          fetch "$BASE_REPO" "$BASE_REV" merges.txt raw/base/merges.txt
+          for f in generation_config.json special_tokens_map.json chat_template.jinja; do
+            fetch "$BASE_REPO" "$BASE_REV" "$f" "raw/base/$f" || rm -f "raw/base/$f"
+          done
+
+      - name: Verify source identity and safetensors headers
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, os, struct
+          def sha(path):
+              h=hashlib.sha256()
+              with path.open('rb') as f:
+                  for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+              return h.hexdigest()
+          rows=[]
+          for role in ('adapter','base'):
+              for p in sorted((Path('raw')/role).iterdir()):
+                  if not p.is_file(): continue
+                  r={'role':role,'name':p.name,'size_bytes':p.stat().st_size,'sha256':sha(p)}
+                  if p.suffix=='.safetensors':
+                      with p.open('rb') as f:
+                          n=struct.unpack('<Q',f.read(8))[0]
+                          header=json.loads(f.read(n))
+                      r['safetensors_header_bytes']=n
+                      r['tensor_count']=len([k for k in header if k!='__metadata__'])
+                  rows.append(r)
+          ac=json.loads(Path('raw/adapter/adapter_config.json').read_text())
+          if ac.get('peft_type')!='LORA' or ac.get('task_type')!='CAUSAL_LM': raise SystemExit('not standard Causal-LM LoRA')
+          if ac.get('modules_to_save') not in (None,[]): raise SystemExit('unexpected modules_to_save')
+          if ac.get('base_model_name_or_path')!=os.environ['BASE_REPO']: raise SystemExit('base id mismatch')
+          receipt={'schema':'LUCIA_AA_C4_ANALYSIS_SOURCE_IDENTITY_V1','candidate_id':'R225-C4-QWEN05-TEXT2SQL','adapter':{'repo_id':os.environ['ADAPTER_REPO'],'revision':os.environ['ADAPTER_REV']},'base':{'repo_id':os.environ['BASE_REPO'],'revision':os.environ['BASE_REV'],'claim_boundary':'PINNED_RUNTIME_REFERENCE_NOT_PROVEN_AS_TRAINING_TIME_BASE'},'adapter_config':ac,'files':rows,'verdict':'PASS_EXACT_PINNED_SOURCE'}
+          Path('results/SOURCE_IDENTITY.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(receipt,indent=2))
+          PY
+
+      - name: Run actual C4 analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -B tools/lucia_aa_c4_actual_analysis.py \
+            --base-dir raw/base \
+            --adapter-dir raw/adapter \
+            --out-dir results
+
+      - name: Delete raw source before result upload
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, shutil
+          root=Path('raw')
+          before=[]
+          if root.exists():
+              for p in sorted(x for x in root.rglob('*') if x.is_file()):
+                  h=hashlib.sha256()
+                  with p.open('rb') as f:
+                      for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
+                  before.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+              shutil.rmtree(root)
+          receipt={'schema':'LUCIA_AA_C4_ACTIONS_RAW_DELETION_V1','deleted_file_count':len(before),'deleted_files':before,'raw_root_exists_after':root.exists(),'verdict':'PASS_RAW_SOURCE_DELETED' if not root.exists() else 'FAIL_RAW_SOURCE_REMAINS'}
+          Path('results').mkdir(exist_ok=True)
+          Path('results/RAW_SOURCE_DELETION_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          if root.exists(): raise SystemExit('raw source deletion failed')
+          PY
+
+      - name: Audit raw-free results
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          forbidden={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.gguf'}
+          bad=[]
+          for p in Path('results').rglob('*'):
+              if p.is_file() and (p.suffix.lower() in forbidden or 'tokenizer' in p.name.lower()): bad.append(p.as_posix())
+          receipt={'schema':'LUCIA_AA_C4_ACTIONS_RAW_FREE_AUDIT_V1','forbidden_files':bad,'verdict':'PASS_RAW_FREE_RESULTS' if not bad else 'FAIL_FORBIDDEN_FILES'}
+          Path('results/RAW_FREE_AUDIT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          if bad: raise SystemExit(f'forbidden result files: {bad}')
+          PY
+
+      - name: Upload raw-free C4 evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lucia-aa-c4-actual-raw-free-evidence
+          path: results/
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
