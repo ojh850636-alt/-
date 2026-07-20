@@ -1,0 +1,36 @@
+name: LUCIA AA C4 generation report
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download raw-free generation evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: lucia-aa-c4-parallel-GENERATION
+          path: evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 29783237376
+      - name: Print exact generation evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(find evidence -type f -name C4_FREE_GENERATION_BASE.json)
+          full=$(find evidence -type f -name C4_FREE_GENERATION_FULL.json)
+          deletion=$(find evidence -type f -name RAW_SOURCE_DELETION_RECEIPT.json)
+          audit=$(find evidence -type f -name RAW_FREE_AUDIT.json)
+          test -n "$base" && test -n "$full" && test -n "$deletion" && test -n "$audit"
+          echo '===BASE_GENERATION_BEGIN==='; cat "$base"; echo '===BASE_GENERATION_END==='
+          echo '===FULL_GENERATION_BEGIN==='; cat "$full"; echo '===FULL_GENERATION_END==='
+          echo '===DELETION_BEGIN==='; cat "$deletion"; echo '===DELETION_END==='
+          echo '===AUDIT_BEGIN==='; cat "$audit"; echo '===AUDIT_END==='
