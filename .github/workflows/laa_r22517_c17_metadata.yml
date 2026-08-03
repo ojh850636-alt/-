@@ -1,0 +1,76 @@
+name: Temporary LAA R22517 C17 metadata-only courier
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve exact Hugging Face revisions and fetch metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22517_C17_METADATA"
+          mkdir -p "$ROOT/adapter" "$ROOT/base"
+          ADAPTER_REPO='qfuxa/whisper-base-french-lora'
+          BASE_REPO='openai/whisper-base'
+          python - <<'PY'
+          import json, pathlib, urllib.request, os, hashlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22517_C17_METADATA'
+          repos={'adapter':'qfuxa/whisper-base-french-lora','base':'openai/whisper-base'}
+          api={}
+          for role,repo in repos.items():
+              with urllib.request.urlopen(f'https://huggingface.co/api/models/{repo}', timeout=60) as r:
+                  data=json.load(r)
+              api[role]=data
+              (root/f'{role}_api.json').write_text(json.dumps(data,indent=2,sort_keys=True)+'\n')
+          adapter_sha=api['adapter']['sha']
+          base_sha=api['base']['sha']
+          allow={
+            'adapter':['adapter_config.json','README.md'],
+            'base':['config.json','generation_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','normalizer.json','README.md']
+          }
+          rows=[]
+          for role,repo in repos.items():
+              sha=adapter_sha if role=='adapter' else base_sha
+              siblings={x['rfilename'] for x in api[role].get('siblings',[])}
+              for name in allow[role]:
+                  if name not in siblings:
+                      continue
+                  url=f'https://huggingface.co/{repo}/resolve/{sha}/{name}?download=true'
+                  out=root/role/name
+                  out.parent.mkdir(parents=True,exist_ok=True)
+                  with urllib.request.urlopen(url,timeout=180) as r:
+                      b=r.read()
+                  out.write_bytes(b)
+                  rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          receipt={
+            'schema':'LUCIA_AA_R2_25_17_C17_METADATA_ONLY_V1',
+            'candidate_id':'R22517-C17-WHISPER-FRENCH-ASR',
+            'adapter_repo':repos['adapter'],'adapter_revision':adapter_sha,
+            'base_repo':repos['base'],'base_revision':base_sha,
+            'raw_weight_bytes_downloaded':0,
+            'model_output_count':0,
+            'files':rows,
+            'adapter_siblings':sorted(x['rfilename'] for x in api['adapter'].get('siblings',[])),
+            'base_siblings':sorted(x['rfilename'] for x in api['base'].get('siblings',[])),
+          }
+          (root/'METADATA_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'adapter_revision':adapter_sha,'base_revision':base_sha,'metadata_files':len(rows)},indent=2))
+          PY
+      - name: Upload one-day metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22517_C17_METADATA_ONLY
+          path: ${{ runner.temp }}/LAA_R22517_C17_METADATA
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
