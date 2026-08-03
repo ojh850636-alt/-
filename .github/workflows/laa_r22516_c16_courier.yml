@@ -43,10 +43,10 @@ jobs:
           BASE_REPO='google/vit-base-patch16-224-in21k'
           BASE_REV='b4569560a39a0f1af58e3ddaf17facf20ab919b0'
 
+          # Exact epoch-1 Adapter commit contains these three safe files plus forbidden training_args.bin.
           download "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json "$SRC/adapter/adapter_config.json"
           download "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors "$SRC/adapter/adapter_model.safetensors"
           download "$ADAPTER_REPO" "$ADAPTER_REV" preprocessor_config.json "$SRC/adapter/preprocessor_config.json"
-          download "$ADAPTER_REPO" "$ADAPTER_REV" README.md "$SRC/adapter/README.md"
 
           download "$BASE_REPO" "$BASE_REV" config.json "$SRC/base/config.json"
           download "$BASE_REPO" "$BASE_REV" model.safetensors "$SRC/base/model.safetensors"
@@ -59,7 +59,7 @@ jobs:
           test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = 'fd4e1169c7aa6c2dbfa8a6448be13b35abc0ee256190857c90009d12c094619b'
 
           count="$(find "$SRC" -type f | wc -l | tr -d ' ')"
-          test "$count" = '8'
+          test "$count" = '7'
           if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then
             echo 'Forbidden file entered courier' >&2
             exit 1
@@ -80,12 +80,13 @@ jobs:
               print(rel, len(tensors), 'tensors')
           PY
 
+          # Match the Adapter's recorded PEFT/Transformers generation while reusing local torch 2.10.
           python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
-            'transformers==4.57.1' \
-            'peft==0.17.1' \
+            'transformers==5.0.0' \
+            'peft==0.18.1' \
             'accelerate==1.14.0' \
-            'tokenizers==0.22.1' \
-            'huggingface-hub==0.36.0'
+            'tokenizers==0.22.2' \
+            'huggingface-hub==1.16.1'
 
           (
             cd "$ROOT"
@@ -98,14 +99,18 @@ jobs:
           root = Path(os.environ['RUNNER_TEMP']) / 'LAA_R22516_C16_COURIER'
           rows=[]
           for p in sorted(x for x in root.rglob('*') if x.is_file()):
-              rows.append({'path': p.relative_to(root).as_posix(), 'size_bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()})
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for block in iter(lambda:f.read(1024*1024),b''):
+                      h.update(block)
+              rows.append({'path': p.relative_to(root).as_posix(), 'size_bytes': p.stat().st_size, 'sha256': h.hexdigest()})
           receipt={
-              'schema':'LUCIA_AA_R2_25_16_C16_GITHUB_COURIER_V1',
+              'schema':'LUCIA_AA_R2_25_16_C16_GITHUB_COURIER_V2',
               'candidate_id':'R22516-C16-VIT-MNIST-VISION',
               'attempt_id':'R22516-C16-VIT-MNIST-RECOVERY-REACQUISITION-1',
               'adapter_revision':'aaca5521b0a2cae4534b280c6c7fa3bdbb99cc6e',
               'base_revision':'b4569560a39a0f1af58e3ddaf17facf20ab919b0',
-              'source_file_count':8,
+              'source_file_count':7,
               'raw_weights_committed_to_git':False,
               'artifact_retention_days':1,
               'files':rows,
