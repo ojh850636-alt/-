@@ -1,0 +1,123 @@
+name: Temporary LAA R22516 C16 exact courier
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-courier:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout transport branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Download exact allowlisted Hugging Face files
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22516_C16_COURIER"
+          SRC="$ROOT/source"
+          WHEELS="$ROOT/wheelhouse"
+          mkdir -p "$SRC/adapter" "$SRC/base" "$WHEELS"
+
+          download() {
+            local repo="$1" rev="$2" path="$3" out="$4"
+            local url="https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"
+            echo "Downloading ${repo}@${rev}/${path}"
+            curl -L --fail --retry 6 --retry-all-errors --connect-timeout 30 \
+              --max-time 1800 --output "$out" "$url"
+          }
+
+          ADAPTER_REPO='Selsabeel/vit-base-patch16-224-in21k-lora-mnist'
+          ADAPTER_REV='aaca5521b0a2cae4534b280c6c7fa3bdbb99cc6e'
+          BASE_REPO='google/vit-base-patch16-224-in21k'
+          BASE_REV='b4569560a39a0f1af58e3ddaf17facf20ab919b0'
+
+          download "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json "$SRC/adapter/adapter_config.json"
+          download "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors "$SRC/adapter/adapter_model.safetensors"
+          download "$ADAPTER_REPO" "$ADAPTER_REV" preprocessor_config.json "$SRC/adapter/preprocessor_config.json"
+          download "$ADAPTER_REPO" "$ADAPTER_REV" README.md "$SRC/adapter/README.md"
+
+          download "$BASE_REPO" "$BASE_REV" config.json "$SRC/base/config.json"
+          download "$BASE_REPO" "$BASE_REV" model.safetensors "$SRC/base/model.safetensors"
+          download "$BASE_REPO" "$BASE_REV" preprocessor_config.json "$SRC/base/preprocessor_config.json"
+          download "$BASE_REPO" "$BASE_REV" README.md "$SRC/base/README.md"
+
+          test "$(stat -c%s "$SRC/adapter/adapter_model.safetensors")" = '2397208'
+          test "$(sha256sum "$SRC/adapter/adapter_model.safetensors" | awk '{print $1}')" = 'a171084898c4b26f889e3f23494e421803434ba36addc8d1875730195a214264'
+          test "$(stat -c%s "$SRC/base/model.safetensors")" = '345579424'
+          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = 'fd4e1169c7aa6c2dbfa8a6448be13b35abc0ee256190857c90009d12c094619b'
+
+          count="$(find "$SRC" -type f | wc -l | tr -d ' ')"
+          test "$count" = '8'
+          if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then
+            echo 'Forbidden file entered courier' >&2
+            exit 1
+          fi
+
+          python - <<'PY'
+          import json, struct
+          from pathlib import Path
+          root = Path(__import__('os').environ['RUNNER_TEMP']) / 'LAA_R22516_C16_COURIER' / 'source'
+          for rel in ('adapter/adapter_model.safetensors', 'base/model.safetensors'):
+              p = root / rel
+              with p.open('rb') as f:
+                  n = struct.unpack('<Q', f.read(8))[0]
+                  header = json.loads(f.read(n))
+              tensors = [k for k in header if k != '__metadata__']
+              if not tensors:
+                  raise SystemExit(f'No tensors in {rel}')
+              print(rel, len(tensors), 'tensors')
+          PY
+
+          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
+            'transformers==4.57.1' \
+            'peft==0.17.1' \
+            'accelerate==1.14.0' \
+            'tokenizers==0.22.1' \
+            'huggingface-hub==0.36.0'
+
+          (
+            cd "$ROOT"
+            find source wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > SHA256_MANIFEST.txt
+          )
+
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'LAA_R22516_C16_COURIER'
+          rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              rows.append({'path': p.relative_to(root).as_posix(), 'size_bytes': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()})
+          receipt={
+              'schema':'LUCIA_AA_R2_25_16_C16_GITHUB_COURIER_V1',
+              'candidate_id':'R22516-C16-VIT-MNIST-VISION',
+              'attempt_id':'R22516-C16-VIT-MNIST-RECOVERY-REACQUISITION-1',
+              'adapter_revision':'aaca5521b0a2cae4534b280c6c7fa3bdbb99cc6e',
+              'base_revision':'b4569560a39a0f1af58e3ddaf17facf20ab919b0',
+              'source_file_count':8,
+              'raw_weights_committed_to_git':False,
+              'artifact_retention_days':1,
+              'files':rows,
+          }
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt, indent=2, sort_keys=True)+'\n')
+          PY
+
+      - name: Upload one-day exact courier artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22516_C16_EXACT_COURIER
+          path: ${{ runner.temp }}/LAA_R22516_C16_COURIER
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
