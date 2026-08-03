@@ -1,4 +1,4 @@
-name: Temporary LAA R22517 C17 metadata-only courier
+name: Temporary LAA R22517 C17 exact ASR courier
 
 on:
   pull_request:
@@ -9,68 +9,83 @@ permissions:
   contents: read
 
 jobs:
-  metadata:
+  courier:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - name: Resolve exact Hugging Face revisions and fetch metadata only
+      - name: Download exact allowlisted Whisper Adapter and Base files
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22517_C17_METADATA"
-          mkdir -p "$ROOT/adapter" "$ROOT/base"
-          ADAPTER_REPO='qfuxa/whisper-base-french-lora'
-          BASE_REPO='openai/whisper-base'
+          ROOT="$RUNNER_TEMP/LAA_R22517_C17_EXACT_COURIER"
+          SRC="$ROOT/source"
+          mkdir -p "$SRC/adapter" "$SRC/base"
           python - <<'PY'
-          import json, pathlib, urllib.request, os, hashlib
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22517_C17_METADATA'
-          repos={'adapter':'qfuxa/whisper-base-french-lora','base':'openai/whisper-base'}
-          api={}
-          for role,repo in repos.items():
-              with urllib.request.urlopen(f'https://huggingface.co/api/models/{repo}', timeout=60) as r:
-                  data=json.load(r)
-              api[role]=data
-              (root/f'{role}_api.json').write_text(json.dumps(data,indent=2,sort_keys=True)+'\n')
-          adapter_sha=api['adapter']['sha']
-          base_sha=api['base']['sha']
+          import hashlib, json, os, pathlib, struct, urllib.request
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22517_C17_EXACT_COURIER'
+          src=root/'source'
+          repos={
+            'adapter':('qfuxa/whisper-base-french-lora','2ac2bf76175223bf9dcbb7f1378d1c13b5077b42'),
+            'base':('openai/whisper-base','e37978b90ca9030d5170a5c07aadb050351a65bb'),
+          }
           allow={
-            'adapter':['adapter_config.json','README.md'],
-            'base':['config.json','generation_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','normalizer.json','README.md']
+            'adapter':['adapter_config.json','adapter_model.safetensors','README.md'],
+            'base':['config.json','generation_config.json','model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','normalizer.json','added_tokens.json','tokenizer.json','README.md'],
           }
+          forbidden={'.bin','.pt','.pth','.pkl','.pickle','.ckpt','.h5','.msgpack','.py','.ipynb'}
           rows=[]
-          for role,repo in repos.items():
-              sha=adapter_sha if role=='adapter' else base_sha
-              siblings={x['rfilename'] for x in api[role].get('siblings',[])}
+          for role,(repo,rev) in repos.items():
               for name in allow[role]:
-                  if name not in siblings:
-                      continue
-                  url=f'https://huggingface.co/{repo}/resolve/{sha}/{name}?download=true'
-                  out=root/role/name
+                  url=f'https://huggingface.co/{repo}/resolve/{rev}/{name}?download=true'
+                  out=src/role/name
                   out.parent.mkdir(parents=True,exist_ok=True)
-                  with urllib.request.urlopen(url,timeout=180) as r:
-                      b=r.read()
-                  out.write_bytes(b)
-                  rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+                  request=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22517-exact-courier'})
+                  with urllib.request.urlopen(request,timeout=1800) as response, out.open('wb') as handle:
+                      while True:
+                          block=response.read(1024*1024)
+                          if not block: break
+                          handle.write(block)
+                  h=hashlib.sha256()
+                  with out.open('rb') as handle:
+                      for block in iter(lambda:handle.read(1024*1024),b''): h.update(block)
+                  if out.suffix.lower() in forbidden:
+                      raise SystemExit(f'forbidden extension: {out}')
+                  rows.append({'role':role,'repo':repo,'revision':rev,'path':name,'size_bytes':out.stat().st_size,'sha256':h.hexdigest()})
+          if len(rows)!=15:
+              raise SystemExit(f'exact allowlist cardinality mismatch: {len(rows)}')
+          adapter_config=json.loads((src/'adapter/adapter_config.json').read_text())
+          if adapter_config.get('base_model_name_or_path')!='openai/whisper-base' or adapter_config.get('task_type')!='SEQ_2_SEQ_LM':
+              raise SystemExit('adapter config contract mismatch')
+          if sorted(adapter_config.get('target_modules') or [])!=['k_proj','out_proj','q_proj','v_proj'] or adapter_config.get('modules_to_save'):
+              raise SystemExit('adapter topology contract mismatch')
+          headers={}
+          for role,name in [('adapter','adapter_model.safetensors'),('base','model.safetensors')]:
+              path=src/role/name
+              with path.open('rb') as handle:
+                  n=struct.unpack('<Q',handle.read(8))[0]
+                  header=json.loads(handle.read(n))
+              keys=sorted(k for k in header if k!='__metadata__')
+              if not keys: raise SystemExit(f'empty safetensors: {role}')
+              headers[role]={'tensor_count':len(keys),'header_sha256':hashlib.sha256(json.dumps(keys,separators=(',',':')).encode()).hexdigest()}
           receipt={
-            'schema':'LUCIA_AA_R2_25_17_C17_METADATA_ONLY_V1',
+            'schema':'LUCIA_AA_R2_25_17_C17_EXACT_COURIER_V1',
             'candidate_id':'R22517-C17-WHISPER-FRENCH-ASR',
-            'adapter_repo':repos['adapter'],'adapter_revision':adapter_sha,
-            'base_repo':repos['base'],'base_revision':base_sha,
-            'raw_weight_bytes_downloaded':0,
-            'model_output_count':0,
-            'files':rows,
-            'adapter_siblings':sorted(x['rfilename'] for x in api['adapter'].get('siblings',[])),
-            'base_siblings':sorted(x['rfilename'] for x in api['base'].get('siblings',[])),
+            'adapter_repo':repos['adapter'][0],'adapter_revision':repos['adapter'][1],
+            'base_repo':repos['base'][0],'base_revision':repos['base'][1],
+            'source_file_count':len(rows),
+            'raw_weights_committed_to_git':False,
+            'artifact_retention_days':1,
+            'files':rows,'safetensors_headers':headers,
           }
-          (root/'METADATA_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'adapter_revision':adapter_sha,'base_revision':base_sha,'metadata_files':len(rows)},indent=2))
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'files':len(rows),'bytes':sum(r['size_bytes'] for r in rows),'headers':headers},indent=2))
           PY
-      - name: Upload one-day metadata artifact
+      - name: Upload one-day exact source artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22517_C17_METADATA_ONLY
-          path: ${{ runner.temp }}/LAA_R22517_C17_METADATA
+          name: LAA_R22517_C17_EXACT_SOURCE
+          path: ${{ runner.temp }}/LAA_R22517_C17_EXACT_COURIER
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
