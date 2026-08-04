@@ -1,4 +1,4 @@
-name: Temporary LAA R22519 C19 exact metadata audit
+name: Temporary LAA R22519 C19 exact source courier
 
 on:
   pull_request:
@@ -9,89 +9,81 @@ permissions:
   contents: read
 
 jobs:
-  metadata:
+  courier:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Audit two OCR adapters and exact Base without weight download
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download three exact safe source objects and runtime wheels
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22519_C19_EXACT_METADATA"
-          mkdir -p "$ROOT/adapter_v1" "$ROOT/adapter_v102" "$ROOT/base"
+          ROOT="$RUNNER_TEMP/LAA_R22519_C19_EXACT_COURIER"
+          SRC="$ROOT/source"
+          WHEELS="$ROOT/wheelhouse"
+          mkdir -p "$SRC/adapter_v1" "$SRC/adapter_v102" "$SRC/base" "$WHEELS"
+          download() {
+            local repo="$1" rev="$2" path="$3" out="$4"
+            echo "Downloading ${repo}@${rev}/${path}"
+            curl -L --fail --retry 6 --retry-all-errors --connect-timeout 30 --max-time 3600 \
+              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"
+          }
+          A1_REPO='Nzyoka19/nyansapo-ocr-trocr-lora_v1'
+          A1_REV='d453a21ea4397791ec64873622713b96f5e8f0a5'
+          A2_REPO='Nzyoka19/nyansapo-ocr-trocr-lora_v1-0-2'
+          A2_REV='e8c954972d9e45a7edd73306eabf34001c459010'
+          B_REPO='microsoft/trocr-base-handwritten'
+          B_REV='eaacaf452b06415df8f10bb6fad3a4c11e609406'
+          for role in adapter_v1 adapter_v102; do
+            if [ "$role" = adapter_v1 ]; then repo="$A1_REPO";rev="$A1_REV"; else repo="$A2_REPO";rev="$A2_REV"; fi
+            for name in README.md adapter_config.json adapter_model.safetensors preprocessor_config.json tokenizer_config.json special_tokens_map.json tokenizer.json vocab.json merges.txt; do
+              download "$repo" "$rev" "$name" "$SRC/$role/$name"
+            done
+          done
+          for name in README.md config.json generation_config.json model.safetensors preprocessor_config.json tokenizer_config.json special_tokens_map.json vocab.json merges.txt; do
+            download "$B_REPO" "$B_REV" "$name" "$SRC/base/$name"
+          done
+          test "$(stat -c%s "$SRC/adapter_v1/adapter_model.safetensors")" = '20087648'
+          test "$(sha256sum "$SRC/adapter_v1/adapter_model.safetensors" | awk '{print $1}')" = 'e8bb8f347933a7048b5dbeac68c352cb8c2a80df637b158ee6687db19d7697b6'
+          test "$(stat -c%s "$SRC/adapter_v102/adapter_model.safetensors")" = '20087648'
+          test "$(sha256sum "$SRC/adapter_v102/adapter_model.safetensors" | awk '{print $1}')" = '129429aaadc823ba0a3bc119c093f8fe157357cbd9bf34a55a93ffb4bada87f6'
+          test "$(stat -c%s "$SRC/base/model.safetensors")" = '1333384464'
+          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '25a40cddc7e6120140a3d5b9e3dd3878a92ada7b4f312953ab22edc19c2a5acc'
+          if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then
+            echo 'Forbidden source entered courier' >&2; exit 1
+          fi
           python - <<'PY'
-          import hashlib,json,os,pathlib,urllib.parse,urllib.request
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_METADATA'
-          headers={'User-Agent':'LUCIA-Adapter-Archaeology-R22519-ExactMetadata/1.0'}
-          repos={
-            'adapter_v1':'Nzyoka19/nyansapo-ocr-trocr-lora_v1',
-            'adapter_v102':'Nzyoka19/nyansapo-ocr-trocr-lora_v1-0-2',
-            'base':'microsoft/trocr-base-handwritten',
-          }
-          def req(url,timeout=180):
-            r=urllib.request.Request(url,headers=headers)
-            with urllib.request.urlopen(r,timeout=timeout) as h:return h.read(),dict(h.headers)
-          def get_json(url):return json.loads(req(url)[0])
-          apis={role:get_json('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true') for role,repo in repos.items()}
-          small_allow={
-            'adapter_v1':['README.md','adapter_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
-            'adapter_v102':['README.md','adapter_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
-            'base':['README.md','config.json','generation_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
-          }
-          rows=[]; object_rows=[]; errors=[]
-          for role,repo in repos.items():
-            api=apis[role]; sha=api['sha']; sibs=api.get('siblings') or []; byname={x.get('rfilename'):x for x in sibs}
-            for name in small_allow[role]:
-              if name not in byname:continue
-              try:
-                b,_=req(f'https://huggingface.co/{repo}/resolve/{sha}/{name}?download=true')
-              except Exception as e:
-                errors.append({'role':role,'path':name,'error':type(e).__name__+': '+str(e)});continue
-              out=root/role/name;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(b)
-              rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
-            for name in ['adapter_model.safetensors','model.safetensors']:
-              if name not in byname:continue
-              x=byname[name]; lfs=x.get('lfs') or {}; size=x.get('size') or (lfs.get('size') if isinstance(lfs,dict) else None)
-              digest=(lfs.get('sha256') or lfs.get('oid')) if isinstance(lfs,dict) else None
-              object_rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':size,'sha256':digest,'blob_id':x.get('blobId'),'xet_hash':x.get('xetHash')})
-          def load(role,name):
-            p=root/role/name
-            return json.loads(p.read_text()) if p.is_file() else None
-          cfg1=load('adapter_v1','adapter_config.json');cfg2=load('adapter_v102','adapter_config.json');basecfg=load('base','config.json')
-          semantic_files=['preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt']
-          semantic={}
-          for name in semantic_files:
-            vals={}
-            for role in repos:
-              p=root/role/name
-              if p.is_file():vals[role]={'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'size_bytes':p.stat().st_size}
-            semantic[name]=vals
-          forbidden=[]
-          for role,api in apis.items():
-            for x in api.get('siblings') or []:
-              n=str(x.get('rfilename',''))
-              if n.endswith(('.bin','.pt','.pth','.pkl','.pickle','.ckpt','.h5','.msgpack','.py','.ipynb')):forbidden.append({'role':role,'path':n})
-          receipt={
-            'schema':'LUCIA_AA_R2_25_19_C19_EXACT_METADATA_AUDIT_V1',
-            'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'repos':repos,
-            'revisions':{r:apis[r]['sha'] for r in repos},'licenses':{r:(apis[r].get('cardData') or {}).get('license') for r in repos},
-            'pipelines':{r:apis[r].get('pipeline_tag') for r in repos},'metadata_files':rows,'weight_objects':object_rows,'semantic_file_comparison':semantic,
-            'adapter_config_v1':cfg1,'adapter_config_v102':cfg2,'base_config_summary':{
-              'model_type':basecfg.get('model_type') if basecfg else None,'architectures':basecfg.get('architectures') if basecfg else None,
-              'encoder_model_type':((basecfg or {}).get('encoder') or {}).get('model_type'),'decoder_model_type':((basecfg or {}).get('decoder') or {}).get('model_type'),
-              'decoder_layers':((basecfg or {}).get('decoder') or {}).get('decoder_layers'),
-            },
-            'forbidden_siblings_not_downloaded':forbidden,'errors':errors,
-            'selection_boundary':'PAIRED_LONGITUDINAL_OCR_STUDY; EXACTLY THESE TWO ADAPTERS SHARE ONE BASE; WEIGHTS REMAIN ZERO UNTIL OUTPUT-INDEPENDENT PRESEAL',
-          }
-          (root/'C19_EXACT_METADATA_AUDIT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'revisions':receipt['revisions'],'licenses':receipt['licenses'],'weight_objects':object_rows,'adapter_configs':{'v1':cfg1,'v102':cfg2},'errors':errors},indent=2))
+          import json,struct,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_COURIER'/'source'
+          for rel in ('adapter_v1/adapter_model.safetensors','adapter_v102/adapter_model.safetensors','base/model.safetensors'):
+            with (root/rel).open('rb') as f:
+              n=struct.unpack('<Q',f.read(8))[0]; h=json.loads(f.read(n))
+            tensors=[k for k in h if k!='__metadata__']
+            if not tensors: raise SystemExit(f'empty safetensors {rel}')
+            print(rel,len(tensors),'tensors')
+          PY
+          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
+            'transformers==4.57.1' 'peft==0.18.1' 'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'safetensors==0.7.0'
+          (cd "$ROOT" && find source wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > SHA256_MANIFEST.txt)
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_COURIER'; rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
+            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          receipt={'schema':'LUCIA_AA_R2_25_19_C19_EXACT_COURIER_V1','candidate_id':'R22519-C19-NYANSAPO-OCR-LONGITUDINAL','attempt_id':'R22519-C19-SINGLE-EXACT-INGRESS-1','source_file_count':27,'weight_object_count':3,'raw_weights_committed_to_git':False,'artifact_retention_days':1,'files':rows}
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22519_C19_EXACT_METADATA
-          path: ${{ runner.temp }}/LAA_R22519_C19_EXACT_METADATA
+          name: LAA_R22519_C19_EXACT_SOURCE
+          path: ${{ runner.temp }}/LAA_R22519_C19_EXACT_COURIER
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
