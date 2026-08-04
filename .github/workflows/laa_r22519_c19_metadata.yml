@@ -1,4 +1,4 @@
-name: Temporary LAA R22519 C19 metadata-only discovery
+name: Temporary LAA R22519 C19 exact metadata audit
 
 on:
   pull_request:
@@ -11,184 +11,87 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Compare new output geometries with zero weight bytes
+      - name: Audit two OCR adapters and exact Base without weight download
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22519_C19_METADATA"
-          mkdir -p "$ROOT"
+          ROOT="$RUNNER_TEMP/LAA_R22519_C19_EXACT_METADATA"
+          mkdir -p "$ROOT/adapter_v1" "$ROOT/adapter_v102" "$ROOT/base"
           python - <<'PY'
-          import csv, hashlib, json, os, pathlib, time, urllib.parse, urllib.request
-
-          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'LAA_R22519_C19_METADATA'
-          headers = {'User-Agent': 'LUCIA-Adapter-Archaeology-R22519-MetadataOnly/1.0'}
-
-          specific = [
-              'Nzyoka19/nyansapo-ocr-trocr-lora_v1',
-              'Nzyoka19/nyansapo-ocr-trocr-lora_v1-0-2',
-              'igzi/depth-anything-v2-large-lora-booster',
-              'igzi/metric3d-vit-giant2-lora-booster',
-          ]
-          queries = [
-              'trocr lora peft',
-              'ocr lora adapter_model safetensors',
-              'semantic segmentation lora peft',
-              'segformer lora adapter_model safetensors',
-              'object detection lora peft',
-              'detr lora adapter_model safetensors',
-              'depth estimation lora peft',
-          ]
-
-          def get_json(url, timeout=90):
-              req=urllib.request.Request(url,headers=headers)
-              with urllib.request.urlopen(req,timeout=timeout) as r:
-                  return json.load(r)
-
-          def get_bytes(url, timeout=90):
-              req=urllib.request.Request(url,headers=headers)
-              with urllib.request.urlopen(req,timeout=timeout) as r:
-                  return r.read()
-
-          model_ids=set(specific)
-          query_hits={}
-          for q in queries:
+          import hashlib,json,os,pathlib,urllib.parse,urllib.request
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_METADATA'
+          headers={'User-Agent':'LUCIA-Adapter-Archaeology-R22519-ExactMetadata/1.0'}
+          repos={
+            'adapter_v1':'Nzyoka19/nyansapo-ocr-trocr-lora_v1',
+            'adapter_v102':'Nzyoka19/nyansapo-ocr-trocr-lora_v1-0-2',
+            'base':'microsoft/trocr-base-handwritten',
+          }
+          def req(url,timeout=180):
+            r=urllib.request.Request(url,headers=headers)
+            with urllib.request.urlopen(r,timeout=timeout) as h:return h.read(),dict(h.headers)
+          def get_json(url):return json.loads(req(url)[0])
+          apis={role:get_json('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true') for role,repo in repos.items()}
+          small_allow={
+            'adapter_v1':['README.md','adapter_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
+            'adapter_v102':['README.md','adapter_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
+            'base':['README.md','config.json','generation_config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt'],
+          }
+          rows=[]; object_rows=[]; errors=[]
+          for role,repo in repos.items():
+            api=apis[role]; sha=api['sha']; sibs=api.get('siblings') or []; byname={x.get('rfilename'):x for x in sibs}
+            for name in small_allow[role]:
+              if name not in byname:continue
               try:
-                  rows=get_json('https://huggingface.co/api/models?'+urllib.parse.urlencode({'search':q,'limit':100,'full':'true'}))
-                  query_hits[q]={'count':len(rows)}
-                  for row in rows:
-                      mid=row.get('id') or row.get('modelId')
-                      if mid: model_ids.add(mid)
+                b,_=req(f'https://huggingface.co/{repo}/resolve/{sha}/{name}?download=true')
               except Exception as e:
-                  query_hits[q]={'count':0,'error':type(e).__name__+': '+str(e)}
-              time.sleep(.1)
-
-          errors=[]; candidates=[]
-          for mid in sorted(model_ids):
-              try:
-                  api=get_json('https://huggingface.co/api/models/'+urllib.parse.quote(mid,safe='/'))
-              except Exception as e:
-                  errors.append({'model_id':mid,'stage':'api','error':type(e).__name__+': '+str(e)})
-                  continue
-              siblings=api.get('siblings') or []
-              names={x.get('rfilename') for x in siblings if x.get('rfilename')}
-              if 'adapter_config.json' not in names or 'adapter_model.safetensors' not in names:
-                  continue
-              sha=api.get('sha')
-              if not sha: continue
-              try:
-                  cfg_bytes=get_bytes(f'https://huggingface.co/{mid}/resolve/{sha}/adapter_config.json?download=true')
-                  cfg=json.loads(cfg_bytes)
-              except Exception as e:
-                  errors.append({'model_id':mid,'stage':'adapter_config','error':type(e).__name__+': '+str(e)})
-                  continue
-              readme_bytes=b''
-              if 'README.md' in names:
-                  try: readme_bytes=get_bytes(f'https://huggingface.co/{mid}/resolve/{sha}/README.md?download=true')
-                  except Exception as e: errors.append({'model_id':mid,'stage':'README','error':type(e).__name__+': '+str(e)})
-              card=api.get('cardData') or {}; tags=api.get('tags') or []
-              base=cfg.get('base_model_name_or_path') or card.get('base_model')
-              weight=next((x for x in siblings if x.get('rfilename')=='adapter_model.safetensors'),{})
-              weight_size=weight.get('size')
-              if weight_size is None and isinstance(weight.get('lfs'),dict): weight_size=weight['lfs'].get('size')
-              weight_sha=None
-              if isinstance(weight.get('lfs'),dict): weight_sha=weight['lfs'].get('sha256') or weight['lfs'].get('oid')
-              if not weight_sha: weight_sha=weight.get('blobId')
-
-              text=' '.join([mid,str(api.get('pipeline_tag') or ''),' '.join(map(str,tags)),str(card.get('datasets') or ''),readme_bytes.decode('utf-8','replace')[:12000],json.dumps(cfg,sort_keys=True)])
-              low=text.lower()
-              if any(x in low for x in ['trocr','ocr','image-to-text','image-text-to-text']):
-                  lane='OCR_IMAGE_TO_TEXT'; geometry='2D glyph image -> autoregressive text sequence'; verifier='exact/CER/WER + glyph-render lineage + negative blank/noise hallucination'
-              elif any(x in low for x in ['semantic-segmentation','semantic segmentation','segformer']):
-                  lane='SEMANTIC_SEGMENTATION'; geometry='per-pixel class mask'; verifier='pixel IoU/Dice/boundary + shape/topology oracle'
-              elif any(x in low for x in ['object-detection','object detection','detr']):
-                  lane='OBJECT_DETECTION'; geometry='set of class-labeled bounding boxes'; verifier='Hungarian match + IoU/class/count oracle'
-              elif any(x in low for x in ['depth-estimation','depth estimation','depth-anything','metric3d']):
-                  lane='DEPTH_ESTIMATION'; geometry='dense continuous relative/metric depth map'; verifier='scale/shift aligned error + ordering/edge oracle'
-              else:
-                  lane='OTHER'; geometry='unknown'; verifier='unknown'
-
-              base_api=None; base_err=None; base_sha=None; base_size=None; base_st=[]; base_license=None; base_pipeline=None; base_custom=[]
-              if isinstance(base,str) and '/' in base and not base.startswith('/'):
-                  try:
-                      base_api=get_json('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/'))
-                      base_sha=base_api.get('sha'); base_pipeline=base_api.get('pipeline_tag'); base_license=(base_api.get('cardData') or {}).get('license')
-                      bs=base_api.get('siblings') or []
-                      base_st=[x for x in bs if str(x.get('rfilename','')).endswith('.safetensors')]
-                      sizes=[]
-                      for x in base_st:
-                          s=x.get('size')
-                          if s is None and isinstance(x.get('lfs'),dict): s=x['lfs'].get('size')
-                          if isinstance(s,int): sizes.append(s)
-                      if sizes: base_size=sum(sizes)
-                      base_custom=[x.get('rfilename') for x in bs if str(x.get('rfilename','')).endswith('.py')]
-                  except Exception as e: base_err=type(e).__name__+': '+str(e)
-
-              custom=[n for n in names if n.endswith('.py') or n.endswith('.ipynb')]
-              license_value=card.get('license') or api.get('license')
-              processor_present=any(n in names for n in ['preprocessor_config.json','processor_config.json','tokenizer_config.json'])
-              score=0; reasons=[]; holds=[]
-              if lane!='OTHER': score+=25; reasons.append('new_output_geometry')
-              if license_value: score+=10; reasons.append('license_present')
-              else: holds.append('adapter_license_missing')
-              if isinstance(base,str) and '/' in base: score+=10; reasons.append('base_declared')
-              else: holds.append('base_binding_missing_or_local')
-              if base_st: score+=10; reasons.append('base_safetensors')
-              else: holds.append('base_safetensors_missing')
-              if not custom and not base_custom: score+=10; reasons.append('no_custom_python')
-              else: holds.append('custom_code_present')
-              if processor_present: score+=5; reasons.append('processor_metadata_present')
-              if cfg.get('target_modules'): score+=10; reasons.append('target_modules_present')
-              else: holds.append('target_modules_missing')
-              if not cfg.get('modules_to_save'): score+=5; reasons.append('no_auxiliary_modules')
-              else: reasons.append('auxiliary_modules_present')
-              if isinstance(weight_size,int):
-                  if weight_size<=100_000_000: score+=10; reasons.append('adapter_under_100MB')
-                  elif weight_size<=500_000_000: score+=4; reasons.append('adapter_under_500MB')
-              if isinstance(base_size,int):
-                  if base_size<=600_000_000: score+=12; reasons.append('base_under_600MB')
-                  elif base_size<=1_500_000_000: score+=8; reasons.append('base_under_1.5GB')
-                  elif base_size<=4_000_000_000: score+=2; reasons.append('base_under_4GB')
-                  else: holds.append('base_over_4GB')
-              task_type=cfg.get('task_type')
-              if task_type is None or isinstance(task_type,str): score+=3; reasons.append('task_type_parseable')
-              else: holds.append('task_type_invalid_type')
-              if lane=='OCR_IMAGE_TO_TEXT': score+=7; reasons.append('strong_procedural_exact_oracle')
-              elif lane=='SEMANTIC_SEGMENTATION': score+=6; reasons.append('strong_pixel_oracle')
-              elif lane=='OBJECT_DETECTION': score+=5; reasons.append('strong_set_oracle')
-              elif lane=='DEPTH_ESTIMATION': score+=3; reasons.append('continuous_oracle_more_confounded')
-
-              candidates.append({
-                  'model_id':mid,'revision':sha,'lane':lane,'output_geometry':geometry,'verifier_plan':verifier,
-                  'pipeline_tag':api.get('pipeline_tag'),'library_name':api.get('library_name'),'tags':tags,
-                  'license':license_value,'datasets':card.get('datasets'),'base_model':base,'base_revision_current':base_sha,
-                  'base_pipeline_tag':base_pipeline,'base_license':base_license,'base_safetensors_bytes_known':base_size,
-                  'base_safetensors_count':len(base_st),'base_custom_code_files':base_custom,'base_api_error':base_err,
-                  'adapter_weight_size_known':weight_size,'adapter_weight_sha_known':weight_sha,
-                  'adapter_config_sha256':hashlib.sha256(cfg_bytes).hexdigest(),'readme_sha256':hashlib.sha256(readme_bytes).hexdigest() if readme_bytes else None,
-                  'peft_type':cfg.get('peft_type'),'task_type':task_type,'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),
-                  'target_modules':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora'),
-                  'processor_metadata_present':processor_present,'custom_repo_files':custom,'metadata_score':score,'score_reasons':reasons,'hold_reasons':holds,
-                  'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'sibling_names':sorted(names),
-              })
-              time.sleep(.06)
-
-          candidates.sort(key=lambda c:(-c['metadata_score'],c['model_id']))
-          receipt={'schema':'LUCIA_AA_R2_25_19_C19_METADATA_DISCOVERY_V1','raw_weight_bytes_downloaded':0,'model_outputs_observed':0,
-                   'queries':queries,'query_hits':query_hits,'unique_models_seen':len(model_ids),'adapter_candidates_found':len(candidates),
-                   'candidates':candidates,'errors':errors}
-          (root/'C19_METADATA_DISCOVERY.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          with (root/'C19_METADATA_DISCOVERY.csv').open('w',newline='') as f:
-              w=csv.writer(f); w.writerow(['score','lane','model_id','revision','base_model','task_type','rank','adapter_bytes','base_bytes','license','holds'])
-              for c in candidates: w.writerow([c['metadata_score'],c['lane'],c['model_id'],c['revision'],c['base_model'],c['task_type'],c['rank'],c['adapter_weight_size_known'],c['base_safetensors_bytes_known'],c['license'],';'.join(c['hold_reasons'])])
-          print(json.dumps({'candidate_count':len(candidates),'top':[{k:c.get(k) for k in ['metadata_score','lane','model_id','base_model','rank','adapter_weight_size_known','base_safetensors_bytes_known','license','hold_reasons']} for c in candidates[:20]]},indent=2))
+                errors.append({'role':role,'path':name,'error':type(e).__name__+': '+str(e)});continue
+              out=root/role/name;out.parent.mkdir(parents=True,exist_ok=True);out.write_bytes(b)
+              rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+            for name in ['adapter_model.safetensors','model.safetensors']:
+              if name not in byname:continue
+              x=byname[name]; lfs=x.get('lfs') or {}; size=x.get('size') or (lfs.get('size') if isinstance(lfs,dict) else None)
+              digest=(lfs.get('sha256') or lfs.get('oid')) if isinstance(lfs,dict) else None
+              object_rows.append({'role':role,'repo':repo,'revision':sha,'path':name,'size_bytes':size,'sha256':digest,'blob_id':x.get('blobId'),'xet_hash':x.get('xetHash')})
+          def load(role,name):
+            p=root/role/name
+            return json.loads(p.read_text()) if p.is_file() else None
+          cfg1=load('adapter_v1','adapter_config.json');cfg2=load('adapter_v102','adapter_config.json');basecfg=load('base','config.json')
+          semantic_files=['preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','tokenizer.json','vocab.json','merges.txt']
+          semantic={}
+          for name in semantic_files:
+            vals={}
+            for role in repos:
+              p=root/role/name
+              if p.is_file():vals[role]={'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'size_bytes':p.stat().st_size}
+            semantic[name]=vals
+          forbidden=[]
+          for role,api in apis.items():
+            for x in api.get('siblings') or []:
+              n=str(x.get('rfilename',''))
+              if n.endswith(('.bin','.pt','.pth','.pkl','.pickle','.ckpt','.h5','.msgpack','.py','.ipynb')):forbidden.append({'role':role,'path':n})
+          receipt={
+            'schema':'LUCIA_AA_R2_25_19_C19_EXACT_METADATA_AUDIT_V1',
+            'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'repos':repos,
+            'revisions':{r:apis[r]['sha'] for r in repos},'licenses':{r:(apis[r].get('cardData') or {}).get('license') for r in repos},
+            'pipelines':{r:apis[r].get('pipeline_tag') for r in repos},'metadata_files':rows,'weight_objects':object_rows,'semantic_file_comparison':semantic,
+            'adapter_config_v1':cfg1,'adapter_config_v102':cfg2,'base_config_summary':{
+              'model_type':basecfg.get('model_type') if basecfg else None,'architectures':basecfg.get('architectures') if basecfg else None,
+              'encoder_model_type':((basecfg or {}).get('encoder') or {}).get('model_type'),'decoder_model_type':((basecfg or {}).get('decoder') or {}).get('model_type'),
+              'decoder_layers':((basecfg or {}).get('decoder') or {}).get('decoder_layers'),
+            },
+            'forbidden_siblings_not_downloaded':forbidden,'errors':errors,
+            'selection_boundary':'PAIRED_LONGITUDINAL_OCR_STUDY; EXACTLY THESE TWO ADAPTERS SHARE ONE BASE; WEIGHTS REMAIN ZERO UNTIL OUTPUT-INDEPENDENT PRESEAL',
+          }
+          (root/'C19_EXACT_METADATA_AUDIT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'revisions':receipt['revisions'],'licenses':receipt['licenses'],'weight_objects':object_rows,'adapter_configs':{'v1':cfg1,'v102':cfg2},'errors':errors},indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22519_C19_METADATA_ONLY
-          path: ${{ runner.temp }}/LAA_R22519_C19_METADATA
+          name: LAA_R22519_C19_EXACT_METADATA
+          path: ${{ runner.temp }}/LAA_R22519_C19_EXACT_METADATA
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
