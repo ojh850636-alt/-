@@ -1,4 +1,4 @@
-name: Temporary LAA R22520 C20 exact embedding metadata audit
+name: Temporary LAA R22520 C20 exact source courier
 
 on:
   pull_request:
@@ -9,113 +9,73 @@ permissions:
   contents: read
 
 jobs:
-  metadata:
+  courier:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - name: Audit exact embedding candidates without weight bytes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact allowlisted Florence-2 source and runtime wheels
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22520_C20_EMBEDDING_METADATA"
-          mkdir -p "$ROOT/files"
+          ROOT="$RUNNER_TEMP/LAA_R22520_C20_EXACT_COURIER"
+          SRC="$ROOT/source"
+          WHEELS="$ROOT/wheelhouse"
+          mkdir -p "$SRC/adapter" "$SRC/base" "$WHEELS"
+          download() {
+            local repo="$1" rev="$2" path="$3" out="$4"
+            curl -L --fail --retry 6 --retry-all-errors --connect-timeout 30 --max-time 3600 \
+              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"
+          }
+          A_REPO='amayuelas/plot-visualization-florence-2-lora-32'
+          A_REV='982466575b92c963e15ab9b6cbc83a7b561ff874'
+          B_REPO='microsoft/Florence-2-base-ft'
+          B_REV='f6c1a25888ffc1d945ee8a1a77ac833c7303d46e'
+          for name in README.md adapter_config.json adapter_model.safetensors added_tokens.json merges.txt preprocessor_config.json special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json; do
+            download "$A_REPO" "$A_REV" "$name" "$SRC/adapter/$name"
+          done
+          for name in README.md LICENSE config.json model.safetensors preprocessor_config.json tokenizer.json tokenizer_config.json vocab.json; do
+            download "$B_REPO" "$B_REV" "$name" "$SRC/base/$name"
+          done
+          test "$(stat -c%s "$SRC/adapter/adapter_model.safetensors")" = '41397480'
+          test "$(sha256sum "$SRC/adapter/adapter_model.safetensors" | awk '{print $1}')" = '9cce33ab4f9d48794c250ffadd4ed5ca347922e06fe41ca1eadcb83f865c5afb'
+          test "$(stat -c%s "$SRC/base/model.safetensors")" = '463221266'
+          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '58757d657ff44051314c8030b68e04cb1bb618ca9a4885418f111f6fb708185a'
+          if find "$SRC" -type f \( -name '*.py' -o -name '*.ipynb' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' \) | grep -q .; then
+            echo 'Forbidden source entered courier' >&2; exit 1
+          fi
           python - <<'PY'
-          import hashlib, json, os, pathlib, urllib.parse, urllib.request
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_EMBEDDING_METADATA'
-          headers={'User-Agent':'LUCIA-AA-R22520-Embedding-Metadata/1.0'}
-          repos=[
-            'vahidthegreat/StanceAware-SBERT',
-            'richardyoung/CardioEmbed-BGE-small-v1.5',
-            'richardyoung/CardioEmbed-BGE-M3',
-            'richardyoung/CardioEmbed-MPNet-base',
-            'Trongnhat191/bge-m3-lora-article-v1',
-            'Isaac74/qwen3-0.6b-lightweight-semantic-mathlib-search-adapter',
-          ]
-          def getj(url,t=90):
-            req=urllib.request.Request(url,headers=headers)
-            with urllib.request.urlopen(req,timeout=t) as r:return json.load(r)
-          def getb(url,t=120):
-            req=urllib.request.Request(url,headers=headers)
-            with urllib.request.urlopen(req,timeout=t) as r:return r.read()
-          def info(row):
-            if not isinstance(row,dict):return None,None
-            size=row.get('size');sha=row.get('blobId') or row.get('xetHash');lfs=row.get('lfs')
-            if isinstance(lfs,dict):size=size if isinstance(size,int) else lfs.get('size');sha=lfs.get('sha256') or lfs.get('oid') or sha
-            if isinstance(sha,str) and sha.startswith('sha256:'):sha=sha.split(':',1)[1]
-            return size if isinstance(size,int) else None,sha
-          rows=[];errors=[]
-          for repo in repos:
-            try:api=getj('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/'))
-            except Exception as e:errors.append({'repo':repo,'stage':'api','error':type(e).__name__+': '+str(e)});continue
-            rev=api.get('sha');sib=api.get('siblings') or [];by={x.get('rfilename'):x for x in sib if x.get('rfilename')};card=api.get('cardData') or {}
-            if 'adapter_config.json' not in by or 'adapter_model.safetensors' not in by:
-              rows.append({'repo':repo,'revision':rev,'verdict':'REJECT_NOT_STANDARD_ROOT_PEFT','sibling_names':sorted(by),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0});continue
-            try:cfgb=getb(f'https://huggingface.co/{repo}/resolve/{rev}/adapter_config.json?download=true');cfg=json.loads(cfgb)
-            except Exception as e:errors.append({'repo':repo,'stage':'config','error':type(e).__name__+': '+str(e)});continue
-            rmb=b''
-            if 'README.md' in by:
-              try:rmb=getb(f'https://huggingface.co/{repo}/resolve/{rev}/README.md?download=true')
-              except Exception as e:errors.append({'repo':repo,'stage':'readme','error':type(e).__name__+': '+str(e)})
-            base=cfg.get('base_model_name_or_path') or card.get('base_model')
-            if isinstance(base,list):base=base[0] if base else None
-            bapi={};brev=None;blic=None;bpipeline=None;blibrary=None;bfiles=[];bbytes=None;bcustom=[];berror=None
-            if isinstance(base,str) and '/' in base and not base.startswith('/'):
-              try:
-                bapi=getj('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/'));brev=bapi.get('sha');bcard=bapi.get('cardData') or {};blic=bcard.get('license') or bapi.get('license');bpipeline=bapi.get('pipeline_tag');blibrary=bapi.get('library_name');sizes=[]
-                for x in bapi.get('siblings') or []:
-                  name=str(x.get('rfilename') or '')
-                  if name.endswith('.py'):bcustom.append(name)
-                  if name.endswith('.safetensors'):
-                    sz,sh=info(x);bfiles.append({'path':name,'size_bytes':sz,'sha256_or_oid':sh});
-                    if isinstance(sz,int):sizes.append(sz)
-                if sizes and len(sizes)==len(bfiles):bbytes=sum(sizes)
-              except Exception as e:berror=type(e).__name__+': '+str(e)
-            asz,asha=info(by.get('adapter_model.safetensors'));lic=card.get('license') or api.get('license');custom=sorted(x for x in by if str(x).endswith('.py'));holds=[];score=0
-            if lic:score+=10
-            else:holds.append('LICENSE_MISSING')
-            if isinstance(base,str) and '/' in base:score+=10
-            else:holds.append('BASE_UNPINNABLE')
-            if bfiles:score+=10
-            else:holds.append('BASE_SAFETENSORS_MISSING')
-            if not custom and not bcustom:score+=10
-            else:holds.append('CUSTOM_PYTHON')
-            if cfg.get('target_modules'):score+=10
-            else:holds.append('TARGETS_MISSING')
-            if not cfg.get('modules_to_save'):score+=10
-            else:holds.append('AUXILIARY_MODULES')
-            if cfg.get('task_type') in ('FEATURE_EXTRACTION',None):score+=5
-            else:holds.append('TASK_TYPE_NOT_EMBEDDING')
-            if isinstance(asz,int):
-              if asz<=20_000_000:score+=15
-              elif asz<=100_000_000:score+=8
-              else:holds.append('ADAPTER_LARGE')
-            else:holds.append('ADAPTER_SIZE_UNKNOWN')
-            if isinstance(bbytes,int):
-              if bbytes<=500_000_000:score+=15
-              elif bbytes<=1_500_000_000:score+=10
-              elif bbytes<=4_000_000_000:score+=3
-              else:holds.append('BASE_OVER_4GB')
-            else:holds.append('BASE_SIZE_UNKNOWN')
-            text=(rmb.decode('utf-8','ignore')+' '+json.dumps(card,sort_keys=True)).lower()
-            task='UNKNOWN'
-            if 'stance' in text:task='STANCE_RELATION_EMBEDDING';score+=10
-            elif 'cardio' in text or 'medical' in text:task='DOMAIN_MEDICAL_RETRIEVAL';score+=7;holds.append('HIGH_STAKES_DOMAIN_REQUIRES_SCOPED_TERMINOLOGY_ONLY')
-            elif 'mathlib' in text or 'lean4' in text:task='FORMAL_MATH_RETRIEVAL';score+=10
-            elif 'article' in text:task='ARTICLE_RETRIEVAL';score+=5
-            else:holds.append('TASK_CONTRACT_UNCLEAR')
-            folder=root/'files'/repo.replace('/','__');folder.mkdir(parents=True,exist_ok=True);(folder/'adapter_config.json').write_bytes(cfgb)
-            if rmb:(folder/'README.md').write_bytes(rmb)
-            rows.append({'repo':repo,'revision':rev,'license':lic,'pipeline_tag':api.get('pipeline_tag'),'library_name':api.get('library_name'),'task_contract':task,'metadata_score':score,'holds':holds,'adapter_weight_size_known':asz,'adapter_weight_sha_known':asha,'adapter_config_sha256':hashlib.sha256(cfgb).hexdigest(),'readme_sha256':hashlib.sha256(rmb).hexdigest() if rmb else None,'base_model':base,'base_revision_current':brev,'base_license':blic,'base_pipeline_tag':bpipeline,'base_library_name':blibrary,'base_safetensors_files':bfiles,'base_safetensors_bytes_known':bbytes,'base_custom_python_files':bcustom,'base_api_error':berror,'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora'),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'sibling_names':sorted(by)})
-          rows.sort(key=lambda x:(-int(x.get('metadata_score',-1)),x['repo']))
-          rec={'schema':'LUCIA_AA_R2_25_20_C20_EMBEDDING_METADATA_AUDIT_V1','raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidate_count':len(rows),'candidates':rows,'errors':errors}
-          (root/'C20_EMBEDDING_METADATA_AUDIT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
-          print(json.dumps(rec,indent=2))
+          import json,struct,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_EXACT_COURIER'/'source'
+          for rel in ('adapter/adapter_model.safetensors','base/model.safetensors'):
+            with (root/rel).open('rb') as f:
+              n=struct.unpack('<Q',f.read(8))[0];h=json.loads(f.read(n))
+            tensors=[k for k in h if k!='__metadata__']
+            if not tensors:raise SystemExit(f'empty safetensors {rel}')
+            print(rel,len(tensors),'tensors')
+          PY
+          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
+            'transformers==4.57.1' 'peft==0.19.1' 'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'pillow==12.2.0' 'safetensors==0.7.0'
+          (cd "$ROOT" && find source wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > SHA256_MANIFEST.txt)
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_EXACT_COURIER';rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
+            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          receipt={'schema':'LUCIA_AA_R2_25_20_C20_EXACT_COURIER_V1','candidate_id':'R22520-C20-FLORENCE2-SUBPLOT-DETECTION','adapter_revision':'982466575b92c963e15ab9b6cbc83a7b561ff874','base_revision':'f6c1a25888ffc1d945ee8a1a77ac833c7303d46e','source_file_count':18,'raw_weights_committed_to_git':False,'artifact_retention_days':1,'files':rows}
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22520_C20_EMBEDDING_METADATA_AUDIT
-          path: ${{ runner.temp }}/LAA_R22520_C20_EMBEDDING_METADATA
+          name: LAA_R22520_C20_EXACT_SOURCE
+          path: ${{ runner.temp }}/LAA_R22520_C20_EXACT_COURIER
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
