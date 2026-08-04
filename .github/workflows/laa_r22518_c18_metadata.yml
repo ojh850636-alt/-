@@ -1,0 +1,232 @@
+name: Temporary LAA R22518 C18 metadata-only discovery
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Discover new output geometries without downloading weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22518_C18_METADATA"
+          mkdir -p "$ROOT"
+          python - <<'PY'
+          import csv, hashlib, json, os, pathlib, time, urllib.parse, urllib.request
+
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'LAA_R22518_C18_METADATA'
+          queries = [
+              'semantic segmentation lora peft',
+              'segformer lora',
+              'sam lora peft',
+              'object detection lora peft',
+              'depth estimation lora peft',
+              'image segmentation adapter_model safetensors',
+              'segmentation adapter_model safetensors',
+          ]
+          headers = {'User-Agent': 'LUCIA-Adapter-Archaeology-R22518-MetadataOnly/1.0'}
+
+          def get_json(url, timeout=90):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return json.load(r)
+
+          def get_bytes(url, timeout=90):
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return r.read()
+
+          models = {}
+          query_hits = {}
+          for q in queries:
+              url = 'https://huggingface.co/api/models?' + urllib.parse.urlencode({'search': q, 'limit': 100, 'full': 'true'})
+              try:
+                  rows = get_json(url)
+              except Exception as e:
+                  query_hits[q] = {'error': type(e).__name__ + ': ' + str(e), 'count': 0}
+                  continue
+              query_hits[q] = {'count': len(rows)}
+              for row in rows:
+                  mid = row.get('id') or row.get('modelId')
+                  if mid:
+                      models[mid] = row
+              time.sleep(0.15)
+
+          candidates = []
+          errors = []
+          for mid in sorted(models):
+              try:
+                  api = get_json('https://huggingface.co/api/models/' + urllib.parse.quote(mid, safe='/'))
+              except Exception as e:
+                  errors.append({'model_id': mid, 'stage': 'model_api', 'error': type(e).__name__ + ': ' + str(e)})
+                  continue
+              siblings = api.get('siblings') or []
+              names = {x.get('rfilename') for x in siblings}
+              if 'adapter_config.json' not in names or 'adapter_model.safetensors' not in names:
+                  continue
+              sha = api.get('sha')
+              if not sha:
+                  continue
+              try:
+                  cfg_bytes = get_bytes(f'https://huggingface.co/{mid}/resolve/{sha}/adapter_config.json?download=true')
+                  cfg = json.loads(cfg_bytes)
+              except Exception as e:
+                  errors.append({'model_id': mid, 'stage': 'adapter_config', 'error': type(e).__name__ + ': ' + str(e)})
+                  continue
+
+              card = api.get('cardData') or {}
+              tags = api.get('tags') or []
+              base = cfg.get('base_model_name_or_path') or card.get('base_model')
+              weight = next((x for x in siblings if x.get('rfilename') == 'adapter_model.safetensors'), {})
+              weight_lfs = weight.get('lfs') or weight.get('xetHash') or {}
+              weight_size = weight.get('size') or (weight_lfs.get('size') if isinstance(weight_lfs, dict) else None)
+              weight_sha = None
+              if isinstance(weight_lfs, dict):
+                  weight_sha = weight_lfs.get('sha256') or weight_lfs.get('oid')
+              if not weight_sha:
+                  weight_sha = weight.get('blobId')
+
+              base_api = None
+              base_error = None
+              base_safetensors_bytes = None
+              base_has_safetensors = False
+              base_sha = None
+              base_pipeline = None
+              base_license = None
+              if isinstance(base, str) and '/' in base and not base.startswith('/'):
+                  try:
+                      base_api = get_json('https://huggingface.co/api/models/' + urllib.parse.quote(base, safe='/'))
+                      base_sha = base_api.get('sha')
+                      base_pipeline = base_api.get('pipeline_tag')
+                      base_license = (base_api.get('cardData') or {}).get('license')
+                      bs = base_api.get('siblings') or []
+                      st = [x for x in bs if str(x.get('rfilename','')).endswith('.safetensors')]
+                      base_has_safetensors = bool(st)
+                      sizes=[]
+                      for x in st:
+                          s=x.get('size')
+                          if s is None and isinstance(x.get('lfs'),dict): s=x['lfs'].get('size')
+                          if isinstance(s,int): sizes.append(s)
+                      if sizes: base_safetensors_bytes=sum(sizes)
+                  except Exception as e:
+                      base_error = type(e).__name__ + ': ' + str(e)
+
+              text = ' '.join([mid, str(api.get('pipeline_tag') or ''), str(api.get('library_name') or ''), ' '.join(map(str,tags)), str(card.get('datasets') or ''), str(card.get('license') or ''), json.dumps(cfg, sort_keys=True)])
+              lower = text.lower()
+              modality = 'OTHER'
+              output_geometry = 'unknown'
+              if 'semantic-segmentation' in lower or 'segformer' in lower or 'semantic segmentation' in lower:
+                  modality='SEMANTIC_SEGMENTATION'; output_geometry='per-pixel class logits/mask'
+              elif 'image-segmentation' in lower or 'segment-anything' in lower or '/sam' in lower or ' sam' in lower:
+                  modality='PROMPTED_IMAGE_SEGMENTATION'; output_geometry='binary/instance masks'
+              elif 'object-detection' in lower or 'object detection' in lower or 'detr' in lower:
+                  modality='OBJECT_DETECTION'; output_geometry='set of boxes/classes'
+              elif 'depth-estimation' in lower or 'depth estimation' in lower or 'dpt' in lower:
+                  modality='DEPTH_ESTIMATION'; output_geometry='dense continuous depth map'
+
+              license_value = card.get('license') or api.get('license')
+              task_type = cfg.get('task_type')
+              targets = cfg.get('target_modules')
+              modules_to_save = cfg.get('modules_to_save')
+              score = 0
+              reasons=[]
+              if modality in {'SEMANTIC_SEGMENTATION','PROMPTED_IMAGE_SEGMENTATION','OBJECT_DETECTION','DEPTH_ESTIMATION'}:
+                  score += 25; reasons.append('new_dense_or_set_output_geometry')
+              if license_value:
+                  score += 10; reasons.append('license_present')
+              else: reasons.append('license_missing')
+              if base:
+                  score += 10; reasons.append('base_declared')
+              else: reasons.append('base_missing')
+              if base_has_safetensors:
+                  score += 10; reasons.append('base_safetensors')
+              if task_type:
+                  score += 5; reasons.append('task_type_present')
+              if targets:
+                  score += 10; reasons.append('target_modules_present')
+              if not modules_to_save:
+                  score += 5; reasons.append('no_auxiliary_modules')
+              else: reasons.append('auxiliary_modules_present')
+              if isinstance(weight_size,int):
+                  if weight_size <= 100_000_000: score += 10; reasons.append('adapter_under_100MB')
+                  elif weight_size <= 500_000_000: score += 4; reasons.append('adapter_under_500MB')
+              if isinstance(base_safetensors_bytes,int):
+                  if base_safetensors_bytes <= 1_500_000_000: score += 10; reasons.append('base_under_1.5GB')
+                  elif base_safetensors_bytes <= 4_000_000_000: score += 4; reasons.append('base_under_4GB')
+              pipeline = api.get('pipeline_tag')
+              if pipeline in {'semantic-segmentation','image-segmentation','object-detection','depth-estimation'}:
+                  score += 5; reasons.append('matching_pipeline_tag')
+
+              candidates.append({
+                  'model_id': mid,
+                  'revision': sha,
+                  'pipeline_tag': pipeline,
+                  'library_name': api.get('library_name'),
+                  'tags': tags,
+                  'license': license_value,
+                  'datasets': card.get('datasets'),
+                  'base_model': base,
+                  'base_revision_current': base_sha,
+                  'base_pipeline_tag': base_pipeline,
+                  'base_license': base_license,
+                  'base_has_safetensors': base_has_safetensors,
+                  'base_safetensors_bytes_known': base_safetensors_bytes,
+                  'base_api_error': base_error,
+                  'adapter_weight_size_known': weight_size,
+                  'adapter_weight_sha_known': weight_sha,
+                  'adapter_config_sha256': hashlib.sha256(cfg_bytes).hexdigest(),
+                  'peft_type': cfg.get('peft_type'),
+                  'task_type': task_type,
+                  'rank': cfg.get('r'),
+                  'alpha': cfg.get('lora_alpha'),
+                  'target_modules': targets,
+                  'modules_to_save': modules_to_save,
+                  'use_dora': cfg.get('use_dora'),
+                  'use_rslora': cfg.get('use_rslora'),
+                  'modality_lane': modality,
+                  'output_geometry': output_geometry,
+                  'metadata_score': score,
+                  'score_reasons': reasons,
+                  'raw_weight_bytes_downloaded': 0,
+                  'model_outputs_observed': 0,
+                  'sibling_names': sorted(x for x in names if x),
+              })
+              time.sleep(0.08)
+
+          candidates.sort(key=lambda x: (-x['metadata_score'], x['model_id']))
+          receipt = {
+              'schema':'LUCIA_AA_R2_25_18_C18_METADATA_DISCOVERY_V1',
+              'raw_weight_bytes_downloaded':0,
+              'model_outputs_observed':0,
+              'queries':queries,
+              'query_hits':query_hits,
+              'unique_models_seen':len(models),
+              'adapter_candidates_found':len(candidates),
+              'candidates':candidates,
+              'errors':errors,
+          }
+          (root/'C18_METADATA_DISCOVERY.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          with (root/'C18_METADATA_DISCOVERY.csv').open('w',newline='') as f:
+              w=csv.writer(f)
+              w.writerow(['score','modality','model_id','revision','base_model','task_type','rank','adapter_bytes','base_bytes','license','pipeline'])
+              for c in candidates:
+                  w.writerow([c['metadata_score'],c['modality_lane'],c['model_id'],c['revision'],c['base_model'],c['task_type'],c['rank'],c['adapter_weight_size_known'],c['base_safetensors_bytes_known'],c['license'],c['pipeline_tag']])
+          print(json.dumps({'unique_models_seen':len(models),'adapter_candidates_found':len(candidates),'top':[{k:c.get(k) for k in ('metadata_score','modality_lane','model_id','base_model','rank','license')} for c in candidates[:12]]},indent=2))
+          PY
+      - name: Upload one-day metadata-only artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22518_C18_METADATA_ONLY
+          path: ${{ runner.temp }}/LAA_R22518_C18_METADATA
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
