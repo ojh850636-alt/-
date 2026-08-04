@@ -1,4 +1,4 @@
-name: Temporary LAA R22519 C19 exact source courier
+name: Temporary LAA R22519 C19 split existing artifact
 
 on:
   pull_request:
@@ -7,83 +7,68 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  courier:
+  split:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Download three exact safe source objects and runtime wheels
+      - name: Reuse and split the already verified exact-source artifact
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22519_C19_EXACT_COURIER"
-          SRC="$ROOT/source"
-          WHEELS="$ROOT/wheelhouse"
-          mkdir -p "$SRC/adapter_v1" "$SRC/adapter_v102" "$SRC/base" "$WHEELS"
-          download() {
-            local repo="$1" rev="$2" path="$3" out="$4"
-            echo "Downloading ${repo}@${rev}/${path}"
-            curl -L --fail --retry 6 --retry-all-errors --connect-timeout 30 --max-time 3600 \
-              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"
-          }
-          A1_REPO='Nzyoka19/nyansapo-ocr-trocr-lora_v1'
-          A1_REV='d453a21ea4397791ec64873622713b96f5e8f0a5'
-          A2_REPO='Nzyoka19/nyansapo-ocr-trocr-lora_v1-0-2'
-          A2_REV='e8c954972d9e45a7edd73306eabf34001c459010'
-          B_REPO='microsoft/trocr-base-handwritten'
-          B_REV='eaacaf452b06415df8f10bb6fad3a4c11e609406'
-          for role in adapter_v1 adapter_v102; do
-            if [ "$role" = adapter_v1 ]; then repo="$A1_REPO";rev="$A1_REV"; else repo="$A2_REPO";rev="$A2_REV"; fi
-            for name in README.md adapter_config.json adapter_model.safetensors preprocessor_config.json tokenizer_config.json special_tokens_map.json tokenizer.json vocab.json merges.txt; do
-              download "$repo" "$rev" "$name" "$SRC/$role/$name"
-            done
-          done
-          for name in README.md config.json generation_config.json model.safetensors preprocessor_config.json tokenizer_config.json special_tokens_map.json vocab.json merges.txt; do
-            download "$B_REPO" "$B_REV" "$name" "$SRC/base/$name"
-          done
-          test "$(stat -c%s "$SRC/adapter_v1/adapter_model.safetensors")" = '20087648'
-          test "$(sha256sum "$SRC/adapter_v1/adapter_model.safetensors" | awk '{print $1}')" = 'e8bb8f347933a7048b5dbeac68c352cb8c2a80df637b158ee6687db19d7697b6'
-          test "$(stat -c%s "$SRC/adapter_v102/adapter_model.safetensors")" = '20087648'
-          test "$(sha256sum "$SRC/adapter_v102/adapter_model.safetensors" | awk '{print $1}')" = '129429aaadc823ba0a3bc119c093f8fe157357cbd9bf34a55a93ffb4bada87f6'
-          test "$(stat -c%s "$SRC/base/model.safetensors")" = '1333384464'
-          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '25a40cddc7e6120140a3d5b9e3dd3878a92ada7b4f312953ab22edc19c2a5acc'
-          if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then
-            echo 'Forbidden source entered courier' >&2; exit 1
-          fi
-          python - <<'PY'
-          import json,struct,os,pathlib
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_COURIER'/'source'
-          for rel in ('adapter_v1/adapter_model.safetensors','adapter_v102/adapter_model.safetensors','base/model.safetensors'):
-            with (root/rel).open('rb') as f:
-              n=struct.unpack('<Q',f.read(8))[0]; h=json.loads(f.read(n))
-            tensors=[k for k in h if k!='__metadata__']
-            if not tensors: raise SystemExit(f'empty safetensors {rel}')
-            print(rel,len(tensors),'tensors')
-          PY
-          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
-            'transformers==4.57.1' 'peft==0.18.1' 'accelerate==1.14.0' \
-            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'safetensors==0.7.0'
-          (cd "$ROOT" && find source wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > SHA256_MANIFEST.txt)
-          python - <<'PY'
-          import hashlib,json,os,pathlib
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22519_C19_EXACT_COURIER'; rows=[]
-          for p in sorted(x for x in root.rglob('*') if x.is_file()):
-            h=hashlib.sha256()
-            with p.open('rb') as f:
-              for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
-            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
-          receipt={'schema':'LUCIA_AA_R2_25_19_C19_EXACT_COURIER_V1','candidate_id':'R22519-C19-NYANSAPO-OCR-LONGITUDINAL','attempt_id':'R22519-C19-SINGLE-EXACT-INGRESS-1','source_file_count':27,'weight_object_count':3,'raw_weights_committed_to_git':False,'artifact_retention_days':1,'files':rows}
-          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          PY
+          ROOT="$RUNNER_TEMP/LAA_R22519_C19_SPLIT"
+          mkdir -p "$ROOT/parts"
+          curl -L --fail --retry 5 --retry-all-errors \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o "$ROOT/original.zip" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/8888979227/zip"
+          test "$(stat -c%s "$ROOT/original.zip")" = '1398936780'
+          test "$(sha256sum "$ROOT/original.zip" | awk '{print $1}')" = '9c3414ea48db85ba72904fdc2f9901884dcdbb504209142ea39aa80f07d72b22'
+          split -b 350000000 -d -a 2 "$ROOT/original.zip" "$ROOT/parts/LAA_R22519_C19_EXACT_SOURCE.zip.part-"
+          rm "$ROOT/original.zip"
+          (cd "$ROOT/parts" && sha256sum * > PARTS_SHA256.txt && stat -c '%n %s' LAA_R22519_C19_EXACT_SOURCE.zip.part-* > PARTS_SIZE.txt)
+          test "$(find "$ROOT/parts" -name 'LAA_R22519_C19_EXACT_SOURCE.zip.part-*' -type f | wc -l | tr -d ' ')" = '4'
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22519_C19_EXACT_SOURCE
-          path: ${{ runner.temp }}/LAA_R22519_C19_EXACT_COURIER
+          name: LAA_R22519_C19_SOURCE_PART_00
+          path: ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/LAA_R22519_C19_EXACT_SOURCE.zip.part-00
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22519_C19_SOURCE_PART_01
+          path: ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/LAA_R22519_C19_EXACT_SOURCE.zip.part-01
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22519_C19_SOURCE_PART_02
+          path: ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/LAA_R22519_C19_EXACT_SOURCE.zip.part-02
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22519_C19_SOURCE_PART_03
+          path: ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/LAA_R22519_C19_EXACT_SOURCE.zip.part-03
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22519_C19_SOURCE_PART_MANIFEST
+          path: |
+            ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/PARTS_SHA256.txt
+            ${{ runner.temp }}/LAA_R22519_C19_SPLIT/parts/PARTS_SIZE.txt
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
