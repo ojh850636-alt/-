@@ -1,4 +1,4 @@
-name: Temporary LAA R22520 C20 exact source courier
+name: Temporary LAA R22520 C20 split existing exact artifact
 
 on:
   pull_request:
@@ -7,75 +7,61 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
-  courier:
+  split:
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Download exact allowlisted Florence-2 source and runtime wheels
+      - name: Reuse and split already verified C20 exact artifact
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22520_C20_EXACT_COURIER"
-          SRC="$ROOT/source"
-          WHEELS="$ROOT/wheelhouse"
-          mkdir -p "$SRC/adapter" "$SRC/base" "$WHEELS"
-          download() {
-            local repo="$1" rev="$2" path="$3" out="$4"
-            curl -L --fail --retry 6 --retry-all-errors --connect-timeout 30 --max-time 3600 \
-              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"
-          }
-          A_REPO='amayuelas/plot-visualization-florence-2-lora-32'
-          A_REV='982466575b92c963e15ab9b6cbc83a7b561ff874'
-          B_REPO='microsoft/Florence-2-base-ft'
-          B_REV='f6c1a25888ffc1d945ee8a1a77ac833c7303d46e'
-          for name in README.md adapter_config.json adapter_model.safetensors added_tokens.json merges.txt preprocessor_config.json special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json; do
-            download "$A_REPO" "$A_REV" "$name" "$SRC/adapter/$name"
-          done
-          for name in README.md LICENSE config.json model.safetensors preprocessor_config.json tokenizer.json tokenizer_config.json vocab.json; do
-            download "$B_REPO" "$B_REV" "$name" "$SRC/base/$name"
-          done
-          test "$(stat -c%s "$SRC/adapter/adapter_model.safetensors")" = '41397480'
-          test "$(sha256sum "$SRC/adapter/adapter_model.safetensors" | awk '{print $1}')" = '9cce33ab4f9d48794c250ffadd4ed5ca347922e06fe41ca1eadcb83f865c5afb'
-          test "$(stat -c%s "$SRC/base/model.safetensors")" = '463221266'
-          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '58757d657ff44051314c8030b68e04cb1bb618ca9a4885418f111f6fb708185a'
-          if find "$SRC" -type f \( -name '*.py' -o -name '*.ipynb' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' \) | grep -q .; then
-            echo 'Forbidden source entered courier' >&2; exit 1
-          fi
-          python - <<'PY'
-          import json,struct,os,pathlib
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_EXACT_COURIER'/'source'
-          for rel in ('adapter/adapter_model.safetensors','base/model.safetensors'):
-            with (root/rel).open('rb') as f:
-              n=struct.unpack('<Q',f.read(8))[0];h=json.loads(f.read(n))
-            tensors=[k for k in h if k!='__metadata__']
-            if not tensors:raise SystemExit(f'empty safetensors {rel}')
-            print(rel,len(tensors),'tensors')
-          PY
-          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
-            'transformers==4.57.1' 'peft==0.19.1' 'accelerate==1.14.0' \
-            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'pillow==12.2.0' 'safetensors==0.7.0'
-          (cd "$ROOT" && find source wheelhouse -type f -print0 | sort -z | xargs -0 sha256sum > SHA256_MANIFEST.txt)
-          python - <<'PY'
-          import hashlib,json,os,pathlib
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_EXACT_COURIER';rows=[]
-          for p in sorted(x for x in root.rglob('*') if x.is_file()):
-            h=hashlib.sha256()
-            with p.open('rb') as f:
-              for block in iter(lambda:f.read(1024*1024),b''):h.update(block)
-            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
-          receipt={'schema':'LUCIA_AA_R2_25_20_C20_EXACT_COURIER_V1','candidate_id':'R22520-C20-FLORENCE2-SUBPLOT-DETECTION','adapter_revision':'982466575b92c963e15ab9b6cbc83a7b561ff874','base_revision':'f6c1a25888ffc1d945ee8a1a77ac833c7303d46e','source_file_count':18,'raw_weights_committed_to_git':False,'artifact_retention_days':1,'files':rows}
-          (root/'COURIER_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          PY
+          ROOT="$RUNNER_TEMP/LAA_R22520_C20_SPLIT"
+          mkdir -p "$ROOT/parts"
+          curl -L --fail --retry 5 --retry-all-errors \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            -o "$ROOT/original.zip" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/8899570964/zip"
+          test "$(stat -c%s "$ROOT/original.zip")" = '536945657'
+          test "$(sha256sum "$ROOT/original.zip" | awk '{print $1}')" = 'c3c2930e02ac7cf3c57d2aa07b77cf6703ef239212ee0679b60a9f24695a2e4c'
+          split -b 200000000 -d -a 2 "$ROOT/original.zip" "$ROOT/parts/LAA_R22520_C20_EXACT_SOURCE.zip.part-"
+          rm "$ROOT/original.zip"
+          (cd "$ROOT/parts" && sha256sum LAA_R22520_C20_EXACT_SOURCE.zip.part-* > PARTS_SHA256.txt && stat -c '%n %s' LAA_R22520_C20_EXACT_SOURCE.zip.part-* > PARTS_SIZE.txt)
+          test "$(find "$ROOT/parts" -name 'LAA_R22520_C20_EXACT_SOURCE.zip.part-*' -type f | wc -l | tr -d ' ')" = '3'
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22520_C20_EXACT_SOURCE
-          path: ${{ runner.temp }}/LAA_R22520_C20_EXACT_COURIER
+          name: LAA_R22520_C20_SOURCE_PART_00
+          path: ${{ runner.temp }}/LAA_R22520_C20_SPLIT/parts/LAA_R22520_C20_EXACT_SOURCE.zip.part-00
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22520_C20_SOURCE_PART_01
+          path: ${{ runner.temp }}/LAA_R22520_C20_SPLIT/parts/LAA_R22520_C20_EXACT_SOURCE.zip.part-01
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22520_C20_SOURCE_PART_02
+          path: ${{ runner.temp }}/LAA_R22520_C20_SPLIT/parts/LAA_R22520_C20_EXACT_SOURCE.zip.part-02
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22520_C20_SOURCE_PART_MANIFEST
+          path: |
+            ${{ runner.temp }}/LAA_R22520_C20_SPLIT/parts/PARTS_SHA256.txt
+            ${{ runner.temp }}/LAA_R22520_C20_SPLIT/parts/PARTS_SIZE.txt
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
