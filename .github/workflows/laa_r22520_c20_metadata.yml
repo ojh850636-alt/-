@@ -1,4 +1,4 @@
-name: Temporary LAA R22520 C20 metadata-only discovery
+name: Temporary LAA R22520 C20 broad metadata discovery
 
 on:
   pull_request:
@@ -11,226 +11,114 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
-      - name: Discover non-duplicate PEFT output geometries without weights
+      - name: Search Hugging Face metadata only
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22520_C20_METADATA"
+          ROOT="$RUNNER_TEMP/LAA_R22520_C20_METADATA_V2"
           mkdir -p "$ROOT/files"
           python - <<'PY'
           import csv, hashlib, json, os, pathlib, time, urllib.parse, urllib.request
-
-          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'LAA_R22520_C20_METADATA'
-          queries = [
-              'segformer lora peft',
-              'semantic segmentation lora peft',
-              'image segmentation adapter_model safetensors',
-              'object detection lora peft',
-              'detr lora peft',
-              'depth estimation lora peft',
-              'image retrieval lora peft',
-              'vision embedding lora peft',
-              'keypoint detection lora peft',
-              'image to image lora peft',
-          ]
-          headers = {'User-Agent': 'LUCIA-Adapter-Archaeology-R22520-MetadataOnly/1.0'}
-
-          def get_json(url, timeout=90):
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req, timeout=timeout) as r:
-                  return json.load(r)
-
-          def get_bytes(url, timeout=120):
-              req = urllib.request.Request(url, headers=headers)
-              with urllib.request.urlopen(req, timeout=timeout) as r:
-                  return r.read()
-
-          models = {}
-          query_hits = {}
-          for q in queries:
-              url = 'https://huggingface.co/api/models?' + urllib.parse.urlencode({'search': q, 'limit': 100, 'full': 'true'})
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22520_C20_METADATA_V2'
+          headers={'User-Agent':'LUCIA-AA-R22520-MetadataOnly/2.0'}
+          terms=['segformer','segmentation','semantic-segmentation','image-segmentation','detr','object-detection','depth-estimation','depth-anything','image-retrieval','image-feature-extraction','clip-lora','keypoint','pose-estimation','super-resolution']
+          def getj(url,t=90):
+            req=urllib.request.Request(url,headers=headers)
+            with urllib.request.urlopen(req,timeout=t) as r:return json.load(r)
+          def getb(url,t=120):
+            req=urllib.request.Request(url,headers=headers)
+            with urllib.request.urlopen(req,timeout=t) as r:return r.read()
+          models={};hits={};errors=[]
+          for term in terms:
+            total=0
+            for params in ({'search':term,'limit':100,'full':'true'},{'filter':'peft','search':term,'limit':100,'full':'true'}):
+              url='https://huggingface.co/api/models?'+urllib.parse.urlencode(params)
               try:
-                  rows = get_json(url)
-                  query_hits[q] = {'count': len(rows)}
-                  for row in rows:
-                      mid = row.get('id') or row.get('modelId')
-                      if mid:
-                          models[mid] = row
-              except Exception as e:
-                  query_hits[q] = {'count': 0, 'error': type(e).__name__ + ': ' + str(e)}
-              time.sleep(0.12)
-
-          def lfs_info(row):
-              if not isinstance(row, dict):
-                  return None, None
-              size = row.get('size')
-              sha = row.get('blobId') or row.get('xetHash')
-              lfs = row.get('lfs')
-              if isinstance(lfs, dict):
-                  size = size if isinstance(size, int) else lfs.get('size')
-                  sha = lfs.get('sha256') or lfs.get('oid') or sha
-              if isinstance(sha, str) and sha.startswith('sha256:'):
-                  sha = sha.split(':', 1)[1]
-              return size if isinstance(size, int) else None, sha
-
-          candidates, errors = [], []
+                rows=getj(url); total+=len(rows)
+                for row in rows:
+                  mid=row.get('id') or row.get('modelId')
+                  if mid:models[mid]=row
+              except Exception as e:errors.append({'term':term,'params':params,'error':type(e).__name__+': '+str(e)})
+              time.sleep(.1)
+            hits[term]=total
+          def objinfo(row):
+            if not isinstance(row,dict):return None,None
+            size=row.get('size');sha=row.get('blobId') or row.get('xetHash');lfs=row.get('lfs')
+            if isinstance(lfs,dict):size=size if isinstance(size,int) else lfs.get('size');sha=lfs.get('sha256') or lfs.get('oid') or sha
+            if isinstance(sha,str) and sha.startswith('sha256:'):sha=sha.split(':',1)[1]
+            return size if isinstance(size,int) else None,sha
+          out=[]
           for mid in sorted(models):
+            try:api=getj('https://huggingface.co/api/models/'+urllib.parse.quote(mid,safe='/'))
+            except Exception as e:errors.append({'model_id':mid,'stage':'api','error':type(e).__name__+': '+str(e)});continue
+            sib=api.get('siblings') or [];by={x.get('rfilename'):x for x in sib if x.get('rfilename')}
+            if 'adapter_config.json' not in by or 'adapter_model.safetensors' not in by:continue
+            rev=api.get('sha')
+            try:cfgb=getb(f'https://huggingface.co/{mid}/resolve/{rev}/adapter_config.json?download=true');cfg=json.loads(cfgb)
+            except Exception as e:errors.append({'model_id':mid,'stage':'config','error':type(e).__name__+': '+str(e)});continue
+            rmb=b''
+            if 'README.md' in by:
+              try:rmb=getb(f'https://huggingface.co/{mid}/resolve/{rev}/README.md?download=true')
+              except Exception:pass
+            card=api.get('cardData') or {};tags=api.get('tags') or [];base=cfg.get('base_model_name_or_path') or card.get('base_model')
+            if isinstance(base,list):base=base[0] if base else None
+            bapi={};bre=None;bfiles=[];bbytes=None;bcustom=[];blic=None
+            if isinstance(base,str) and '/' in base and not base.startswith('/'):
               try:
-                  api = get_json('https://huggingface.co/api/models/' + urllib.parse.quote(mid, safe='/'))
-              except Exception as e:
-                  errors.append({'model_id': mid, 'stage': 'model_api', 'error': type(e).__name__ + ': ' + str(e)})
-                  continue
-              siblings = api.get('siblings') or []
-              by_name = {x.get('rfilename'): x for x in siblings if x.get('rfilename')}
-              if 'adapter_config.json' not in by_name or 'adapter_model.safetensors' not in by_name:
-                  continue
-              revision = api.get('sha')
-              if not revision:
-                  continue
-              try:
-                  cfg_bytes = get_bytes(f'https://huggingface.co/{mid}/resolve/{revision}/adapter_config.json?download=true')
-                  cfg = json.loads(cfg_bytes)
-              except Exception as e:
-                  errors.append({'model_id': mid, 'stage': 'adapter_config', 'error': type(e).__name__ + ': ' + str(e)})
-                  continue
-              readme_bytes = b''
-              if 'README.md' in by_name:
-                  try:
-                      readme_bytes = get_bytes(f'https://huggingface.co/{mid}/resolve/{revision}/README.md?download=true')
-                  except Exception as e:
-                      errors.append({'model_id': mid, 'stage': 'README', 'error': type(e).__name__ + ': ' + str(e)})
-              card = api.get('cardData') or {}
-              tags = api.get('tags') or []
-              base = cfg.get('base_model_name_or_path') or card.get('base_model')
-              if isinstance(base, list):
-                  base = base[0] if base else None
-              weight_size, weight_sha = lfs_info(by_name.get('adapter_model.safetensors'))
-              base_api = None
-              base_revision = None
-              base_license = None
-              base_pipeline = None
-              base_library = None
-              base_safe = []
-              base_total = None
-              base_custom_python = []
-              base_error = None
-              if isinstance(base, str) and '/' in base and not base.startswith('/'):
-                  try:
-                      base_api = get_json('https://huggingface.co/api/models/' + urllib.parse.quote(base, safe='/'))
-                      base_revision = base_api.get('sha')
-                      base_card = base_api.get('cardData') or {}
-                      base_license = base_card.get('license') or base_api.get('license')
-                      base_pipeline = base_api.get('pipeline_tag')
-                      base_library = base_api.get('library_name')
-                      sizes = []
-                      for row in base_api.get('siblings') or []:
-                          name = str(row.get('rfilename') or '')
-                          if name.endswith('.py'):
-                              base_custom_python.append(name)
-                          if name.endswith('.safetensors'):
-                              sz, sh = lfs_info(row)
-                              base_safe.append({'path': name, 'size_bytes': sz, 'sha256_or_oid': sh})
-                              if isinstance(sz, int): sizes.append(sz)
-                      if sizes and len(sizes) == len(base_safe):
-                          base_total = sum(sizes)
-                  except Exception as e:
-                      base_error = type(e).__name__ + ': ' + str(e)
-              custom_python = sorted(x for x in by_name if str(x).endswith('.py'))
-              text = ' '.join([
-                  mid, str(api.get('pipeline_tag') or ''), str(api.get('library_name') or ''),
-                  ' '.join(map(str, tags)), str(card.get('datasets') or ''),
-                  json.dumps(cfg, sort_keys=True), readme_bytes[:16000].decode('utf-8', 'ignore')
-              ]).lower()
-              lane = 'OTHER'
-              geometry = 'unknown'
-              if any(k in text for k in ('semantic-segmentation', 'semantic segmentation', 'segformer', 'upernet')):
-                  lane='SEMANTIC_SEGMENTATION'; geometry='per-pixel class mask/logit field'
-              elif any(k in text for k in ('object-detection', 'object detection', 'detr', 'yolos')):
-                  lane='OBJECT_DETECTION'; geometry='unordered set of boxes/classes/scores'
-              elif any(k in text for k in ('depth-estimation', 'depth estimation', 'zoedepth', 'depth-anything', 'dpt')):
-                  lane='DEPTH_ESTIMATION'; geometry='dense continuous depth field'
-              elif any(k in text for k in ('image retrieval', 'retrieval', 'embedding', 'contrastive')):
-                  lane='IMAGE_RETRIEVAL_EMBEDDING'; geometry='continuous embedding and ranked-neighbor relation'
-              elif any(k in text for k in ('keypoint', 'pose estimation', 'landmark detection')):
-                  lane='KEYPOINT_DETECTION'; geometry='set of landmark coordinates/confidences'
-              elif any(k in text for k in ('image-to-image', 'super-resolution', 'denoising', 'inpainting')):
-                  lane='IMAGE_TO_IMAGE'; geometry='dense continuous pixel field'
-              license_value = card.get('license') or api.get('license')
-              modules_to_save = cfg.get('modules_to_save')
-              targets = cfg.get('target_modules')
-              score = 0; reasons=[]; holds=[]
-              if lane != 'OTHER': score += 30; reasons.append('new_output_geometry')
-              else: holds.append('unclassified_output_geometry')
-              if license_value: score += 10; reasons.append('license_present')
-              else: holds.append('license_missing')
-              if isinstance(base, str) and '/' in base: score += 10; reasons.append('base_declared')
-              else: holds.append('base_missing_or_local')
-              if base_safe: score += 10; reasons.append('base_safetensors_present')
-              else: holds.append('base_safetensors_missing')
-              if not custom_python and not base_custom_python: score += 10; reasons.append('no_custom_python')
-              else: holds.append('custom_python_present')
-              if targets: score += 10; reasons.append('target_modules_present')
-              else: holds.append('target_modules_missing')
-              if not modules_to_save: score += 5; reasons.append('no_auxiliary_modules')
-              else: holds.append('auxiliary_modules_present')
-              if isinstance(weight_size, int):
-                  if weight_size <= 100_000_000: score += 10; reasons.append('adapter_under_100MB')
-                  elif weight_size <= 500_000_000: score += 4; reasons.append('adapter_under_500MB')
-              else: holds.append('adapter_size_unknown')
-              if isinstance(base_total, int):
-                  if base_total <= 500_000_000: score += 15; reasons.append('base_under_500MB')
-                  elif base_total <= 1_500_000_000: score += 10; reasons.append('base_under_1.5GB')
-                  elif base_total <= 4_000_000_000: score += 3; reasons.append('base_under_4GB')
-                  else: holds.append('base_over_4GB')
-              else: holds.append('base_size_unknown')
-              if api.get('pipeline_tag') in {'image-segmentation','semantic-segmentation','object-detection','depth-estimation','image-feature-extraction'}:
-                  score += 5; reasons.append('matching_pipeline_tag')
-              safe_mid = mid.replace('/', '__')
-              folder = root / 'files' / safe_mid
-              folder.mkdir(parents=True, exist_ok=True)
-              (folder / 'adapter_config.json').write_bytes(cfg_bytes)
-              if readme_bytes:
-                  (folder / 'README.md').write_bytes(readme_bytes)
-              candidates.append({
-                  'model_id':mid,'revision':revision,'pipeline_tag':api.get('pipeline_tag'),
-                  'library_name':api.get('library_name'),'tags':tags,'license':license_value,
-                  'datasets':card.get('datasets'),'base_model':base,'base_revision_current':base_revision,
-                  'base_license':base_license,'base_pipeline_tag':base_pipeline,'base_library_name':base_library,
-                  'base_safetensors_files':base_safe,'base_safetensors_bytes_known':base_total,
-                  'base_custom_python_files':base_custom_python,'base_api_error':base_error,
-                  'adapter_weight_size_known':weight_size,'adapter_weight_sha_known':weight_sha,
-                  'adapter_config_sha256':hashlib.sha256(cfg_bytes).hexdigest(),
-                  'readme_sha256':hashlib.sha256(readme_bytes).hexdigest() if readme_bytes else None,
-                  'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'rank':cfg.get('r'),
-                  'alpha':cfg.get('lora_alpha'),'target_modules':targets,'modules_to_save':modules_to_save,
-                  'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora'),
-                  'lane':lane,'output_geometry':geometry,'metadata_score':score,
-                  'score_reasons':reasons,'holds':holds,'raw_weight_bytes_downloaded':0,
-                  'model_outputs_observed':0,'sibling_names':sorted(by_name),
-              })
-              time.sleep(0.06)
-          candidates.sort(key=lambda x:(-x['metadata_score'], x['lane'], x['model_id']))
-          receipt={
-              'schema':'LUCIA_AA_R2_25_20_C20_METADATA_DISCOVERY_V1',
-              'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,
-              'queries':queries,'query_hits':query_hits,'unique_models_seen':len(models),
-              'adapter_candidates_found':len(candidates),'candidates':candidates,'errors':errors,
-          }
-          (root/'C20_METADATA_DISCOVERY.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+                bapi=getj('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/'));bre=bapi.get('sha');blic=(bapi.get('cardData') or {}).get('license') or bapi.get('license');sizes=[]
+                for x in bapi.get('siblings') or []:
+                  name=str(x.get('rfilename') or '')
+                  if name.endswith('.py'):bcustom.append(name)
+                  if name.endswith('.safetensors'):
+                    sz,sh=objinfo(x);bfiles.append({'path':name,'size_bytes':sz,'sha256_or_oid':sh});
+                    if isinstance(sz,int):sizes.append(sz)
+                if sizes and len(sizes)==len(bfiles):bbytes=sum(sizes)
+              except Exception as e:errors.append({'model_id':mid,'stage':'base','error':type(e).__name__+': '+str(e)})
+            text=' '.join([mid,str(api.get('pipeline_tag') or ''),' '.join(map(str,tags)),json.dumps(card,sort_keys=True),json.dumps(cfg,sort_keys=True),rmb[:20000].decode('utf-8','ignore')]).lower()
+            lane='OTHER';geom='unknown'
+            if any(x in text for x in ['segformer','semantic-segmentation','semantic segmentation','upernet']):lane='SEMANTIC_SEGMENTATION';geom='per-pixel class mask/logits'
+            elif any(x in text for x in ['object-detection','object detection','detr','yolos']):lane='OBJECT_DETECTION';geom='set of boxes/classes/scores'
+            elif any(x in text for x in ['depth-estimation','depth estimation','depth-anything','zoedepth','dpt']):lane='DEPTH_ESTIMATION';geom='dense continuous depth map'
+            elif any(x in text for x in ['image-retrieval','image retrieval','image-feature-extraction','embedding','contrastive','clip']):lane='RETRIEVAL_EMBEDDING';geom='continuous embedding/ranking'
+            elif any(x in text for x in ['keypoint','pose-estimation','pose estimation','landmark']):lane='KEYPOINT';geom='landmark coordinates/confidences'
+            elif any(x in text for x in ['super-resolution','image-to-image','denoising','inpainting']):lane='IMAGE_TO_IMAGE';geom='dense pixel field'
+            asz,asha=objinfo(by.get('adapter_model.safetensors'));lic=card.get('license') or api.get('license');custom=sorted(x for x in by if str(x).endswith('.py'));holds=[];score=0
+            if lane!='OTHER':score+=30
+            else:holds.append('LANE_UNKNOWN')
+            if lic:score+=10
+            else:holds.append('LICENSE_MISSING')
+            if isinstance(base,str) and '/' in base:score+=10
+            else:holds.append('BASE_UNPINNABLE')
+            if bfiles:score+=10
+            else:holds.append('BASE_SAFETENSORS_MISSING')
+            if not custom and not bcustom:score+=10
+            else:holds.append('CUSTOM_PYTHON')
+            if cfg.get('target_modules'):score+=10
+            else:holds.append('TARGETS_MISSING')
+            if not cfg.get('modules_to_save'):score+=5
+            else:holds.append('AUXILIARY_MODULES')
+            if isinstance(asz,int) and asz<=100_000_000:score+=10
+            elif asz is None:holds.append('ADAPTER_SIZE_UNKNOWN')
+            if isinstance(bbytes,int) and bbytes<=500_000_000:score+=15
+            elif isinstance(bbytes,int) and bbytes<=1_500_000_000:score+=10
+            elif bbytes is None:holds.append('BASE_SIZE_UNKNOWN')
+            folder=root/'files'/mid.replace('/','__');folder.mkdir(parents=True,exist_ok=True);(folder/'adapter_config.json').write_bytes(cfgb)
+            if rmb:(folder/'README.md').write_bytes(rmb)
+            out.append({'model_id':mid,'revision':rev,'lane':lane,'output_geometry':geom,'metadata_score':score,'holds':holds,'pipeline_tag':api.get('pipeline_tag'),'library_name':api.get('library_name'),'license':lic,'datasets':card.get('datasets'),'base_model':base,'base_revision_current':bre,'base_license':blic,'base_safetensors_files':bfiles,'base_safetensors_bytes_known':bbytes,'base_custom_python_files':bcustom,'adapter_weight_size_known':asz,'adapter_weight_sha_known':asha,'adapter_config_sha256':hashlib.sha256(cfgb).hexdigest(),'readme_sha256':hashlib.sha256(rmb).hexdigest() if rmb else None,'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora'),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'sibling_names':sorted(by)})
+          out.sort(key=lambda x:(-x['metadata_score'],x['lane'],x['model_id']))
+          rec={'schema':'LUCIA_AA_R2_25_20_C20_METADATA_DISCOVERY_V2','raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'terms':terms,'query_hits':hits,'unique_models_seen':len(models),'adapter_candidates_found':len(out),'candidates':out,'errors':errors}
+          (root/'C20_METADATA_DISCOVERY.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
           with (root/'C20_METADATA_DISCOVERY.csv').open('w',newline='') as f:
-              w=csv.writer(f); w.writerow(['score','lane','model_id','revision','base_model','task_type','rank','adapter_bytes','base_bytes','license','holds'])
-              for c in candidates:
-                  w.writerow([c['metadata_score'],c['lane'],c['model_id'],c['revision'],c['base_model'],c['task_type'],c['rank'],c['adapter_weight_size_known'],c['base_safetensors_bytes_known'],c['license'],'|'.join(c['holds'])])
-          print(json.dumps({'unique_models_seen':len(models),'adapter_candidates_found':len(candidates),'top':[{k:c.get(k) for k in ('metadata_score','lane','model_id','base_model','rank','license','base_safetensors_bytes_known','adapter_weight_size_known','holds')} for c in candidates[:20]]},indent=2))
+            w=csv.writer(f);w.writerow(['score','lane','model_id','revision','base_model','rank','adapter_bytes','base_bytes','license','holds']);[w.writerow([x['metadata_score'],x['lane'],x['model_id'],x['revision'],x['base_model'],x['rank'],x['adapter_weight_size_known'],x['base_safetensors_bytes_known'],x['license'],'|'.join(x['holds'])]) for x in out]
+          print(json.dumps({'models_seen':len(models),'candidates':len(out),'top':out[:20]},indent=2))
           PY
-      - name: Upload one-day metadata-only artifact
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22520_C20_METADATA_ONLY
-          path: ${{ runner.temp }}/LAA_R22520_C20_METADATA
+          name: LAA_R22520_C20_METADATA_ONLY_V2
+          path: ${{ runner.temp }}/LAA_R22520_C20_METADATA_V2
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
