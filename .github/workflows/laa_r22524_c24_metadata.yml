@@ -1,4 +1,4 @@
-name: Temporary LAA R22524 C24 expanded dense-output metadata audit
+name: Temporary LAA R22524 C24 targeted SegFormer license audit
 
 on:
   pull_request:
@@ -11,149 +11,64 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Expanded exact metadata and license audit without weight bytes
+      - name: Audit explicit candidate and Base licenses without weight bytes
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22524_C24_EXPANDED_METADATA"
-          mkdir -p "$ROOT/files"
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_LICENSE_AUDIT"
+          mkdir -p "$ROOT"
           python - <<'PY'
-          import hashlib,json,os,pathlib,re,subprocess,time,urllib.error,urllib.parse,urllib.request
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_EXPANDED_METADATA'
-          headers={'User-Agent':'LUCIA-AA-R22524-Expanded-Metadata/2.0'}
-          terms=[
-            'depth-anything','Depth-Anything','dpt-hybrid-midas','dpt-large','zoedepth','dinov2 depth',
-            'segformer-b0-finetuned','segformer-b1-finetuned','semantic-segmentation','mask2former lora','sam lora',
-            'detr-resnet-50 lora','yolos lora','vitpose lora','keypoint detection lora','pose estimation adapter',
-            'raft optical flow lora','optical-flow adapter','pointnet lora','point cloud adapter','videoMAE lora'
-          ]
-          def req(url,method='GET',attempts=8):
-            last=None
+          import json,subprocess,time,urllib.error,urllib.parse,urllib.request,os,pathlib,re,hashlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_LICENSE_AUDIT'
+          headers={'User-Agent':'LUCIA-AA-R22524-License-Audit/3.0'}
+          repos=['KYLE11111111/segformer-b0-scene-parse-150-lora','almosenja/segformer-b0-finetuned-ade-512-512-housekeeping-lora','APaul1/segformer-scene-parse-150-lora','LucidCAT/segformer-b4-finetuned-ade-512-512-scene-parse-150-lora','almosenja/segformer-b1-finetuned-ade-512-512-housekeeping-lora','almosenja/segformer-b3-finetuned-ade-512-512-housekeeping-lora','jiangdaniel/segformer-scene-parse-150-lora']
+          def req(url,attempts=8):
             for i in range(attempts):
               try:
-                q=urllib.request.Request(url,headers=headers,method=method)
-                with urllib.request.urlopen(q,timeout=180) as r:
-                  if method=='HEAD': return dict(r.headers)
-                  return r.read()
+                q=urllib.request.Request(url,headers=headers)
+                with urllib.request.urlopen(q,timeout=120) as r:return r.read()
               except urllib.error.HTTPError as e:
-                last=e
-                if e.code in (403,404): return None
-                if e.code in (429,500,502,503,504): time.sleep(min(45,2**i)); continue
+                if e.code in (403,404):return None
+                if e.code in (429,500,502,503,504):time.sleep(min(30,2**i));continue
                 raise
-              except Exception as e:last=e;time.sleep(min(30,2**i))
+              except Exception:time.sleep(min(20,2**i))
             return None
           def getj(url):
-            b=req(url)
-            return json.loads(b) if b else None
+            b=req(url);return json.loads(b) if b else {}
           def rev(repo):
             try:
-              out=subprocess.check_output(['git','ls-remote','https://huggingface.co/'+repo,'refs/heads/main'],text=True,timeout=120).split()
-              return out[0] if out and len(out[0])==40 else None
+              o=subprocess.check_output(['git','ls-remote','https://huggingface.co/'+repo,'refs/heads/main'],text=True,timeout=120).split()
+              return o[0] if o and len(o[0])==40 else None
             except Exception:return None
-          repos=[]; errors=[]
-          for term in terms:
-            rows=getj('https://huggingface.co/api/models?search='+urllib.parse.quote(term)+'&limit=40&sort=downloads&direction=-1')
-            if isinstance(rows,list):
-              for x in rows:
-                rid=x.get('id') or x.get('modelId')
-                if rid and rid not in repos:repos.append(rid)
-            else: errors.append({'term':term,'error':'SEARCH_FAILED'})
-            time.sleep(.8)
-          results=[]
-          for repo in repos[:260]:
-            r=rev(repo)
-            if not r:continue
-            cfgb=req(f'https://huggingface.co/{repo}/resolve/{r}/adapter_config.json?download=true')
-            if not cfgb:continue
-            try:cfg=json.loads(cfgb)
-            except Exception:continue
-            ah=req(f'https://huggingface.co/{repo}/resolve/{r}/adapter_model.safetensors?download=true','HEAD')
-            if not ah:continue
-            ap=getj('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')) or {}
-            readmeb=req(f'https://huggingface.co/{repo}/resolve/{r}/README.md?download=true') or b''
-            readme=readmeb.decode('utf-8','replace')
-            card=ap.get('cardData') or {}
-            lic=card.get('license') or ap.get('license')
-            if not lic:
-              m=re.search(r'(?im)^license:\s*([^\s#]+)',readme);lic=m.group(1) if m else None
-            base=cfg.get('base_model_name_or_path')
-            br=rev(base) if isinstance(base,str) and '/' in base and not base.startswith('/') else None
-            bp=getj('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/')) if br else {}
-            bp=bp or {}; bcard=bp.get('cardData') or {}
-            blic=bcard.get('license') or bp.get('license')
-            bcfgb=req(f'https://huggingface.co/{base}/resolve/{br}/config.json?download=true') if br else None
-            bcfg={}
-            if bcfgb:
-              try:bcfg=json.loads(bcfgb)
-              except Exception:pass
-            bhead=None;bpath=None
-            if br:
-              for path in ('model.safetensors','model.safetensors.index.json'):
-                h=req(f'https://huggingface.co/{base}/resolve/{br}/{path}?download=true','HEAD')
-                if h:bhead=h;bpath=path;break
-            def sz(h):
-              if not h:return 0
-              for k in ('x-linked-size','X-Linked-Size','content-length','Content-Length'):
-                v=h.get(k)
-                if v and str(v).isdigit():return int(v)
-              return 0
-            text=' '.join([repo,base or '',str(ap.get('pipeline_tag')),str(bp.get('pipeline_tag')),str(bcfg.get('model_type')),str(bcfg.get('architectures')),readme[:16000]]).lower()
-            if any(x in text for x in ['segformer','semantic segmentation','semantic-segmentation','mask2former']):g='SEMANTIC_SEGMENTATION'
-            elif any(x in text for x in ['depth-anything','depth estimation','depth-estimation','zoedepth','dpt']):g='DEPTH_FIELD'
-            elif any(x in text for x in ['keypoint','pose estimation','pose-estimation','vitpose']):g='KEYPOINT_POSE'
-            elif any(x in text for x in ['optical flow','optical-flow','raft']):g='OPTICAL_FLOW'
-            elif any(x in text for x in ['detr','object detection','object-detection','yolos']):g='OBJECT_DETECTION'
-            elif any(x in text for x in ['point cloud','point-cloud','pointnet']):g='POINT_CLOUD'
-            elif any(x in text for x in ['videomae','video classification','video-classification']):g='VIDEO_TEMPORAL'
-            else:g='UNKNOWN'
-            holds=[];score=0
-            if lic:score+=18
-            else:holds.append('ADAPTER_LICENSE_MISSING')
-            if blic:score+=4
-            else:holds.append('BASE_LICENSE_MISSING')
-            if br:score+=12
-            else:holds.append('BASE_REVISION_UNRESOLVED')
-            if bpath:score+=10
-            else:holds.append('BASE_SAFETENSORS_UNRESOLVED')
-            if cfg.get('peft_type')=='LORA':score+=10
-            else:holds.append('NONSTANDARD_PEFT')
-            if cfg.get('target_modules'):score+=8
-            else:holds.append('TARGETS_MISSING')
-            if g!='UNKNOWN':score+=16
-            else:holds.append('GEOMETRY_UNKNOWN')
-            a_size=sz(ah);b_size=sz(bhead)
-            if 0<a_size<=100_000_000:score+=8
-            else:holds.append('ADAPTER_RESOURCE_HOLD')
-            if 0<b_size<=1_500_000_000:score+=8
-            elif bpath and bpath.endswith('.index.json'):score+=4;holds.append('SHARDED_BASE_SIZE_REQUIRES_PREFLIGHT')
-            else:holds.append('BASE_RESOURCE_HOLD')
-            if cfg.get('modules_to_save'):holds.append('AUXILIARY_MODULES_PRESENT')
-            else:score+=3
-            if 'trust_remote_code=true' in readme.lower():holds.append('REMOTE_CODE_REQUIRED_OR_ADVERTISED')
-            else:score+=3
-            folder=root/'files'/repo.replace('/','__');folder.mkdir(parents=True,exist_ok=True)
-            (folder/'adapter_config.json').write_bytes(cfgb)
-            if readmeb:(folder/'README.md').write_bytes(readmeb)
-            if bcfgb:(folder/'base_config.json').write_bytes(bcfgb)
-            results.append({'repo':repo,'revision':r,'license':lic,'pipeline_tag':ap.get('pipeline_tag'),'geometry':g,'score':score,'holds':holds,
-              'adapter_size_bytes':a_size,'adapter_etag':ah.get('x-linked-etag') or ah.get('etag'),'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),
-              'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),
-              'base_repo':base,'base_revision':br,'base_license':blic,'base_pipeline_tag':bp.get('pipeline_tag'),'base_weight_path':bpath,'base_weight_size_or_index_bytes':b_size,
-              'base_model_type':bcfg.get('model_type'),'base_architectures':bcfg.get('architectures'),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0})
-            time.sleep(.5)
-          results.sort(key=lambda x:(-x['score'],x['repo']))
-          out={'schema':'LUCIA_AA_R2_25_24_C24_EXPANDED_METADATA_AUDIT_V2','queries':terms,'searched_repos':len(repos),'audited':len(results),'errors':errors,
-               'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':results}
-          (root/'C24_EXPANDED_METADATA_AUDIT.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'searched':len(repos),'audited':len(results),'top':results[:20]},indent=2))
+          out=[]
+          for repo in repos:
+            r=rev(repo);api=getj('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/'))
+            card=api.get('cardData') or {}; lic=card.get('license') or api.get('license');tags=api.get('tags') or []
+            cfgb=req(f'https://huggingface.co/{repo}/resolve/{r}/adapter_config.json?download=true') if r else None
+            cfg=json.loads(cfgb) if cfgb else {}
+            rb=req(f'https://huggingface.co/{repo}/resolve/{r}/README.md?download=true') if r else b''
+            readme=(rb or b'').decode('utf-8','replace')
+            m=re.search(r'(?im)^license:\s*([^\s#]+)',readme); lic=lic or (m.group(1) if m else None)
+            license_files=[]
+            for name in ('LICENSE','LICENSE.md','LICENSE.txt','COPYING'):
+              b=req(f'https://huggingface.co/{repo}/resolve/{r}/{name}?download=true') if r else None
+              if b:license_files.append({'path':name,'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'first_line':b.decode('utf-8','replace').splitlines()[0][:200]})
+            base=cfg.get('base_model_name_or_path');br=rev(base) if isinstance(base,str) and '/' in base else None
+            bapi=getj('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/')) if br else {}
+            bcard=bapi.get('cardData') or {};blic=bcard.get('license') or bapi.get('license')
+            out.append({'repo':repo,'revision':r,'api_license':lic,'api_tags':tags,'license_files':license_files,'adapter_config':cfg,'base_repo':base,'base_revision':br,'base_license':blic,'explicit_adapter_license':bool(lic or license_files),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0})
+            time.sleep(1)
+          rec={'schema':'LUCIA_AA_R2_25_24_C24_TARGETED_LICENSE_AUDIT_V1','rows':out,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          (root/'C24_TARGETED_LICENSE_AUDIT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22524_C24_EXPANDED_METADATA
-          path: ${{ runner.temp }}/LAA_R22524_C24_EXPANDED_METADATA
+          name: LAA_R22524_C24_TARGETED_LICENSE_AUDIT
+          path: ${{ runner.temp }}/LAA_R22524_C24_LICENSE_AUDIT
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
