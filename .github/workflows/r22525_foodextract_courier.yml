@@ -2,11 +2,9 @@ name: R22525 FoodExtract exact-source courier
 
 on:
   push:
-    branches:
-      - agent/r22525-foodextract-courier
+    branches: [agent/r22525-foodextract-courier]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +16,6 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -26,16 +23,16 @@ jobs:
       - name: Install capture-only dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'huggingface_hub==1.4.1' 'safetensors==0.7.0'
+          python -m pip install 'huggingface_hub==1.4.1' 'safetensors==0.7.0' 'numpy==2.3.5'
 
-      - name: Exact revision capture and audit
+      - name: Exact revision capture and torch-free audit
         env:
           HF_HUB_DISABLE_TELEMETRY: '1'
           HF_HUB_ENABLE_HF_TRANSFER: '0'
         run: |
           cat > /tmp/capture.py <<'PY'
           from pathlib import Path
-          import hashlib, json, os, shutil
+          import hashlib, json, shutil
           from huggingface_hub import snapshot_download
           from safetensors import safe_open
 
@@ -63,6 +60,10 @@ jobs:
               'special_tokens_map.json', 'tokenizer.json',
               'tokenizer_config.json', 'vocab.json', 'model.safetensors'
           ]
+          banned_suffixes = {
+              '.bin', '.pt', '.pth', '.pkl', '.pickle', '.h5',
+              '.msgpack', '.ckpt', '.py', '.ipynb'
+          }
 
           a_cache = snapshot_download(
               repo_id=adapter_repo, revision=adapter_revision,
@@ -90,29 +91,28 @@ jobs:
           copied_adapter = copy_allow(a_cache, ADAPTER, adapter_allow)
           copied_base = copy_allow(b_cache, BASE, base_allow)
 
-          banned = {'.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack','.ckpt','.py','.ipynb'}
-          bad = [str(p) for p in ROOT.rglob('*') if p.is_file() and p.suffix.lower() in banned]
+          bad = [str(p) for p in ROOT.rglob('*') if p.is_file() and p.suffix.lower() in banned_suffixes]
           if bad:
               raise SystemExit(f'banned files captured: {bad}')
 
           def sha256(path):
               h = hashlib.sha256()
               with open(path, 'rb') as f:
-                  for block in iter(lambda: f.read(1024*1024), b''):
+                  for block in iter(lambda: f.read(1024 * 1024), b''):
                       h.update(block)
               return h.hexdigest()
 
           def tensor_summary(path):
               out = {'tensor_count': 0, 'total_elements': 0, 'dtypes': {}, 'keys_sha256': None}
               keys = []
-              with safe_open(path, framework='pt', device='cpu') as f:
+              with safe_open(path, framework='numpy') as f:
                   for key in f.keys():
-                      t = f.get_slice(key)
-                      shape = list(t.get_shape())
-                      dtype = str(t.get_dtype())
+                      sl = f.get_slice(key)
+                      shape = [int(x) for x in sl.get_shape()]
+                      dtype = str(sl.get_dtype())
                       n = 1
                       for dim in shape:
-                          n *= int(dim)
+                          n *= dim
                       out['tensor_count'] += 1
                       out['total_elements'] += n
                       out['dtypes'][dtype] = out['dtypes'].get(dtype, 0) + 1
@@ -121,15 +121,20 @@ jobs:
               out['key_shapes'] = keys
               return out
 
+          adapter_weight = ADAPTER / 'adapter_model.safetensors'
+          base_weight = BASE / 'model.safetensors'
+          required = [ADAPTER / 'adapter_config.json', adapter_weight, BASE / 'config.json', base_weight]
+          missing = [str(p) for p in required if not p.is_file()]
+          if missing:
+              raise SystemExit(f'missing required files: {missing}')
+
           files = []
           for p in sorted(ROOT.rglob('*')):
               if p.is_file():
                   files.append({'path': p.relative_to(ROOT).as_posix(), 'size': p.stat().st_size, 'sha256': sha256(p)})
 
-          adapter_weight = ADAPTER / 'adapter_model.safetensors'
-          base_weight = BASE / 'model.safetensors'
           report = {
-              'schema': 'R22525_EXACT_SOURCE_CAPTURE_V1',
+              'schema': 'R22525_EXACT_SOURCE_CAPTURE_V2',
               'adapter': {'repo': adapter_repo, 'revision': adapter_revision, 'copied': copied_adapter},
               'base': {'repo': base_repo, 'revision': base_revision, 'copied': copied_base, 'training_time_revision_proven': False},
               'files': files,
@@ -138,9 +143,15 @@ jobs:
               'trust_remote_code': False,
               'pickle_loaded': False,
               'banned_file_count': 0,
+              'audit_framework': 'numpy_no_torch',
           }
           (ROOT / 'CAPTURE_MANIFEST.json').write_text(json.dumps(report, indent=2, sort_keys=True), encoding='utf-8')
-          print(json.dumps({'adapter_bytes': adapter_weight.stat().st_size, 'adapter_sha256': sha256(adapter_weight), 'base_bytes': base_weight.stat().st_size, 'base_sha256': sha256(base_weight)}, indent=2))
+          print(json.dumps({
+              'adapter_bytes': adapter_weight.stat().st_size,
+              'adapter_sha256': sha256(adapter_weight),
+              'base_bytes': base_weight.stat().st_size,
+              'base_sha256': sha256(base_weight),
+          }, indent=2))
           PY
           python /tmp/capture.py
 
@@ -150,14 +161,19 @@ jobs:
             'transformers==5.0.0' 'peft==0.18.1' 'accelerate==1.14.0' \
             'tokenizers==0.22.2' 'safetensors==0.7.0' \
             'huggingface_hub==1.4.1' 'pillow==11.3.0' 'numpy==2.3.5' \
-            'sentencepiece==0.2.1' 'num2words==0.5.14' 'psutil==7.0.0'
+            'sentencepiece==0.2.1' 'num2words==0.5.14' 'psutil==7.0.0' \
+            'packaging==26.3' 'pyyaml==6.0.3' 'regex==2026.7.20' \
+            'requests==2.32.5' 'tqdm==4.70.0' 'filelock==3.32.2' \
+            'fsspec==2026.7.0' 'typing_extensions==4.16.0' \
+            'jinja2==3.1.6' 'protobuf==6.33.5' 'charset_normalizer==3.4.4' \
+            'idna==3.18' 'urllib3==2.6.3' 'certifi==2026.7.22' \
+            'markupsafe==3.0.3'
           python - <<'PY'
           from pathlib import Path
           import hashlib, json
-          rows=[]
+          rows = []
           for p in sorted(Path('bundle/wheels').glob('*')):
-              h=hashlib.sha256(p.read_bytes()).hexdigest()
-              rows.append({'name':p.name,'size':p.stat().st_size,'sha256':h})
+              rows.append({'name': p.name, 'size': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()})
           Path('bundle/WHEEL_MANIFEST.json').write_text(json.dumps(rows, indent=2, sort_keys=True))
           PY
 
@@ -172,13 +188,13 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           import hashlib, json
-          rows=[]
+          rows = []
           for p in sorted(Path('parts/base').glob('base.part.*')):
-              h=hashlib.sha256(p.read_bytes()).hexdigest()
-              rows.append({'name':p.name,'size':p.stat().st_size,'sha256':h})
+              rows.append({'name': p.name, 'size': p.stat().st_size, 'sha256': hashlib.sha256(p.read_bytes()).hexdigest()})
           Path('parts/base/PARTS_MANIFEST.json').write_text(json.dumps(rows, indent=2, sort_keys=True))
           print(rows)
           PY
+          test "$(find parts/base -name 'base.part.*' | wc -l)" -le 6
           ls -lh parts/base parts/adapter parts/meta
 
       - uses: actions/upload-artifact@v4
@@ -187,14 +203,12 @@ jobs:
           path: parts/meta
           compression-level: 0
           retention-days: 1
-
       - uses: actions/upload-artifact@v4
         with:
           name: R22525_ADAPTER_WEIGHT
           path: parts/adapter
           compression-level: 0
           retention-days: 1
-
       - uses: actions/upload-artifact@v4
         with:
           name: R22525_BASE_PART_00
