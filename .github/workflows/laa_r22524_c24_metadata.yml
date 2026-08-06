@@ -1,0 +1,180 @@
+name: Temporary LAA R22524 C24 metadata-only dense-output audit
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Search and audit standard PEFT candidates without weight bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_METADATA"
+          mkdir -p "$ROOT/files"
+          python - <<'PY'
+          import hashlib, json, pathlib, re, subprocess, time, urllib.parse, urllib.request, urllib.error, os
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_METADATA'
+          headers={'User-Agent':'LUCIA-AA-R22524-MetadataOnly/1.0'}
+          terms=[
+            'segformer lora', 'semantic segmentation lora', 'depth estimation lora',
+            'dpt lora', 'detr lora', 'keypoint lora', 'pose estimation lora',
+            'optical flow lora', 'anomaly detection lora', 'point cloud lora'
+          ]
+          def getj(url, attempts=8):
+            last=None
+            for i in range(attempts):
+              try:
+                req=urllib.request.Request(url,headers=headers)
+                with urllib.request.urlopen(req,timeout=90) as r:return json.load(r)
+              except urllib.error.HTTPError as e:
+                last=e
+                if e.code in (429,500,502,503,504): time.sleep(min(30,2**i)); continue
+                raise
+              except Exception as e:
+                last=e; time.sleep(min(20,2**i))
+            raise last
+          def getb(url, attempts=6):
+            last=None
+            for i in range(attempts):
+              try:
+                req=urllib.request.Request(url,headers=headers)
+                with urllib.request.urlopen(req,timeout=180) as r:return r.read()
+              except urllib.error.HTTPError as e:
+                last=e
+                if e.code in (404,403): return None
+                if e.code in (429,500,502,503,504): time.sleep(min(30,2**i)); continue
+                raise
+              except Exception as e:
+                last=e; time.sleep(min(20,2**i))
+            return None
+          def rev(repo, dataset=False):
+            prefix='https://huggingface.co/datasets/' if dataset else 'https://huggingface.co/'
+            try:
+              out=subprocess.check_output(['git','ls-remote',prefix+repo,'refs/heads/main'],text=True,timeout=120).strip().split()
+              return out[0] if out and len(out[0])==40 else None
+            except Exception:return None
+          def frontmatter_license(text):
+            m=re.search(r'(?im)^license:\s*([^\s#]+)',text or '')
+            return m.group(1).strip() if m else None
+          repos=[]
+          search_errors=[]
+          for term in terms:
+            try:
+              rows=getj('https://huggingface.co/api/models?search='+urllib.parse.quote(term)+'&limit=30&sort=downloads&direction=-1')
+              for x in rows if isinstance(rows,list) else []:
+                rid=x.get('id') or x.get('modelId')
+                if rid and rid not in repos: repos.append(rid)
+            except Exception as e: search_errors.append({'term':term,'error':type(e).__name__+': '+str(e)})
+            time.sleep(1.0)
+          audited=[]
+          for idx,repo in enumerate(repos[:180]):
+            r=rev(repo)
+            if not r: continue
+            cfgb=getb(f'https://huggingface.co/{repo}/resolve/{r}/adapter_config.json?download=true')
+            if not cfgb: continue
+            try: cfg=json.loads(cfgb)
+            except Exception: continue
+            try:
+              req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{r}/adapter_model.safetensors?download=true',headers=headers,method='HEAD')
+              with urllib.request.urlopen(req,timeout=90) as rr:
+                asize=int(rr.headers.get('x-linked-size') or rr.headers.get('content-length') or 0)
+                aetag=(rr.headers.get('x-linked-etag') or rr.headers.get('etag') or '').strip('"')
+            except Exception:
+              continue
+            readmeb=getb(f'https://huggingface.co/{repo}/resolve/{r}/README.md?download=true') or b''
+            readme=readmeb.decode('utf-8','replace')
+            base=cfg.get('base_model_name_or_path')
+            brev=rev(base) if isinstance(base,str) and '/' in base and not base.startswith('/') else None
+            basecfgb=getb(f'https://huggingface.co/{base}/resolve/{brev}/config.json?download=true') if brev else None
+            basecfg={}
+            if basecfgb:
+              try: basecfg=json.loads(basecfgb)
+              except Exception: pass
+            bsize=0; betag=''; bpath=None
+            if brev:
+              for candidate in ('model.safetensors','model.safetensors.index.json'):
+                try:
+                  req=urllib.request.Request(f'https://huggingface.co/{base}/resolve/{brev}/{candidate}?download=true',headers=headers,method='HEAD')
+                  with urllib.request.urlopen(req,timeout=90) as rr:
+                    bsize=int(rr.headers.get('x-linked-size') or rr.headers.get('content-length') or 0)
+                    betag=(rr.headers.get('x-linked-etag') or rr.headers.get('etag') or '').strip('"')
+                    bpath=candidate; break
+                except Exception: pass
+            tags=' '.join([str(x) for x in (basecfg.get('architectures') or [])]+[repo,base or '',readme[:12000]]).lower()
+            geometry='UNKNOWN'
+            if any(s in tags for s in ['segformer','semantic segmentation','semantic-segmentation']): geometry='SEMANTIC_SEGMENTATION'
+            elif any(s in tags for s in ['depth','dpt','zoedepth']): geometry='DEPTH_FIELD'
+            elif any(s in tags for s in ['keypoint','pose estimation','pose-estimation']): geometry='KEYPOINT_POSE'
+            elif any(s in tags for s in ['optical flow','optical-flow','raft']): geometry='OPTICAL_FLOW'
+            elif any(s in tags for s in ['detr','object detection','object-detection']): geometry='OBJECT_DETECTION'
+            elif any(s in tags for s in ['anomaly','anomaly detection']): geometry='ANOMALY_FIELD'
+            elif any(s in tags for s in ['point cloud','pointnet','point-cloud']): geometry='POINT_CLOUD'
+            lic=frontmatter_license(readme)
+            holds=[]; score=0
+            if lic: score+=15
+            else: holds.append('LICENSE_MISSING')
+            if brev: score+=12
+            else: holds.append('BASE_REVISION_UNRESOLVED')
+            if bpath: score+=10
+            else: holds.append('BASE_SAFETENSORS_UNRESOLVED')
+            if cfg.get('target_modules'): score+=10
+            else: holds.append('TARGETS_MISSING')
+            if cfg.get('peft_type') in ('LORA','ADALORA'): score+=8
+            else: holds.append('PEFT_VARIANT_'+str(cfg.get('peft_type')))
+            if geometry!='UNKNOWN': score+=15
+            else: holds.append('OUTPUT_GEOMETRY_UNCLEAR')
+            if asize and asize<=50_000_000: score+=10
+            elif asize and asize<=200_000_000: score+=4
+            else: holds.append('ADAPTER_SIZE_LARGE_OR_UNKNOWN')
+            if bsize and bsize<=1_200_000_000: score+=10
+            elif bsize and bsize<=3_000_000_000: score+=4
+            else: holds.append('BASE_SIZE_LARGE_OR_UNKNOWN')
+            if not cfg.get('modules_to_save'): score+=5
+            else: holds.append('AUXILIARY_MODULES_PRESENT')
+            if 'trust_remote_code' not in readme.lower(): score+=5
+            else: holds.append('REMOTE_CODE_MENTION')
+            deterministic={'SEMANTIC_SEGMENTATION','DEPTH_FIELD','KEYPOINT_POSE','OPTICAL_FLOW','OBJECT_DETECTION','ANOMALY_FIELD','POINT_CLOUD'}
+            if geometry in deterministic: score+=10
+            folder=root/'files'/repo.replace('/','__'); folder.mkdir(parents=True,exist_ok=True)
+            (folder/'adapter_config.json').write_bytes(cfgb)
+            if readmeb: (folder/'README.md').write_bytes(readmeb)
+            if basecfgb: (folder/'base_config.json').write_bytes(basecfgb)
+            audited.append({
+              'repo':repo,'revision':r,'license':lic,'geometry':geometry,'score':score,'holds':holds,
+              'adapter_size_bytes':asize,'adapter_etag_or_oid':aetag,'adapter_config_sha256':hashlib.sha256(cfgb).hexdigest(),
+              'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),
+              'target_modules':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),'base_repo':base,'base_revision':brev,
+              'base_weight_path':bpath,'base_weight_size_or_index_bytes':bsize,'base_etag_or_oid':betag,
+              'base_model_type':basecfg.get('model_type'),'base_architectures':basecfg.get('architectures'),
+              'raw_weight_bytes_downloaded':0,'model_outputs_observed':0
+            })
+            time.sleep(0.4)
+          audited.sort(key=lambda x:(-x['score'],x['repo']))
+          receipt={'schema':'LUCIA_AA_R2_25_24_C24_DENSE_OUTPUT_METADATA_AUDIT_V1','queries':terms,
+                   'search_repo_count':len(repos),'audited_standard_peft_count':len(audited),'search_errors':search_errors,
+                   'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':audited}
+          (root/'C24_METADATA_AUDIT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          import csv
+          with (root/'C24_METADATA_AUDIT.csv').open('w',newline='',encoding='utf-8') as f:
+            w=csv.DictWriter(f,fieldnames=['repo','geometry','score','license','adapter_size_bytes','base_repo','base_revision','base_weight_size_or_index_bytes','peft_type','task_type','modules_to_save','holds'])
+            w.writeheader()
+            for x in audited:
+              y={k:x.get(k) for k in w.fieldnames}; y['holds']='|'.join(x['holds']); w.writerow(y)
+          print(json.dumps({'searched':len(repos),'audited':len(audited),'top':audited[:12]},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_DENSE_OUTPUT_METADATA
+          path: ${{ runner.temp }}/LAA_R22524_C24_METADATA
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
