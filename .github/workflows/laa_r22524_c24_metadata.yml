@@ -1,4 +1,4 @@
-name: Temporary LAA R22524 C24 fast VQA metadata audit
+name: Temporary LAA R22524 C24 grammar-repair metadata audit
 
 on:
   pull_request:
@@ -11,28 +11,28 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Fast exact audit of small VQA PEFT candidates without weight bytes
+      - name: Audit standard PEFT grammar and spelling repair candidates without weight bytes
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22524_C24_FAST_VQA"; mkdir -p "$ROOT/files"
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_GEC_METADATA"; mkdir -p "$ROOT/files"
           python - <<'PY'
           import json,os,pathlib,re,subprocess,time,urllib.error,urllib.parse,urllib.request
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_FAST_VQA';headers={'User-Agent':'LUCIA-AA-R22524-Fast-VQA/2.0'}
-          terms=['SmolVLM','SmolVLM2','PaliGemma VQA','Florence-2 VQA','ChartQA','DocVQA']
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_GEC_METADATA';headers={'User-Agent':'LUCIA-AA-R22524-GEC-Metadata/1.0'}
+          terms=['grammar correction lora','grammatical error correction peft','GEC LoRA','t5 grammar correction lora','flan-t5 grammar correction','spelling correction lora','text correction peft','punctuation restoration lora']
           def get(url,method='GET'):
-            for i in range(6):
+            for i in range(7):
               try:
                 q=urllib.request.Request(url,headers=headers,method=method)
-                with urllib.request.urlopen(q,timeout=120) as r:return dict(r.headers) if method=='HEAD' else r.read()
+                with urllib.request.urlopen(q,timeout=150) as r:return dict(r.headers) if method=='HEAD' else r.read()
               except urllib.error.HTTPError as e:
                 if e.code in (403,404):return None
-                if e.code in (429,500,502,503,504):time.sleep(min(20,2**i));continue
+                if e.code in (429,500,502,503,504):time.sleep(min(30,2**i));continue
                 raise
-              except Exception:time.sleep(min(10,2**i))
+              except Exception:time.sleep(min(20,2**i))
             return None
           def js(url):
             b=get(url);return json.loads(b) if b else {}
@@ -42,20 +42,21 @@ jobs:
             except Exception:return None
           repos=[]
           for term in terms:
-            rows=js('https://huggingface.co/api/models?search='+urllib.parse.quote(term)+'&limit=35&sort=downloads&direction=-1')
+            rows=js('https://huggingface.co/api/models?search='+urllib.parse.quote(term)+'&limit=50&sort=downloads&direction=-1')
             for x in rows if isinstance(rows,list) else []:
               rid=x.get('id') or x.get('modelId')
               if rid and rid not in repos:repos.append(rid)
-          rows=[]
-          for repo in repos[:80]:
+            time.sleep(.6)
+          out=[]
+          for repo in repos[:160]:
             r=rev(repo)
             if not r:continue
             cb=get(f'https://huggingface.co/{repo}/resolve/{r}/adapter_config.json?download=true')
             if not cb:continue
             try:c=json.loads(cb)
             except Exception:continue
-            h=get(f'https://huggingface.co/{repo}/resolve/{r}/adapter_model.safetensors?download=true','HEAD')
-            if not h:continue
+            ah=get(f'https://huggingface.co/{repo}/resolve/{r}/adapter_model.safetensors?download=true','HEAD')
+            if not ah:continue
             rb=get(f'https://huggingface.co/{repo}/resolve/{r}/README.md?download=true') or b'';text=rb.decode('utf-8','replace')
             api=js('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/'));card=api.get('cardData') or {};lic=card.get('license') or api.get('license')
             if not lic:
@@ -72,8 +73,8 @@ jobs:
               for k,v in x.items():
                 if k.lower() in ('x-linked-size','content-length') and str(v).isdigit():return int(v)
               return 0
-            low=(repo+' '+str(base)+' '+text[:10000]).lower()
-            g='CHART_QA' if 'chartqa' in low else 'DOCUMENT_VQA' if ('docvqa' in low or 'document vqa' in low) else 'PROCEDURAL_VQA'
+            low=(repo+' '+str(base)+' '+text[:18000]).lower()
+            g='GRAMMAR_ERROR_CORRECTION' if any(s in low for s in ['grammar','grammatical','gec']) else 'SPELLING_TEXT_REPAIR' if any(s in low for s in ['spelling','correction','punctuation']) else 'UNKNOWN'
             holds=[]
             if not lic:holds.append('ADAPTER_LICENSE_MISSING')
             if not blic:holds.append('BASE_LICENSE_MISSING')
@@ -81,21 +82,22 @@ jobs:
             if not bp:holds.append('BASE_WEIGHT_UNRESOLVED')
             if c.get('peft_type')!='LORA':holds.append('NONSTANDARD_PEFT')
             if not c.get('target_modules'):holds.append('TARGETS_MISSING')
-            if sz(h)>150_000_000 or sz(h)==0:holds.append('ADAPTER_RESOURCE_HOLD')
+            if g=='UNKNOWN':holds.append('TASK_UNCLEAR')
+            if sz(ah)>100_000_000 or sz(ah)==0:holds.append('ADAPTER_RESOURCE_HOLD')
             if bp and bp.endswith('index.json'):holds.append('SHARDED_BASE_PREFLIGHT')
-            elif sz(bh)>2_000_000_000 or sz(bh)==0:holds.append('BASE_RESOURCE_HOLD')
+            elif sz(bh)>1_500_000_000 or sz(bh)==0:holds.append('BASE_RESOURCE_HOLD')
             score=100-10*len(holds)
             folder=root/'files'/repo.replace('/','__');folder.mkdir(parents=True,exist_ok=True);(folder/'adapter_config.json').write_bytes(cb)
             if rb:(folder/'README.md').write_bytes(rb)
-            rows.append({'repo':repo,'revision':r,'license':lic,'geometry':g,'score':score,'holds':holds,'adapter_size_bytes':sz(h),'rank':c.get('r'),'alpha':c.get('lora_alpha'),'target_modules':c.get('target_modules'),'modules_to_save':c.get('modules_to_save'),'base_repo':base,'base_revision':br,'base_license':blic,'base_weight_path':bp,'base_weight_size_or_index_bytes':sz(bh),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0})
-          rows.sort(key=lambda x:(-x['score'],x['repo']))
-          (root/'C24_FAST_VQA_AUDIT.json').write_text(json.dumps({'schema':'LUCIA_AA_R2_25_24_C24_FAST_VQA_AUDIT_V1','searched':len(repos),'rows':rows,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0},indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'searched':len(repos),'audited':len(rows),'top':rows[:20]},indent=2))
+            out.append({'repo':repo,'revision':r,'license':lic,'geometry':g,'score':score,'holds':holds,'adapter_size_bytes':sz(ah),'rank':c.get('r'),'alpha':c.get('lora_alpha'),'target_modules':c.get('target_modules'),'modules_to_save':c.get('modules_to_save'),'task_type':c.get('task_type'),'base_repo':base,'base_revision':br,'base_license':blic,'base_weight_path':bp,'base_weight_size_or_index_bytes':sz(bh),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0})
+          out.sort(key=lambda x:(-x['score'],x['repo']))
+          rec={'schema':'LUCIA_AA_R2_25_24_C24_GEC_METADATA_AUDIT_V1','searched':len(repos),'rows':out,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          (root/'C24_GEC_METADATA_AUDIT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n');print(json.dumps({'searched':len(repos),'audited':len(out),'top':out[:30]},indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22524_C24_FAST_VQA_AUDIT
-          path: ${{ runner.temp }}/LAA_R22524_C24_FAST_VQA
+          name: LAA_R22524_C24_GEC_METADATA_AUDIT
+          path: ${{ runner.temp }}/LAA_R22524_C24_GEC_METADATA
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
