@@ -1,4 +1,4 @@
-name: Temporary LAA R22524 C24 small seq2seq translation metadata audit
+name: Temporary LAA R22524 C24 Malayalam speech-translation metadata audit
 
 on:
   pull_request:
@@ -11,94 +11,90 @@ permissions:
 jobs:
   metadata:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-      - name: Audit small licensed translation and text-normalization PEFT candidates
+      - name: Pin exact speech-translation Adapter, Base and processor without weight bytes
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22524_C24_TRANSLATION_METADATA";mkdir -p "$ROOT/files"
-          python - <<'PY'
-          import json,os,pathlib,re,subprocess,time,urllib.error,urllib.parse,urllib.request
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_TRANSLATION_METADATA';headers={'User-Agent':'LUCIA-AA-R22524-Translation-Metadata/1.0'}
-          terms=['flan-t5-small translation lora','t5-small translation lora','translation peft adapter','machine translation lora t5','opus-mt lora','mt5-small translation lora','text normalization lora t5','transliteration lora t5']
-          def get(url,method='GET'):
-            for i in range(7):
-              try:
-                q=urllib.request.Request(url,headers=headers,method=method)
-                with urllib.request.urlopen(q,timeout=150) as r:return dict(r.headers) if method=='HEAD' else r.read()
-              except urllib.error.HTTPError as e:
-                if e.code in (403,404):return None
-                if e.code in (429,500,502,503,504):time.sleep(min(30,2**i));continue
-                raise
-              except Exception:time.sleep(min(20,2**i))
-            return None
-          def js(url):
-            b=get(url);return json.loads(b) if b else {}
-          def rev(repo):
-            try:
-              x=subprocess.check_output(['git','ls-remote','https://huggingface.co/'+repo,'refs/heads/main'],text=True,timeout=90).split();return x[0] if x and len(x[0])==40 else None
-            except Exception:return None
-          repos=[]
-          for term in terms:
-            rows=js('https://huggingface.co/api/models?search='+urllib.parse.quote(term)+'&limit=60&sort=downloads&direction=-1')
-            for x in rows if isinstance(rows,list) else []:
-              rid=x.get('id') or x.get('modelId')
-              if rid and rid not in repos:repos.append(rid)
-          out=[]
-          for repo in repos[:180]:
-            r=rev(repo)
-            if not r:continue
-            cb=get(f'https://huggingface.co/{repo}/resolve/{r}/adapter_config.json?download=true')
-            if not cb:continue
-            try:c=json.loads(cb)
-            except Exception:continue
-            ah=get(f'https://huggingface.co/{repo}/resolve/{r}/adapter_model.safetensors?download=true','HEAD')
-            if not ah:continue
-            rb=get(f'https://huggingface.co/{repo}/resolve/{r}/README.md?download=true') or b'';text=rb.decode('utf-8','replace')
-            api=js('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/'));card=api.get('cardData') or {};lic=card.get('license') or api.get('license')
-            if not lic:
-              m=re.search(r'(?im)^license:\s*([^\s#]+)',text);lic=m.group(1) if m else None
-            base=c.get('base_model_name_or_path')
-            aliases={'t5-small':'google-t5/t5-small','t5-base':'google-t5/t5-base','google/flan-t5-small':'google/flan-t5-small','google/mt5-small':'google/mt5-small'}
-            canonical=aliases.get(base,base)
-            br=rev(canonical) if isinstance(canonical,str) and '/' in canonical and not canonical.startswith('/') else None
-            bapi=js('https://huggingface.co/api/models/'+urllib.parse.quote(canonical,safe='/')) if br else {};bc=bapi.get('cardData') or {};blic=bc.get('license') or bapi.get('license')
-            bp=None;bh=None
-            if br:
-              for p in ('model.safetensors','model.safetensors.index.json'):
-                z=get(f'https://huggingface.co/{canonical}/resolve/{br}/{p}?download=true','HEAD')
-                if z:bp=p;bh=z;break
-            def sz(x):
-              if not x:return 0
-              for k,v in x.items():
-                if k.lower() in ('x-linked-size','content-length') and str(v).isdigit():return int(v)
-              return 0
-            low=(repo+' '+str(base)+' '+text[:18000]).lower();g='TRANSLATION' if any(s in low for s in ['translation','translate','machine translation','opus-mt']) else 'TEXT_NORMALIZATION' if any(s in low for s in ['normalization','transliteration']) else 'UNKNOWN'
-            holds=[]
-            if not lic:holds.append('ADAPTER_LICENSE_MISSING')
-            if not blic:holds.append('BASE_LICENSE_MISSING')
-            if not br:holds.append('BASE_REVISION_UNRESOLVED')
-            if not bp:holds.append('BASE_SAFETENSORS_UNRESOLVED')
-            if c.get('peft_type')!='LORA':holds.append('NONSTANDARD_PEFT')
-            if not c.get('target_modules'):holds.append('TARGETS_MISSING')
-            if g=='UNKNOWN':holds.append('TASK_UNCLEAR')
-            if sz(ah)>100_000_000 or sz(ah)==0:holds.append('ADAPTER_RESOURCE_HOLD')
-            if bp and bp.endswith('index.json'):holds.append('SHARDED_BASE_PREFLIGHT')
-            elif sz(bh)>1_500_000_000 or sz(bh)==0:holds.append('BASE_RESOURCE_HOLD')
-            score=100-10*len(holds)
-            folder=root/'files'/repo.replace('/','__');folder.mkdir(parents=True,exist_ok=True);(folder/'adapter_config.json').write_bytes(cb)
-            if rb:(folder/'README.md').write_bytes(rb)
-            out.append({'repo':repo,'revision':r,'license':lic,'geometry':g,'score':score,'holds':holds,'adapter_size_bytes':sz(ah),'rank':c.get('r'),'alpha':c.get('lora_alpha'),'target_modules':c.get('target_modules'),'modules_to_save':c.get('modules_to_save'),'task_type':c.get('task_type'),'declared_base_repo':base,'base_repo':canonical,'base_revision':br,'base_license':blic,'base_weight_path':bp,'base_weight_size_or_index_bytes':sz(bh),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0})
-          out.sort(key=lambda x:(-x['score'],x['repo']))
-          (root/'C24_TRANSLATION_METADATA_AUDIT.json').write_text(json.dumps({'schema':'LUCIA_AA_R2_25_24_C24_TRANSLATION_METADATA_AUDIT_V1','searched':len(repos),'rows':out,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0},indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'searched':len(repos),'audited':len(out),'top':out[:30]},indent=2))
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_MAL_EN_METADATA";mkdir -p "$ROOT/adapter" "$ROOT/base"
+          A_REPO='Be-win/whisper-small-mal-en-lora'
+          B_REPO='openai/whisper-small'
+          A_REV="$(git ls-remote "https://huggingface.co/${A_REPO}" refs/heads/main | awk '{print $1}')"
+          B_REV="$(git ls-remote "https://huggingface.co/${B_REPO}" refs/heads/main | awk '{print $1}')"
+          test "${#A_REV}" = 40; test "${#B_REV}" = 40
+          fetch_optional() {
+            local repo="$1" rev="$2" path="$3" out="$4"
+            if curl -L --fail --retry 7 --retry-all-errors --connect-timeout 30 --max-time 420 \
+              -A 'LUCIA-AA-R22524-MetadataOnly/4.0' \
+              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"; then return 0; fi
+            rm -f "$out"; return 1
+          }
+          for name in README.md adapter_config.json preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do
+            fetch_optional "$A_REPO" "$A_REV" "$name" "$ROOT/adapter/$name" || true
+          done
+          for name in README.md LICENSE config.json preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do
+            fetch_optional "$B_REPO" "$B_REV" "$name" "$ROOT/base/$name" || true
+          done
+          test -f "$ROOT/adapter/adapter_config.json"; test -f "$ROOT/base/config.json"; test -f "$ROOT/base/preprocessor_config.json"
+          curl -sSIL --retry 6 --retry-all-errors \
+            "https://huggingface.co/${A_REPO}/resolve/${A_REV}/adapter_model.safetensors?download=true" > "$ROOT/adapter/adapter_weight_headers.txt"
+          curl -sSIL --retry 6 --retry-all-errors \
+            "https://huggingface.co/${B_REPO}/resolve/${B_REV}/model.safetensors?download=true" > "$ROOT/base/base_weight_headers.txt"
+          A_REPO="$A_REPO" A_REV="$A_REV" B_REPO="$B_REPO" B_REV="$B_REV" python - <<'PY'
+          import hashlib,json,os,pathlib,re
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_MAL_EN_METADATA'
+          def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def headers(path):
+            text=pathlib.Path(path).read_text(errors='replace');blocks=[]
+            for block in re.split(r'\r?\n\r?\n',text):
+              item={}
+              for line in block.splitlines():
+                if ':' in line:
+                  k,v=line.split(':',1);item[k.strip().lower()]=v.strip()
+              if item:blocks.append(item)
+            size=None;etag=None
+            for x in blocks:
+              size=size or x.get('x-linked-size') or x.get('content-length')
+              etag=etag or x.get('x-linked-etag') or x.get('etag')
+            return {'size_bytes':int(size) if size and str(size).isdigit() else size,'etag_or_oid':etag,'blocks':blocks}
+          cfg=json.loads((root/'adapter/adapter_config.json').read_text())
+          base_cfg=json.loads((root/'base/config.json').read_text())
+          pp=json.loads((root/'base/preprocessor_config.json').read_text())
+          readme=(root/'adapter/README.md').read_text(errors='replace') if (root/'adapter/README.md').exists() else ''
+          rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file() and not x.name.endswith('_headers.txt')):
+            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':sha(p)})
+          low=readme.lower()
+          task_evidence={
+            'speech_translation_tag':('speech-translation' in low or 'translation' in low),
+            'malayalam_evidence':('malayalam' in low or ' mal ' in low),
+            'english_target_evidence':('english' in low or ' mal-en' in low),
+          }
+          receipt={
+            'schema':'LUCIA_AA_R2_25_24_C24_MAL_EN_METADATA_V1',
+            'candidate_id':'R22524-C24-WHISPER-SMALL-MALAYALAM-ENGLISH-TRANSLATION',
+            'scientific_question':'Does the Malayalam-to-English Whisper LoRA add compositional speech translation beyond ASR, and which capability/failure mechanisms cause the change?',
+            'adapter_repo':os.environ['A_REPO'],'adapter_revision':os.environ['A_REV'],'adapter_license':'apache-2.0',
+            'base_repo':os.environ['B_REPO'],'base_revision':os.environ['B_REV'],'base_license':'apache-2.0',
+            'adapter_config':cfg,'base_model_type':base_cfg.get('model_type'),'base_architectures':base_cfg.get('architectures'),
+            'processor':pp,'task_evidence':task_evidence,
+            'adapter_weight_object':headers(root/'adapter/adapter_weight_headers.txt'),
+            'base_weight_object':headers(root/'base/base_weight_headers.txt'),
+            'metadata_files':rows,
+            'output_geometry':'Malayalam waveform -> autoregressive English semantic token sequence',
+            'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,
+          }
+          if cfg.get('peft_type')!='LORA' or not cfg.get('target_modules'):raise SystemExit('Not standard target-bearing LoRA')
+          if not all(task_evidence.values()):raise SystemExit(str(task_evidence))
+          (root/'C24_MAL_EN_METADATA_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'candidate_id':receipt['candidate_id'],'adapter_revision':receipt['adapter_revision'],'base_revision':receipt['base_revision'],'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'targets':cfg.get('target_modules'),'task_evidence':task_evidence,'adapter_weight':receipt['adapter_weight_object'],'base_weight':receipt['base_weight_object']},indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: LAA_R22524_C24_TRANSLATION_METADATA_AUDIT
-          path: ${{ runner.temp }}/LAA_R22524_C24_TRANSLATION_METADATA
+          name: LAA_R22524_C24_MAL_EN_METADATA
+          path: ${{ runner.temp }}/LAA_R22524_C24_MAL_EN_METADATA
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
