@@ -3,6 +3,8 @@ name: R22527 metadata-only candidate search
 on:
   push:
     branches: [agent/r22527-metadata-search]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -21,13 +23,14 @@ jobs:
         run: |
           python -m pip install 'requests==2.32.5'
           python - <<'PY'
-          import json, requests, time, re
+          import json, requests
           from pathlib import Path
           S=requests.Session(); S.headers['User-Agent']='LUCIA-AA-R22527-metadata-only/1.0'
           terms=[
             'whisper lora translation','speech translation lora','whisper translate lora',
             'speech-to-text translation peft','whisper french translation lora',
-            'whisper english translation lora','whisper multilingual lora'
+            'whisper english translation lora','whisper multilingual lora',
+            'whisper covost lora','whisper must-c lora'
           ]
           seen={}; rows=[]
           for term in terms:
@@ -37,31 +40,22 @@ jobs:
             except Exception as e:
               rows.append({'search_term':term,'search_error':repr(e)}); continue
             for m in data:
-              rid=m.get('id');
+              rid=m.get('id')
               if not rid or rid in seen: continue
               seen[rid]=1
               siblings={x.get('rfilename') for x in m.get('siblings',[]) if x.get('rfilename')}
               if 'adapter_config.json' not in siblings or 'adapter_model.safetensors' not in siblings: continue
               lic=(m.get('cardData') or {}).get('license') or next((t.split(':',1)[1] for t in m.get('tags',[]) if t.startswith('license:')),None)
-              cfg=None; readme=None
               try:
-                u=f'https://huggingface.co/{rid}/resolve/main/adapter_config.json'
-                rr=S.get(u,timeout=30); rr.raise_for_status(); cfg=rr.json()
+                rr=S.get(f'https://huggingface.co/{rid}/resolve/main/adapter_config.json',timeout=30); rr.raise_for_status(); cfg=rr.json()
               except Exception as e: cfg={'_error':repr(e)}
               try:
-                rr=S.get(f'https://huggingface.co/{rid}/raw/main/README.md',timeout=30)
-                if rr.ok: readme=rr.text[:12000]
-              except Exception: pass
-              text=(readme or '').lower()
+                rr=S.get(f'https://huggingface.co/{rid}/raw/main/README.md',timeout=30); readme=rr.text[:16000] if rr.ok else ''
+              except Exception: readme=''
+              text=readme.lower()
               task_words=[w for w in ['translation','translate','speech translation','automatic speech recognition','common voice','fleurs','covost','must-c'] if w in text]
               weight=next((x for x in m.get('siblings',[]) if x.get('rfilename')=='adapter_model.safetensors'),{})
-              rows.append({
-                'repo':rid,'sha':m.get('sha'),'lastModified':m.get('lastModified'),'pipeline_tag':m.get('pipeline_tag'),
-                'library_name':m.get('library_name'),'license':lic,'downloads':m.get('downloads'),'likes':m.get('likes'),
-                'adapter_config':cfg,'task_words':task_words,'siblings':sorted(siblings),
-                'adapter_lfs':weight.get('lfs'),'adapter_size':weight.get('size'),
-                'readme_excerpt':(readme or '')[:4000]
-              })
+              rows.append({'repo':rid,'sha':m.get('sha'),'lastModified':m.get('lastModified'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),'license':lic,'downloads':m.get('downloads'),'likes':m.get('likes'),'adapter_config':cfg,'task_words':task_words,'siblings':sorted(siblings),'adapter_lfs':weight.get('lfs'),'adapter_size':weight.get('size'),'readme_excerpt':readme[:5000]})
           Path('r22527_hf_candidates.json').write_text(json.dumps(rows,ensure_ascii=False,indent=2,sort_keys=True),encoding='utf-8')
           print('rows',len(rows))
           for x in rows:
