@@ -1,4 +1,4 @@
-name: Temporary LAA R22524 C24 Malayalam speech-translation metadata audit
+name: Temporary LAA R22524 C24 exact split courier
 
 on:
   pull_request:
@@ -9,92 +9,68 @@ permissions:
   contents: read
 
 jobs:
-  metadata:
+  courier:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
-      - name: Pin exact speech-translation Adapter, Base and processor without weight bytes
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact allowlisted Whisper-small translation source and split archive
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$RUNNER_TEMP/LAA_R22524_C24_MAL_EN_METADATA";mkdir -p "$ROOT/adapter" "$ROOT/base"
-          A_REPO='Be-win/whisper-small-mal-en-lora'
-          B_REPO='openai/whisper-small'
-          A_REV="$(git ls-remote "https://huggingface.co/${A_REPO}" refs/heads/main | awk '{print $1}')"
-          B_REV="$(git ls-remote "https://huggingface.co/${B_REPO}" refs/heads/main | awk '{print $1}')"
-          test "${#A_REV}" = 40; test "${#B_REV}" = 40
-          fetch_optional() {
-            local repo="$1" rev="$2" path="$3" out="$4"
-            if curl -L --fail --retry 7 --retry-all-errors --connect-timeout 30 --max-time 420 \
-              -A 'LUCIA-AA-R22524-MetadataOnly/4.0' \
-              -o "$out" "https://huggingface.co/${repo}/resolve/${rev}/${path}?download=true"; then return 0; fi
-            rm -f "$out"; return 1
-          }
-          for name in README.md adapter_config.json preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do
-            fetch_optional "$A_REPO" "$A_REV" "$name" "$ROOT/adapter/$name" || true
-          done
-          for name in README.md LICENSE config.json preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do
-            fetch_optional "$B_REPO" "$B_REV" "$name" "$ROOT/base/$name" || true
-          done
-          test -f "$ROOT/adapter/adapter_config.json"; test -f "$ROOT/base/config.json"; test -f "$ROOT/base/preprocessor_config.json"
-          curl -sSIL --retry 6 --retry-all-errors \
-            "https://huggingface.co/${A_REPO}/resolve/${A_REV}/adapter_model.safetensors?download=true" > "$ROOT/adapter/adapter_weight_headers.txt"
-          curl -sSIL --retry 6 --retry-all-errors \
-            "https://huggingface.co/${B_REPO}/resolve/${B_REV}/model.safetensors?download=true" > "$ROOT/base/base_weight_headers.txt"
-          A_REPO="$A_REPO" A_REV="$A_REV" B_REPO="$B_REPO" B_REV="$B_REV" python - <<'PY'
-          import hashlib,json,os,pathlib,re
-          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_MAL_EN_METADATA'
-          def sha(p):return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
-          def headers(path):
-            text=pathlib.Path(path).read_text(errors='replace');blocks=[]
-            for block in re.split(r'\r?\n\r?\n',text):
-              item={}
-              for line in block.splitlines():
-                if ':' in line:
-                  k,v=line.split(':',1);item[k.strip().lower()]=v.strip()
-              if item:blocks.append(item)
-            size=None;etag=None
-            for x in blocks:
-              size=size or x.get('x-linked-size') or x.get('content-length')
-              etag=etag or x.get('x-linked-etag') or x.get('etag')
-            return {'size_bytes':int(size) if size and str(size).isdigit() else size,'etag_or_oid':etag,'blocks':blocks}
-          cfg=json.loads((root/'adapter/adapter_config.json').read_text())
-          base_cfg=json.loads((root/'base/config.json').read_text())
-          pp=json.loads((root/'base/preprocessor_config.json').read_text())
-          readme=(root/'adapter/README.md').read_text(errors='replace') if (root/'adapter/README.md').exists() else ''
-          rows=[]
-          for p in sorted(x for x in root.rglob('*') if x.is_file() and not x.name.endswith('_headers.txt')):
-            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':sha(p)})
-          low=readme.lower()
-          task_evidence={
-            'speech_translation_tag':('speech-translation' in low or 'translation' in low),
-            'malayalam_evidence':('malayalam' in low or ' mal ' in low),
-            'english_target_evidence':('english' in low or ' mal-en' in low),
-          }
-          receipt={
-            'schema':'LUCIA_AA_R2_25_24_C24_MAL_EN_METADATA_V1',
-            'candidate_id':'R22524-C24-WHISPER-SMALL-MALAYALAM-ENGLISH-TRANSLATION',
-            'scientific_question':'Does the Malayalam-to-English Whisper LoRA add compositional speech translation beyond ASR, and which capability/failure mechanisms cause the change?',
-            'adapter_repo':os.environ['A_REPO'],'adapter_revision':os.environ['A_REV'],'adapter_license':'apache-2.0',
-            'base_repo':os.environ['B_REPO'],'base_revision':os.environ['B_REV'],'base_license':'apache-2.0',
-            'adapter_config':cfg,'base_model_type':base_cfg.get('model_type'),'base_architectures':base_cfg.get('architectures'),
-            'processor':pp,'task_evidence':task_evidence,
-            'adapter_weight_object':headers(root/'adapter/adapter_weight_headers.txt'),
-            'base_weight_object':headers(root/'base/base_weight_headers.txt'),
-            'metadata_files':rows,
-            'output_geometry':'Malayalam waveform -> autoregressive English semantic token sequence',
-            'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,
-          }
-          if cfg.get('peft_type')!='LORA' or not cfg.get('target_modules'):raise SystemExit('Not standard target-bearing LoRA')
-          if not all(task_evidence.values()):raise SystemExit(str(task_evidence))
-          (root/'C24_MAL_EN_METADATA_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
-          print(json.dumps({'candidate_id':receipt['candidate_id'],'adapter_revision':receipt['adapter_revision'],'base_revision':receipt['base_revision'],'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'targets':cfg.get('target_modules'),'task_evidence':task_evidence,'adapter_weight':receipt['adapter_weight_object'],'base_weight':receipt['base_weight_object']},indent=2))
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_EXACT"
+          SRC="$ROOT/source"; WHEELS="$ROOT/wheelhouse"; PARTS="$ROOT/parts"
+          mkdir -p "$SRC/adapter" "$SRC/base" "$WHEELS" "$PARTS"
+          A_REPO='Be-win/whisper-small-mal-en-lora'; A_REV='326fa07ed37811577e2b8aa8b3061dfa15743bdd'
+          B_REPO='openai/whisper-small'; B_REV='973afd24965f72e36ca33b3055d56a652f456b4d'
+          dl(){ curl -L --fail --retry 8 --retry-all-errors --connect-timeout 30 --max-time 3600 -A 'LUCIA-AA-R22524-Exact/1.0' -o "$4" "https://huggingface.co/$1/resolve/$2/$3?download=true"; }
+          for n in README.md adapter_config.json adapter_model.safetensors preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do dl "$A_REPO" "$A_REV" "$n" "$SRC/adapter/$n" || true; done
+          for n in README.md LICENSE config.json model.safetensors preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do dl "$B_REPO" "$B_REV" "$n" "$SRC/base/$n" || true; done
+          test "$(stat -c%s "$SRC/adapter/adapter_model.safetensors")" = '14196448'
+          test "$(sha256sum "$SRC/adapter/adapter_model.safetensors" | awk '{print $1}')" = 'e6ccbca5a7e47cdb90a4867c46f6fda26ca35e599cc38ec984d447193c88ca8c'
+          test "$(stat -c%s "$SRC/base/model.safetensors")" = '966995080'
+          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b'
+          if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then echo forbidden >&2; exit 1; fi
+          python - <<'PY'
+          import json,struct,os,pathlib
+          r=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_EXACT/source'
+          for rel in ('adapter/adapter_model.safetensors','base/model.safetensors'):
+            with (r/rel).open('rb') as f:n=struct.unpack('<Q',f.read(8))[0];h=json.loads(f.read(n))
+            t=[k for k in h if k!='__metadata__'];assert t,rel;print(rel,len(t))
           PY
+          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
+            'transformers==4.57.1' 'peft==0.19.1' 'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'safetensors==0.7.0'
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_EXACT';rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file() and 'parts' not in x.parts):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for b in iter(lambda:f.read(1<<20),b''):h.update(b)
+            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          rec={'schema':'LUCIA_AA_R2_25_24_C24_EXACT_COURIER_V1','candidate_id':'R22524-C24-WHISPER-SMALL-MALAYALAM-ENGLISH-TRANSLATION','adapter_revision':'326fa07ed37811577e2b8aa8b3061dfa15743bdd','base_revision':'973afd24965f72e36ca33b3055d56a652f456b4d','raw_weight_committed_to_git':False,'files':rows}
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
+          PY
+          (cd "$ROOT" && tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf EXACT_SOURCE.tar source wheelhouse COURIER_RECEIPT.json)
+          sha256sum "$ROOT/EXACT_SOURCE.tar" > "$ROOT/EXACT_SOURCE.tar.sha256"
+          split -b 300000000 -d -a 2 "$ROOT/EXACT_SOURCE.tar" "$PARTS/part_"
+          (cd "$PARTS" && sha256sum part_* > PARTS_SHA256.txt && wc -c part_* > PARTS_SIZES.txt)
       - uses: actions/upload-artifact@v4
-        with:
-          name: LAA_R22524_C24_MAL_EN_METADATA
-          path: ${{ runner.temp }}/LAA_R22524_C24_MAL_EN_METADATA
-          retention-days: 1
-          compression-level: 0
-          if-no-files-found: error
+        with: {name: LAA_R22524_C24_PART_00, path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_00, retention-days: 1, compression-level: 0, if-no-files-found: error}
+      - uses: actions/upload-artifact@v4
+        with: {name: LAA_R22524_C24_PART_01, path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_01, retention-days: 1, compression-level: 0, if-no-files-found: error}
+      - uses: actions/upload-artifact@v4
+        with: {name: LAA_R22524_C24_PART_02, path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_02, retention-days: 1, compression-level: 0, if-no-files-found: error}
+      - uses: actions/upload-artifact@v4
+        with: {name: LAA_R22524_C24_PART_03, path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_03, retention-days: 1, compression-level: 0, if-no-files-found: error}
+      - uses: actions/upload-artifact@v4
+        with: {name: LAA_R22524_C24_PART_MANIFEST, path: |
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/PARTS_SHA256.txt
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/PARTS_SIZES.txt
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/EXACT_SOURCE.tar.sha256
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/COURIER_RECEIPT.json
+          , retention-days: 1, compression-level: 0, if-no-files-found: error}
