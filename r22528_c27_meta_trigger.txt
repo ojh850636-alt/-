@@ -1,0 +1,1 @@
+R22528 C27 metadata-only trigger. No raw model weights are committed.
