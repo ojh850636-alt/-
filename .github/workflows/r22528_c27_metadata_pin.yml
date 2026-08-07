@@ -1,4 +1,4 @@
-name: R22528 C27 metadata-only source pin
+name: R22528 C27 metadata-only source pin v2
 
 on:
   push:
@@ -17,38 +17,36 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: {python-version: '3.13'}
-      - name: Pin public metadata only
+      - name: Pin public metadata and LFS identities only
         run: |
           python -m pip install 'requests==2.32.5'
           python - <<'PY'
-          import hashlib,json,os,requests
+          import hashlib,json,requests
           from pathlib import Path
-          S=requests.Session(); S.headers['User-Agent']='LUCIA-AA-R22528-C27-metadata-only/1.0'
+          S=requests.Session(); S.headers['User-Agent']='LUCIA-AA-R22528-C27-metadata-only/2.0'
           repos=['uga-gaim/CLIPSeg-CloudSEN12Plus-LoRA','CIDAS/clipseg-rd64-refined']
-          out={'schema':'R22528_C27_METADATA_PIN_V1','raw_model_weight_bytes_downloaded':0,'repos':{}}
+          out={'schema':'R22528_C27_METADATA_PIN_V2','raw_model_weight_bytes_downloaded':0,'repos':{}}
           for repo in repos:
-            m=S.get('https://huggingface.co/api/models/'+repo,timeout=30); m.raise_for_status(); meta=m.json()
-            sha=meta.get('sha')
-            siblings=[]
-            for x in meta.get('siblings',[]):
-              row={'rfilename':x.get('rfilename'),'size':x.get('size')}
-              if x.get('lfs'): row['lfs']=x.get('lfs')
-              siblings.append(row)
+            r=S.get('https://huggingface.co/api/models/'+repo,params={'full':'true'},timeout=30); r.raise_for_status(); meta=r.json(); sha=meta['sha']
+            tree=S.get(f'https://huggingface.co/api/models/{repo}/tree/{sha}',params={'recursive':'true','expand':'true'},timeout=30); tree.raise_for_status(); entries=tree.json()
+            files={x.get('path'):x for x in entries if x.get('type')=='file'}
             card=meta.get('cardData') or {}
-            row={'repo':repo,'sha':sha,'license':card.get('license') or next((t.split(':',1)[1] for t in meta.get('tags',[]) if t.startswith('license:')),None),'pipeline_tag':meta.get('pipeline_tag'),'library_name':meta.get('library_name'),'siblings':siblings,'tags':meta.get('tags',[])}
+            row={'repo':repo,'sha':sha,'license':card.get('license') or next((t.split(':',1)[1] for t in meta.get('tags',[]) if t.startswith('license:')),None),'pipeline_tag':meta.get('pipeline_tag'),'library_name':meta.get('library_name'),'files':files}
             for rel in ['adapter_config.json','config.json','README.md']:
-              u=f'https://huggingface.co/{repo}/resolve/{sha}/{rel}'
-              r=S.get(u,timeout=30)
-              if r.ok:
-                row[rel]={'bytes':len(r.content),'sha256':hashlib.sha256(r.content).hexdigest(),'text':r.text[:20000]}
+              q=S.get(f'https://huggingface.co/{repo}/resolve/{sha}/{rel}',timeout=30)
+              if q.ok: row[rel]={'bytes':len(q.content),'sha256':hashlib.sha256(q.content).hexdigest(),'text':q.text[:20000]}
             out['repos'][repo]=row
-          Path('r22528_c27_metadata_pin.json').write_text(json.dumps(out,indent=2,sort_keys=True),encoding='utf-8')
-          print(json.dumps({r:{'sha':v['sha'],'license':v['license']} for r,v in out['repos'].items()},indent=2))
+          Path('r22528_c27_metadata_pin_v2.json').write_text(json.dumps(out,indent=2,sort_keys=True),encoding='utf-8')
+          for repo,row in out['repos'].items():
+            print('\n',repo,row['sha'],row['license'])
+            for fn in ('adapter_model.safetensors','model.safetensors'):
+              if fn in row['files']:
+                x=row['files'][fn]; print(fn,'size',x.get('size'),'lfs',x.get('lfs'),'oid',x.get('oid'))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: R22528_C27_METADATA_PIN
-          path: r22528_c27_metadata_pin.json
+          name: R22528_C27_METADATA_PIN_V2
+          path: r22528_c27_metadata_pin_v2.json
           compression-level: 0
           retention-days: 1
       - name: Publish run receipt
@@ -60,7 +58,7 @@ jobs:
         run: |
           python - <<'PY'
           import json,os,urllib.request
-          body={'body':f"R22528_C27_METADATA_RUN_ID={os.environ['RUN_ID']}"}
+          body={'body':f"R22528_C27_METADATA_V2_RUN_ID={os.environ['RUN_ID']}"}
           req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/26/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
           print(urllib.request.urlopen(req,timeout=30).read().decode())
           PY
