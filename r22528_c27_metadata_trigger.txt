@@ -1,0 +1,1 @@
+R22528 C27 metadata-only search trigger. No raw model bytes are downloaded by this branch.
