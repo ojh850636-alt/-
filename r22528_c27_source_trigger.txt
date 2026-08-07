@@ -1,0 +1,1 @@
+R22528 C27 exact-source courier trigger. No raw model bytes are committed here.
