@@ -1,0 +1,1 @@
+R22528 C27 semantic-segmentation metadata-only trigger. No raw model bytes committed.
