@@ -1,0 +1,120 @@
+name: R22528 C27 exact-source courier
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.13'}
+      - name: Pin and capture exact safetensors-only source
+        env: {HF_HUB_DISABLE_TELEMETRY: '1'}
+        run: |
+          python -m pip install 'huggingface_hub==0.36.0' 'safetensors==0.7.0' 'numpy==2.3.5' 'requests==2.32.5'
+          cat > /tmp/capture.py <<'PY'
+          from pathlib import Path
+          import hashlib,json,shutil,requests
+          from huggingface_hub import snapshot_download
+          from safetensors import safe_open
+          root=Path('bundle'); a=root/'adapter'; b=root/'base'; a.mkdir(parents=True); b.mkdir(parents=True)
+          ar='uga-gaim/CLIPSeg-CloudSEN12Plus-LoRA'; av='1001cdf50bf934d8d605c08cf91d28899087fa69'
+          br='CIDAS/clipseg-rd64-refined'
+          S=requests.Session(); S.headers['User-Agent']='LUCIA-AA-R22528-C27-courier/1.0'
+          bm=S.get(f'https://huggingface.co/api/models/{br}',timeout=30); bm.raise_for_status(); bm=bm.json(); bv=bm['sha']
+          bl=(bm.get('cardData') or {}).get('license') or next((x.split(':',1)[1] for x in bm.get('tags',[]) if x.startswith('license:')),None)
+          am=S.get(f'https://huggingface.co/api/models/{ar}',timeout=30); am.raise_for_status(); am=am.json()
+          if am.get('sha')!=av: raise SystemExit(f'adapter head drift: {am.get("sha")} != {av}')
+          al=(am.get('cardData') or {}).get('license') or next((x.split(':',1)[1] for x in am.get('tags',[]) if x.startswith('license:')),None)
+          pin={'schema':'R22528_C27_SOURCE_PIN_V1','adapter':{'repo':ar,'revision':av,'license':al},'base':{'repo':br,'revision':bv,'license':bl},'pin_before_bytes':True}
+          root.mkdir(exist_ok=True); (root/'SOURCE_PIN.json').write_text(json.dumps(pin,indent=2,sort_keys=True))
+          aa=['README.md','adapter_config.json','adapter_model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','tokenizer.json']
+          ba=['README.md','config.json','model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','tokenizer.json']
+          banned=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.ckpt','*.py','*.ipynb','onnx/**']
+          ac=snapshot_download(repo_id=ar,revision=av,allow_patterns=aa,ignore_patterns=banned)
+          bc=snapshot_download(repo_id=br,revision=bv,allow_patterns=ba,ignore_patterns=banned)
+          def cp(src,dst,names):
+            out=[]
+            for rel in names:
+              p=Path(src)/rel
+              if p.is_file(): q=dst/rel; q.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(p,q); out.append(rel)
+            return out
+          ca=cp(ac,a,aa); cb=cp(bc,b,ba)
+          bads={'.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack','.ckpt','.py','.ipynb'}
+          bad=[str(p) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in bads]
+          if bad: raise SystemExit(f'banned captured: {bad}')
+          def sha(p):
+            h=hashlib.sha256()
+            with open(p,'rb') as f:
+              for x in iter(lambda:f.read(1048576),b''): h.update(x)
+            return h.hexdigest()
+          def ts(p):
+            rows=[]
+            with safe_open(p,framework='numpy') as f:
+              for k in f.keys(): s=f.get_slice(k); rows.append({'key':k,'shape':[int(x) for x in s.get_shape()],'dtype':str(s.get_dtype())})
+            return rows
+          aw=a/'adapter_model.safetensors'; bw=b/'model.safetensors'
+          if not aw.is_file() or not bw.is_file(): raise SystemExit('required safetensors missing')
+          files=[]
+          for p in sorted(root.rglob('*')):
+            if p.is_file(): files.append({'path':p.relative_to(root).as_posix(),'size':p.stat().st_size,'sha256':sha(p)})
+          rep={'schema':'R22528_C27_EXACT_SOURCE_CAPTURE_V1','pin':pin,'adapter':{'repo':ar,'revision':av,'size':aw.stat().st_size,'sha256':sha(aw),'copied':ca,'tensors':ts(aw)},'base':{'repo':br,'revision':bv,'size':bw.stat().st_size,'sha256':sha(bw),'copied':cb,'training_time_revision_proven':False},'files':files,'trust_remote_code':False,'pickle_loaded':False,'banned_file_count':0}
+          (root/'CAPTURE_MANIFEST.json').write_text(json.dumps(rep,indent=2,sort_keys=True))
+          print(json.dumps({'adapter_bytes':aw.stat().st_size,'adapter_sha256':sha(aw),'base_revision':bv,'base_bytes':bw.stat().st_size,'base_sha256':sha(bw)},indent=2))
+          PY
+          python /tmp/capture.py
+          mkdir -p parts/meta parts/adapter parts/base
+          cp bundle/SOURCE_PIN.json bundle/CAPTURE_MANIFEST.json parts/meta/
+          find bundle/adapter -type f ! -name adapter_model.safetensors -exec cp --parents '{}' parts/meta/ \;
+          find bundle/base -type f ! -name model.safetensors -exec cp --parents '{}' parts/meta/ \;
+          cp bundle/adapter/adapter_model.safetensors parts/adapter/
+          split -b 180M -d -a 2 bundle/base/model.safetensors parts/base/base.part.
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          rows=[]
+          for p in sorted(Path('parts/base').glob('base.part.*')): rows.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          Path('parts/base/PARTS_MANIFEST.json').write_text(json.dumps(rows,indent=2,sort_keys=True))
+          print(rows)
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_META, path: parts/meta, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_ADAPTER, path: parts/adapter, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_00, path: parts/base/base.part.00, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_01, path: parts/base/base.part.01, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_02, path: parts/base/base.part.02, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_03, path: parts/base/base.part.03, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_04, path: parts/base/base.part.04, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_05, path: parts/base/base.part.05, compression-level: 0, retention-days: 1}
+      - uses: actions/upload-artifact@v4
+        with: {name: R22528_C27_BASE_MANIFEST, path: parts/base/PARTS_MANIFEST.json, compression-level: 0, retention-days: 1}
+      - name: Publish run receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import json,os,urllib.request
+          body={'body':f"R22528_C27_SOURCE_RUN_ID={os.environ['RUN_ID']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/{os.environ['PR_NUMBER']}/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          print(urllib.request.urlopen(req,timeout=30).read().decode())
+          PY
