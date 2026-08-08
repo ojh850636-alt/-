@@ -25,14 +25,13 @@ jobs:
           printf '%s\n' "resolved_base_revision=${RESOLVED_BASE_REV}"
           test "${RESOLVED_BASE_REV}" = "${EXPECT_BASE_REV}"
 
-          python -m pip install --disable-pip-version-check -q 'huggingface_hub[hf_xet]==0.36.0' 'safetensors==0.7.0'
+          python -m pip install --disable-pip-version-check -q 'huggingface_hub[hf_xet]==0.36.0'
           mkdir -p courier_out/{adapter,base,meta,wheels,parts}
 
           python - <<'PY'
           from pathlib import Path
           from huggingface_hub import snapshot_download, hf_hub_download
           import hashlib, json, shutil
-          from safetensors import safe_open
 
           adapter_repo='uga-gaim/CLIPSeg-CloudSEN12Plus-LoRA'
           adapter_rev='3fddbf18830d7d5ae563d73060a57cb59c2c0d4c'
@@ -56,10 +55,13 @@ jobs:
                   for chunk in iter(lambda:f.read(1024*1024),b''): h.update(chunk)
               return h.hexdigest()
           def st_header(path):
-              with safe_open(str(path),framework='pt',device='cpu') as f:
-                  keys=list(f.keys()); sample=[]
-                  for k in keys[:64]: sample.append({'key':k,'shape':list(f.get_slice(k).get_shape())})
-              return {'tensor_count':len(keys),'sample':sample}
+              with open(path,'rb') as f:
+                  n=int.from_bytes(f.read(8),'little',signed=False)
+                  assert 2 <= n <= 100_000_000, n
+                  header=json.loads(f.read(n).decode('utf-8'))
+              keys=sorted(k for k in header if k!='__metadata__')
+              sample=[{'key':k,'shape':list(header[k].get('shape') or []),'dtype':header[k].get('dtype')} for k in keys[:64]]
+              return {'tensor_count':len(keys),'sample':sample,'metadata':header.get('__metadata__')}
 
           aw=a/'adapter_model.safetensors'; bw=b/'model.safetensors'
           expected={
@@ -73,6 +75,7 @@ jobs:
           for role in ('adapter','base'):
               assert observed[role]['bytes']==expected[role]['bytes'], (role,observed[role]['bytes'])
               assert observed[role]['sha256']==expected[role]['sha256'], (role,observed[role]['sha256'])
+              assert observed[role]['header']['tensor_count'] > 0
           blocked=[]
           for root in (a,b):
               for p in root.rglob('*'):
