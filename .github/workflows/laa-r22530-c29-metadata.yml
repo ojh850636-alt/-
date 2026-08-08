@@ -1,0 +1,101 @@
+name: LAA R22530 C29 Metadata Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Audit candidate metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, subprocess, urllib.request, pathlib
+
+          candidates = [
+            {
+              'id':'DEMUC_GUITAR',
+              'repo':'barvarvara/demucs-guitar-lora',
+              'question':'stereo music mixture waveform -> isolated acoustic-guitar waveform/stem',
+              'expected_base_repo':'adefossez/HTDemucs',
+            },
+            {
+              'id':'F5_TTS_VOICE',
+              'repo':'instavar/f5-tts-v1-lora-female01',
+              'question':'text/reference speech -> synthesized target-speaker waveform',
+              'expected_base_repo':None,
+            },
+            {
+              'id':'SD15_SUPERRES',
+              'repo':'bradhinkel/sd-image-upscaler-sd15-lora',
+              'question':'low-resolution image -> super-resolved image field',
+              'expected_base_repo':None,
+            },
+          ]
+
+          def req(url):
+              return urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22530-metadata'})
+          def get_json(url):
+              with urllib.request.urlopen(req(url),timeout=30) as r:
+                  return json.loads(r.read().decode())
+          def get_text(url):
+              try:
+                  with urllib.request.urlopen(req(url),timeout=30) as r:
+                      return r.read().decode('utf-8',errors='replace')
+              except Exception as e:
+                  return None
+          def resolve(repo):
+              p=subprocess.run(['git','ls-remote',f'https://huggingface.co/{repo}','refs/heads/main'],capture_output=True,text=True,check=True)
+              return p.stdout.split()[0]
+          def siblings(api):
+              out=[]
+              for s in api.get('siblings',[]):
+                  rec={'rfilename':s.get('rfilename'),'size':s.get('size')}
+                  if s.get('lfs'): rec['lfs']=s.get('lfs')
+                  if s.get('xetHash'): rec['xetHash']=s.get('xetHash')
+                  out.append(rec)
+              return out
+
+          rows=[]
+          for c in candidates:
+              repo=c['repo']; rev=resolve(repo); api=get_json(f'https://huggingface.co/api/models/{repo}?blobs=true')
+              cfg_txt=get_text(f'https://huggingface.co/{repo}/raw/{rev}/adapter_config.json')
+              cfg=None
+              if cfg_txt:
+                  try: cfg=json.loads(cfg_txt)
+                  except Exception: cfg={'_parse_error':True,'_raw_prefix':cfg_txt[:3000]}
+              readme=get_text(f'https://huggingface.co/{repo}/raw/{rev}/README.md')
+              base=None
+              if isinstance(cfg,dict): base=cfg.get('base_model_name_or_path')
+              base_repo = c.get('expected_base_repo') or (base if isinstance(base,str) and '/' in base and not base.startswith('/') else None)
+              base_meta=None
+              if base_repo:
+                  try:
+                      brev=resolve(base_repo); bapi=get_json(f'https://huggingface.co/api/models/{base_repo}?blobs=true')
+                      base_meta={'repo':base_repo,'revision':brev,'license':(bapi.get('cardData') or {}).get('license'),'pipeline_tag':bapi.get('pipeline_tag'),'tags':bapi.get('tags',[]),'siblings':siblings(bapi),'readme_prefix':(get_text(f'https://huggingface.co/{base_repo}/raw/{brev}/README.md') or '')[:8000]}
+                  except Exception as e:
+                      base_meta={'repo':base_repo,'error':repr(e)}
+              rows.append({
+                **c,'revision':rev,'license':(api.get('cardData') or {}).get('license'),'pipeline_tag':api.get('pipeline_tag'),'tags':api.get('tags',[]),
+                'adapter_config':cfg,'siblings':siblings(api),'readme_prefix':(readme or '')[:16000],'base_meta':base_meta,
+              })
+
+          out={'schema':'LUCIA_AA_R22530_C29_METADATA_AUDIT_V1','raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':rows}
+          pathlib.Path('out/C29_METADATA_AUDIT.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'candidate_count':len(rows),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0},indent=2))
+          PY
+      - name: Upload metadata audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22530-c29-metadata
+          path: out/C29_METADATA_AUDIT.json
+          retention-days: 1
+          compression-level: 6
