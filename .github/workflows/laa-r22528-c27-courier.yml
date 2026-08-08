@@ -20,7 +20,7 @@ jobs:
           ADAPTER_REV='3fddbf18830d7d5ae563d73060a57cb59c2c0d4c'
           ADAPTER_AMEND='10682e040b3ed26e83daf92f7aa4b676887e720b'
           BASE_REPO='CIDAS/clipseg-rd64-refined'
-          EXPECT_BASE_REV='8bef68afb9ebcbb7b153eee19f49aedb58e3f083'
+          EXPECT_BASE_REV='999e0328d9e10b484360c477313983f9afdd7050'
           RESOLVED_BASE_REV="$(git ls-remote "https://huggingface.co/${BASE_REPO}" refs/heads/main | awk '{print $1}')"
           printf '%s\n' "resolved_base_revision=${RESOLVED_BASE_REV}"
           test "${RESOLVED_BASE_REV}" = "${EXPECT_BASE_REV}"
@@ -31,16 +31,15 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from huggingface_hub import snapshot_download, hf_hub_download
-          import hashlib, json, os, shutil
+          import hashlib, json, shutil
           from safetensors import safe_open
 
           adapter_repo='uga-gaim/CLIPSeg-CloudSEN12Plus-LoRA'
           adapter_rev='3fddbf18830d7d5ae563d73060a57cb59c2c0d4c'
           adapter_amend='10682e040b3ed26e83daf92f7aa4b676887e720b'
           base_repo='CIDAS/clipseg-rd64-refined'
-          base_rev='8bef68afb9ebcbb7b153eee19f49aedb58e3f083'
-          out=Path('courier_out')
-          a=out/'adapter'; b=out/'base'; m=out/'meta'
+          base_rev='999e0328d9e10b484360c477313983f9afdd7050'
+          out=Path('courier_out'); a=out/'adapter'; b=out/'base'; m=out/'meta'
           a_allow=['adapter_config.json','adapter_model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt']
           b_allow=['config.json','model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt']
           snapshot_download(repo_id=adapter_repo, revision=adapter_rev, allow_patterns=a_allow, local_dir=a)
@@ -58,11 +57,8 @@ jobs:
               return h.hexdigest()
           def st_header(path):
               with safe_open(str(path),framework='pt',device='cpu') as f:
-                  keys=list(f.keys())
-                  sample=[]
-                  for k in keys[:64]:
-                      t=f.get_slice(k)
-                      sample.append({'key':k,'shape':list(t.get_shape())})
+                  keys=list(f.keys()); sample=[]
+                  for k in keys[:64]: sample.append({'key':k,'shape':list(f.get_slice(k).get_shape())})
               return {'tensor_count':len(keys),'sample':sample}
 
           aw=a/'adapter_model.safetensors'; bw=b/'model.safetensors'
@@ -80,8 +76,7 @@ jobs:
           blocked=[]
           for root in (a,b):
               for p in root.rglob('*'):
-                  if p.is_file() and p.suffix.lower() in {'.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack'}:
-                      blocked.append(str(p))
+                  if p.is_file() and p.suffix.lower() in {'.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack'}: blocked.append(str(p))
           assert not blocked, blocked
           small=[]
           for role,root in [('adapter',a),('base',b)]:
@@ -90,21 +85,12 @@ jobs:
                       rel=f'{role}/{p.relative_to(root).as_posix()}'
                       dest=m/rel; dest.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(p,dest)
                       small.append({'path':rel,'bytes':p.stat().st_size,'sha256':sha(p)})
-          manifest={
-              'schema':'LUCIA_AA_R22528_C27_COURIER_V1',
-              'adapter_repo':adapter_repo,'adapter_revision':adapter_rev,'adapter_metadata_amendment_revision':adapter_amend,
-              'base_repo':base_repo,'base_revision':base_rev,
-              'expected':expected,'observed':observed,'small_files':small,
-              'blocked_files_present':blocked,'raw_committed_to_git':False,
-          }
+          manifest={'schema':'LUCIA_AA_R22528_C27_COURIER_V1','adapter_repo':adapter_repo,'adapter_revision':adapter_rev,'adapter_metadata_amendment_revision':adapter_amend,'base_repo':base_repo,'base_revision':base_rev,'expected':expected,'observed':observed,'small_files':small,'blocked_files_present':blocked,'raw_committed_to_git':False}
           (m/'SOURCE_MANIFEST.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
           PY
 
-          # Split the 603 MB Base into connector-friendly Actions artifacts.
           split -b 150M courier_out/base/model.safetensors courier_out/parts/base_
           rm courier_out/base/model.safetensors
-
-          # Runtime wheels only; torch/safetensors/numpy/Pillow already exist in the analysis runtime.
           python -m pip download --disable-pip-version-check --no-deps -q -d courier_out/wheels \
             'transformers==5.0.0' 'peft==0.18.1' 'tokenizers==0.22.2' 'accelerate==1.14.0'
           sha256sum courier_out/wheels/* > courier_out/meta/WHEEL_SHA256.txt
@@ -117,7 +103,6 @@ jobs:
           path: courier_out/meta
           retention-days: 1
           compression-level: 6
-
       - name: Upload C27 adapter
         uses: actions/upload-artifact@v4
         with:
@@ -125,7 +110,6 @@ jobs:
           path: courier_out/adapter/adapter_model.safetensors
           retention-days: 1
           compression-level: 0
-
       - name: Upload C27 base part 00
         uses: actions/upload-artifact@v4
         with:
@@ -133,7 +117,6 @@ jobs:
           path: courier_out/parts/base_aa
           retention-days: 1
           compression-level: 0
-
       - name: Upload C27 base part 01
         uses: actions/upload-artifact@v4
         with:
@@ -141,7 +124,6 @@ jobs:
           path: courier_out/parts/base_ab
           retention-days: 1
           compression-level: 0
-
       - name: Upload C27 base part 02
         uses: actions/upload-artifact@v4
         with:
@@ -149,7 +131,6 @@ jobs:
           path: courier_out/parts/base_ac
           retention-days: 1
           compression-level: 0
-
       - name: Upload C27 base part 03
         uses: actions/upload-artifact@v4
         with:
@@ -157,7 +138,6 @@ jobs:
           path: courier_out/parts/base_ad
           retention-days: 1
           compression-level: 0
-
       - name: Upload C27 runtime wheels
         uses: actions/upload-artifact@v4
         with:
