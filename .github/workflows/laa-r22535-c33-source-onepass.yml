@@ -1,0 +1,206 @@
+name: LAA R22535 C33 One Exact Source Archaeology
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'r22535/AUTHORIZE_SOURCE_INGRESS'
+
+permissions:
+  contents: read
+
+jobs:
+  onepass:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify one-use authorization and reconstruct premodel reference law
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f r22535/AUTHORIZE_SOURCE_INGRESS
+          grep -F 'candidate=R22534-C33-SARVAM1-HINGLISH-G2P-LORA' r22535/AUTHORIZE_SOURCE_INGRESS
+          grep -F 'suite_sha256=463d80e249bf75fc2d0daf7b2e8b6eac33b64b4a9f0b64e88204dc33c3ae5367' r22535/AUTHORIZE_SOURCE_INGRESS
+          grep -F 'reference_labels_sha256=c2cb51740be2a608c6948d889d8d322bc331ca2ab395fc142ab427fea35136b7' r22535/AUTHORIZE_SOURCE_INGRESS
+          grep -F 'adapter_revision=70ed6e5a25607604568a6f7e9fe37857c85e891f' r22535/AUTHORIZE_SOURCE_INGRESS
+          grep -F 'base_revision=e9607337286ddf496d4a2562b194e489dcf3feea' r22535/AUTHORIZE_SOURCE_INGRESS
+          mkdir -p work/ref work/meta work/raw/adapter work/raw/base work/out work/hfhome tmp
+          python r22535/build_suite.py work/ref/C33_INPUT_SUITE.jsonl
+
+          git clone -q --filter=blob:none --no-checkout https://github.com/Abhijit89Kumar/fast-indic-tts.git tmp/fast-indic-tts
+          git -C tmp/fast-indic-tts fetch -q --depth 1 origin 42339058cd2048d3ff907fd811e9ba6bcc4dff88
+          git -C tmp/fast-indic-tts checkout -q --detach 42339058cd2048d3ff907fd811e9ba6bcc4dff88
+          git clone -q --filter=blob:none --no-checkout https://github.com/espeak-ng/espeak-ng.git tmp/espeak-ng
+          git -C tmp/espeak-ng fetch -q --depth 1 origin 4870adfa25b1a32b4361592f1be8a40337c58d6c
+          git -C tmp/espeak-ng checkout -q --detach 4870adfa25b1a32b4361592f1be8a40337c58d6c
+          cmake -S tmp/espeak-ng -B tmp/espeak-ng/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/tmp/espeak-install" -DBUILD_SHARED_LIBS=ON -DUSE_MBROLA=OFF -DUSE_LIBSONIC=OFF -DUSE_LIBPCAUDIO=OFF -DUSE_SPEECHPLAYER=OFF -DUSE_ASYNC=OFF >/dev/null
+          cmake --build tmp/espeak-ng/build -j2 >/dev/null
+          cmake --install tmp/espeak-ng/build >/dev/null
+          export PHONEMIZER_ESPEAK_LIBRARY="$(find "$PWD/tmp/espeak-install" -type f -name 'libespeak-ng.so*' | sort | head -1)"
+          export ESPEAK_BIN="$PWD/tmp/espeak-install/bin/espeak-ng"
+          python -m pip install --disable-pip-version-check -q 'phonemizer==3.3.0'
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,sys,unicodedata,subprocess,os
+          up=Path('tmp/fast-indic-tts/indic_prosody_frontend').resolve();sys.path.insert(0,str(up))
+          import g2p
+          suite=Path('work/ref/C33_INPUT_SUITE.jsonl')
+          rows=[json.loads(x) for x in suite.read_text(encoding='utf-8').splitlines() if x.strip()]
+          outputs=[]
+          for i in range(0,len(rows),64): outputs.extend(g2p.espeak_g2p([r['input_text'] for r in rows[i:i+64]]))
+          labels=[]
+          for r,p in zip(rows,outputs):
+              p=unicodedata.normalize('NFC',p.strip());assert p
+              labels.append({'case_id':r['case_id'],'input':r['input_text'],'reference_ipa':p,'reference_provider_digest':'f87f026f15e8b6ea74324da6cae5d2016b3a3e2ac4980fd29fb5cbde5ffa563f'})
+          lp=Path('work/ref/C33_REFERENCE_LABELS.jsonl');lp.write_text(''.join(json.dumps(x,ensure_ascii=False,sort_keys=True)+'\n' for x in labels),encoding='utf-8')
+          def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+          assert sha(suite)=='463d80e249bf75fc2d0daf7b2e8b6eac33b64b4a9f0b64e88204dc33c3ae5367'
+          assert sha(lp)=='c2cb51740be2a608c6948d889d8d322bc331ca2ab395fc142ab427fea35136b7'
+          def canon(s):
+              s=unicodedata.normalize('NFC',s).replace('ˈ','').replace('ˌ','')
+              return ''.join(c for c in s if not c.isspace())
+          for r,p in zip(rows[:32],outputs[:32]):
+              q=subprocess.run([os.environ['ESPEAK_BIN'],'-q','--ipa','-v','en-us',r['input_text']],capture_output=True,text=True,check=True).stdout.strip()
+              assert canon(q)==canon(p),(r['case_id'],p,q)
+          Path('work/meta/R22535_C33_PREMODEL_RECHECK.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_PREMODEL_RECHECK_V1','verdict':'PASS','suite_sha256':sha(suite),'reference_labels_sha256':sha(lp),'independent_cli_crosscheck':'32/32','raw_weight_bytes_downloaded':0,'model_outputs_observed':0},indent=2,sort_keys=True)+'\n')
+          PY
+          rm -rf tmp
+
+      - name: Install exact execution runtime before source ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check -q --index-url https://download.pytorch.org/whl/cpu 'torch==2.5.1'
+          python -m pip install --disable-pip-version-check -q 'transformers==4.45.2' 'peft==0.13.2' 'accelerate==1.0.1' 'safetensors==0.4.5' 'sentencepiece==0.2.0' 'huggingface_hub[hf_xet]==0.36.0'
+          python - <<'PY'
+          import json,platform,torch,transformers,peft,accelerate,safetensors,huggingface_hub
+          from pathlib import Path
+          Path('work/meta/R22535_C33_REMOTE_ENVIRONMENT.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REMOTE_ENVIRONMENT_V1','python':platform.python_version(),'platform':platform.platform(),'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'accelerate':accelerate.__version__,'safetensors':safetensors.__version__,'huggingface_hub':huggingface_hub.__version__,'canonical_dtype':'bfloat16 CPU','training_time_environment_proven':False},indent=2,sort_keys=True)+'\n')
+          PY
+          python -m pip cache purge >/dev/null 2>&1 || true
+          base64 -d r22535/c33_remote_onepass.py.gz.b64 | gzip -dc > work/c33_remote_onepass.py
+          python -B -m py_compile work/c33_remote_onepass.py
+
+      - name: One exact ingress, viability-first, behavior and causal extraction
+        shell: bash
+        timeout-minutes: 305
+        env:
+          HF_HOME: ${{ github.workspace }}/work/hfhome
+        run: |
+          set -uo pipefail
+          START=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          RC=0
+          export OMP_NUM_THREADS=4 MKL_NUM_THREADS=4 TOKENIZERS_PARALLELISM=false
+          python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id='AK04-IXR/sarvam1-hinglish-g2p-lora',revision='70ed6e5a25607604568a6f7e9fe37857c85e891f',allow_patterns=['adapter_config.json','adapter_model.safetensors','README.md'],local_dir='work/raw/adapter')
+          PY
+          rm -rf work/raw/adapter/.cache work/hfhome/hub/.locks 2>/dev/null || true
+          python - <<'PY'
+          import importlib.util,json
+          from pathlib import Path
+          s=importlib.util.spec_from_file_location('c33','work/c33_remote_onepass.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
+          p=Path('work/raw/adapter/adapter_model.safetensors')
+          if p.stat().st_size!=m.ADAPTER_BYTES or m.sha256_file(p)!=m.ADAPTER_SHA: raise SystemExit('adapter identity mismatch')
+          r=m.static_operator_forensics(p,Path('work/out'))
+          Path('work/meta/OPERATOR_VIABILITY.txt').write_text(r['operator_viability']+'\n')
+          PY
+          if [[ "$(cat work/meta/OPERATOR_VIABILITY.txt)" == 'PASS' ]]; then
+            python - <<'PY'
+          from huggingface_hub import snapshot_download
+          allow=['config.json','generation_config.json','model.safetensors.index.json','model-00001-of-00002.safetensors','model-00002-of-00002.safetensors','tokenizer.json','tokenizer.model','tokenizer_config.json','special_tokens_map.json','LICENSE.md']
+          snapshot_download(repo_id='sarvamai/sarvam-1',revision='e9607337286ddf496d4a2562b194e489dcf3feea',allow_patterns=allow,local_dir='work/raw/base')
+          PY
+            rm -rf work/raw/base/.cache work/hfhome/hub/.locks 2>/dev/null || true
+            timeout --signal=TERM --kill-after=30s 18000 python -B work/c33_remote_onepass.py --mode main --base-dir work/raw/base --adapter-dir work/raw/adapter --suite work/ref/C33_INPUT_SUITE.jsonl --labels work/ref/C33_REFERENCE_LABELS.jsonl --out-dir work/out || RC=$?
+            if [[ "$RC" -eq 0 && -f work/out/R22535_C33_REPLAY_REQUEST.json ]]; then
+              timeout --signal=TERM --kill-after=30s 1200 python -B work/c33_remote_onepass.py --mode replay --base-dir work/raw/base --adapter-dir work/raw/adapter --suite work/ref/C33_INPUT_SUITE.jsonl --labels work/ref/C33_REFERENCE_LABELS.jsonl --out-dir work/out || RC=$?
+            fi
+            if [[ "$RC" -eq 0 && -f work/out/R22535_C33_MAIN_EXECUTION.json ]]; then
+              python -B work/c33_remote_onepass.py --mode finalize --suite work/ref/C33_INPUT_SUITE.jsonl --labels work/ref/C33_REFERENCE_LABELS.jsonl --out-dir work/out || RC=$?
+            fi
+          else
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          Path('work/out/R22535_C33_TERMINAL_EXECUTION.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_TERMINAL_EXECUTION_V1','candidate_id':'R22534-C33-SARVAM1-HINGLISH-G2P-LORA','verdict':'CLOSED_NO_REDOWNLOAD_OPERATOR_NOT_VIABLE','evidence_grade':'E1_STATIC_OPERATOR_FORENSICS','external_claim_increment':0,'model_loads':0,'training_time_base_revision_proven':False,'raw_weights_in_terminal_artifact':False},indent=2,sort_keys=True)+'\n')
+          PY
+          fi
+          if [[ "$RC" -ne 0 ]]; then
+            export RC START
+            python - <<'PY'
+          import json,os
+          from pathlib import Path
+          out=Path('work/out')
+          obj={'schema':'LUCIA_AA_R22535_C33_TECHNICAL_HOLD_V1','verdict':'CLOSED_SOURCE_CONSUMED_TECHNICAL_HOLD_NO_REDOWNLOAD','return_code':int(os.environ['RC']),'started_at':os.environ['START'],'model_output_claim_increment':0,'causal_claim_increment':0,'algorithm_increment':0,'student_increment':0,'promotion_increment':0,'raw_source_ephemeral_runner_only':True}
+          (out/'R22535_C33_TECHNICAL_HOLD.json').write_text(json.dumps(obj,indent=2,sort_keys=True)+'\n')
+          PY
+          fi
+          export RC START
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          out=Path('work/out'); meta=Path('work/meta')
+          files=[]
+          for root in (out,meta):
+              for p in sorted(root.rglob('*')):
+                  if p.is_file():
+                      h=hashlib.sha256(p.read_bytes()).hexdigest();files.append({'path':p.relative_to(Path('work')).as_posix(),'bytes':p.stat().st_size,'sha256':h})
+          (out/'R22535_C33_PREDELETE_EVIDENCE_INDEX.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_PREDELETE_EVIDENCE_INDEX_V1','return_code':int(os.environ['RC']),'files':files},indent=2,sort_keys=True)+'\n')
+          PY
+          rm -rf work/raw work/hfhome
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          raw=Path('work/raw');hf=Path('work/hfhome')
+          remaining=[]
+          for x in (raw,hf):
+              if x.exists(): remaining.append(str(x))
+          if remaining: raise SystemExit(remaining)
+          Path('work/out/R22535_C33_REMOTE_SOURCE_DELETION_RECEIPT.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REMOTE_SOURCE_DELETION_RECEIPT_V1','verdict':'PASS_EPHEMERAL_RAW_SOURCE_DELETED_BEFORE_ARTIFACT','deleted_roles':['Adapter safetensors/config cache','Base safetensor shards/config/tokenizer cache','HF transport cache'],'remaining_raw_paths':remaining,'raw_committed_to_git':False,'raw_uploaded_as_artifact':False},indent=2,sort_keys=True)+'\n')
+          PY
+          rm -f work/c33_remote_onepass.py
+          exit 0
+
+      - name: Raw-free artifact audit
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e work/raw
+          test ! -e work/hfhome
+          find work/out work/meta -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.ckpt' -o -name '*.h5' -o -name '*.msgpack' \) -print -quit | grep -q . && exit 1 || true
+          python - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          roots=[Path('work/out'),Path('work/meta')]
+          bad=[]
+          forbidden_names=('adapter_model.safetensors','model-00001-of-00002.safetensors','model-00002-of-00002.safetensors','tokenizer.model','tokenizer.json')
+          for r in roots:
+              for p in r.rglob('*'):
+                  if p.is_file() and p.name in forbidden_names: bad.append(str(p))
+          if bad: raise SystemExit(bad)
+          files=[]
+          for r in roots:
+              for p in sorted(r.rglob('*')):
+                  if p.is_file():
+                      h=hashlib.sha256(p.read_bytes()).hexdigest();files.append({'path':p.relative_to(Path('work')).as_posix(),'bytes':p.stat().st_size,'sha256':h})
+          Path('work/out/R22535_C33_REMOTE_ARTIFACT_AUDIT.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REMOTE_ARTIFACT_AUDIT_V1','verdict':'PASS_RAW_FREE','files':len(files),'raw_weights':0,'raw_tokenizers':0,'raw_activations':0,'raw_logits':0,'reconstructable_delta_w':0,'manifest':files},indent=2,sort_keys=True)+'\n')
+          PY
+
+      - name: Upload only raw-free forensic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22535-c33-rawfree-evidence
+          path: |
+            work/out
+            work/meta
+          retention-days: 1
+          compression-level: 6
