@@ -1,4 +1,4 @@
-name: LAA R22532 C31 Exact Courier
+name: LAA R22532 C31 Runtime ABI Courier
 
 on:
   pull_request:
@@ -8,94 +8,24 @@ permissions:
   contents: read
 
 jobs:
-  capture:
+  runtime:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
-      - name: Exact safe source capture
+      - name: Capture Python 3.13 abi3 tokenizers wheel only
         shell: bash
         run: |
           set -euo pipefail
-          ADAPTER_REPO='aryamanpathak/blip-vqa-abo'
-          ADAPTER_REV='b2716865b485848659b9bf5ec8ef8063eafa5c6e'
-          BASE_REPO='Salesforce/blip-vqa-base'
-          BASE_REV='787b3d35d57e49572baabd22884b3d5a05acf072'
-          test "$(git ls-remote https://huggingface.co/${ADAPTER_REPO} refs/heads/main | awk '{print $1}')" = "$ADAPTER_REV"
-          test "$(git ls-remote https://huggingface.co/${BASE_REPO} refs/heads/main | awk '{print $1}')" = "$BASE_REV"
-          python -m pip install --disable-pip-version-check -q 'huggingface_hub[hf_xet]==0.36.0'
-          mkdir -p out/{adapter,base,meta,wheels,parts}
-          python - <<'PY'
-          from huggingface_hub import snapshot_download
-          from pathlib import Path
-          import hashlib,json,shutil,struct
-          ar='aryamanpathak/blip-vqa-abo'; av='b2716865b485848659b9bf5ec8ef8063eafa5c6e'
-          br='Salesforce/blip-vqa-base'; bv='787b3d35d57e49572baabd22884b3d5a05acf072'
-          out=Path('out');a=out/'adapter';b=out/'base';m=out/'meta'
-          snapshot_download(repo_id=ar,revision=av,allow_patterns=['adapter_config.json','adapter_model.safetensors','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.txt'],local_dir=a)
-          snapshot_download(repo_id=br,revision=bv,allow_patterns=['model.safetensors','config.json','preprocessor_config.json','tokenizer_config.json','special_tokens_map.json','vocab.txt'],local_dir=b)
-          for x in (a,b):
-              c=x/'.cache'
-              if c.exists(): shutil.rmtree(c)
-          def sha(p):
-              h=hashlib.sha256()
-              with open(p,'rb') as f:
-                  for z in iter(lambda:f.read(1024*1024),b''): h.update(z)
-              return h.hexdigest()
-          def header(p):
-              with open(p,'rb') as f:
-                  n=struct.unpack('<Q',f.read(8))[0]; meta=json.loads(f.read(n))
-              ks=[k for k in meta if k!='__metadata__']
-              return {'tensor_count':len(ks),'sample':[{'key':k,'shape':meta[k].get('shape'),'dtype':meta[k].get('dtype')} for k in ks[:160]]}
-          aw=a/'adapter_model.safetensors';bw=b/'model.safetensors'
-          expected={'adapter':{'bytes':1776456,'sha256':'e3d07c59b197a0790e9b5066f9c8cde0ba93ccfb734c738c271a7d63aa15d31b'},'base':{'bytes':1538800584,'sha256':'33786eed34def0c95fa948128cb4386be9b9219aa2c2e25f1c9c744692121bb7'}}
-          observed={'adapter':{'bytes':aw.stat().st_size,'sha256':sha(aw),'header':header(aw)},'base':{'bytes':bw.stat().st_size,'sha256':sha(bw),'header':header(bw)}}
-          for role in expected:
-              assert observed[role]['bytes']==expected[role]['bytes'],(role,observed[role]['bytes'])
-              assert observed[role]['sha256']==expected[role]['sha256'],(role,observed[role]['sha256'])
-          blocked=[]
-          for root in (a,b):
-              for p in root.rglob('*'):
-                  if p.is_file() and p.suffix.lower() in {'.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack'}: blocked.append(str(p))
-          assert not blocked,blocked
-          small=[]
-          for role,root,weight in [('adapter',a,'adapter_model.safetensors'),('base',b,'model.safetensors')]:
-              for p in root.rglob('*'):
-                  if p.is_file() and p.name!=weight:
-                      rel=f'{role}/{p.relative_to(root).as_posix()}';dest=m/rel;dest.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,dest);small.append({'path':rel,'bytes':p.stat().st_size,'sha256':sha(p)})
-          manifest={'schema':'LUCIA_AA_R22532_C31_COURIER_V1','adapter_repo':ar,'adapter_revision':av,'base_repo':br,'base_revision':bv,'expected':expected,'observed':observed,'small_files':small,'blocked_files_present':blocked,'raw_committed_to_git':False,'preseal_sha256':'667173450fc4f3c501668f3fb3f73d73f625ca438b8cf1deb62baae748c2db46','suite_sha256':'a1927490e7ef83a0e72f397cab78844b93685f1a45ebc94d6d96f1bfccaf209e'}
-          (m/'SOURCE_MANIFEST.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
-          PY
-          split -b 220M out/base/model.safetensors out/parts/base_
-          rm out/base/model.safetensors
-          python -m pip download --disable-pip-version-check --no-deps -q -d out/wheels 'transformers==4.46.2'
-          sha256sum out/wheels/* > out/meta/WHEEL_SHA256.txt
-      - name: Upload C31 metadata
+          mkdir -p out
+          python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: \
+            --python-version 313 --implementation cp --abi abi3 --platform manylinux_2_17_x86_64 \
+            -d out 'tokenizers==0.20.3'
+          sha256sum out/* > out/SHA256.txt
+          ls -lh out
+      - name: Upload runtime ABI wheel
         uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-meta, path: out/meta, retention-days: 1, compression-level: 6}
-      - name: Upload C31 adapter
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-adapter, path: out/adapter/adapter_model.safetensors, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 00
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-00, path: out/parts/base_aa, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 01
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-01, path: out/parts/base_ab, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 02
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-02, path: out/parts/base_ac, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 03
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-03, path: out/parts/base_ad, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 04
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-04, path: out/parts/base_ae, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 05
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-05, path: out/parts/base_af, retention-days: 1, compression-level: 0}
-      - name: Upload C31 base 06
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-base-06, path: out/parts/base_ag, retention-days: 1, compression-level: 0}
-      - name: Upload C31 runtime
-        uses: actions/upload-artifact@v4
-        with: {name: r22532-c31-runtime, path: out/wheels, retention-days: 1, compression-level: 6}
+        with:
+          name: r22532-c31-tokenizers-cp313
+          path: out
+          retention-days: 1
+          compression-level: 0
