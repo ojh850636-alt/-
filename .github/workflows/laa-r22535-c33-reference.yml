@@ -19,17 +19,13 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p out/ref out/meta tmp
-
-          # Rebuild the already-presealed 512-input suite and verify byte identity.
           python r22535/build_suite.py out/ref/C33_INPUT_SUITE.jsonl
 
-          # Pin the exact upstream code that created the G2P reference law.
           git clone -q --filter=blob:none --no-checkout https://github.com/Abhijit89Kumar/fast-indic-tts.git tmp/fast-indic-tts
           git -C tmp/fast-indic-tts fetch -q --depth 1 origin 42339058cd2048d3ff907fd811e9ba6bcc4dff88
           git -C tmp/fast-indic-tts checkout -q --detach 42339058cd2048d3ff907fd811e9ba6bcc4dff88
           test "$(git -C tmp/fast-indic-tts rev-parse HEAD)" = '42339058cd2048d3ff907fd811e9ba6bcc4dff88'
 
-          # Pin eSpeak NG 1.52.0: the stable release available before the 2026-06-14 upstream G2P commit.
           git clone -q --filter=blob:none --no-checkout https://github.com/espeak-ng/espeak-ng.git tmp/espeak-ng
           git -C tmp/espeak-ng fetch -q --depth 1 origin 4870adfa25b1a32b4361592f1be8a40337c58d6c
           git -C tmp/espeak-ng checkout -q --detach 4870adfa25b1a32b4361592f1be8a40337c58d6c
@@ -54,7 +50,6 @@ jobs:
           export PHONEMIZER_ESPEAK_LIBRARY="$ESPEAK_LIB"
           export ESPEAK_BIN
 
-          # Resolve the current runtime-reference Base metadata without downloading model weights.
           python - <<'PY'
           from huggingface_hub import HfApi
           from pathlib import Path
@@ -95,41 +90,18 @@ jobs:
           base_weights=[x for x in base_files if x['rfilename'].endswith('.safetensors')]
           assert len(base_weights)==2,base_weights
           blocked=[x.rfilename for x in bi.siblings if Path(x.rfilename).suffix.lower() in {'.bin','.pt','.pth','.pkl','.pickle','.ckpt','.h5','.msgpack'}]
-          # Blocked files may exist remotely; they are metadata only and will never be allowlisted for ingress.
           base_identity_payload=json.dumps(base_weights,sort_keys=True,separators=(',',':')).encode()
           base_identity_digest=hashlib.sha256(base_identity_payload).hexdigest()
-          (meta/'BASE_METADATA.json').write_text(json.dumps({
-              'schema':'LUCIA_AA_R22535_C33_BASE_METADATA_V1','repo_id':base_repo,'revision':base_rev,
-              'safe_files':base_files,'weight_files':base_weights,'weight_identity_digest':base_identity_digest,
-              'remote_blocked_files':blocked,'raw_weight_bytes_downloaded':0,'training_time_base_revision_proven':False
-          },indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
-          (meta/'ADAPTER_METADATA.json').write_text(json.dumps({
-              'schema':'LUCIA_AA_R22535_C33_ADAPTER_METADATA_V1','repo_id':adapter_repo,'revision':adapter_rev,
-              'safe_files':adapter_files,'expected_adapter_bytes':adapter_expected_bytes,'expected_adapter_sha256':adapter_expected_sha,
-              'raw_weight_bytes_downloaded':0
-          },indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
+          (meta/'BASE_METADATA.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_BASE_METADATA_V1','repo_id':base_repo,'revision':base_rev,'safe_files':base_files,'weight_files':base_weights,'weight_identity_digest':base_identity_digest,'remote_blocked_files':blocked,'raw_weight_bytes_downloaded':0,'training_time_base_revision_proven':False},indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
+          (meta/'ADAPTER_METADATA.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_ADAPTER_METADATA_V1','repo_id':adapter_repo,'revision':adapter_rev,'safe_files':adapter_files,'expected_adapter_bytes':adapter_expected_bytes,'expected_adapter_sha256':adapter_expected_sha,'raw_weight_bytes_downloaded':0},indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
 
-          # Hash the exact upstream reference-provider code from the checked-out commit.
           up=Path('tmp/fast-indic-tts/indic_prosody_frontend')
           def sha(p): return hashlib.sha256(Path(p).read_bytes()).hexdigest()
-          source_files={
-              'g2p.py':sha(up/'g2p.py'),
-              'make_g2p_data.py':sha(up/'make_g2p_data.py'),
-              'metrics.py':sha(up/'metrics.py'),
-          }
-          provider_identity={
-              'upstream_repo':upstream_repo,'upstream_revision':upstream_rev,'source_sha256':source_files,
-              'espeak_ng_version':'1.52.0','espeak_ng_revision':espeak_rev,
-              'phonemizer_version':importlib.metadata.version('phonemizer'),'phonemizer_release_revision':phonemizer_rev,
-              'voice':'en-us','with_stress':False,'language_switch':'remove-flags','strip':True,
-              'training_time_engine_version_proven':False,
-              'training_time_phonemizer_version_proven':False,
-              'reference_version_policy':'PINNED_REPRODUCIBLE_PRE_UPSTREAM_RELEASE_NOT_TRAINING_TIME_PROOF'
-          }
+          source_files={'g2p.py':sha(up/'g2p.py'),'make_g2p_data.py':sha(up/'make_g2p_data.py'),'metrics.py':sha(up/'metrics.py')}
+          provider_identity={'upstream_repo':upstream_repo,'upstream_revision':upstream_rev,'source_sha256':source_files,'espeak_ng_version':'1.52.0','espeak_ng_revision':espeak_rev,'phonemizer_version':importlib.metadata.version('phonemizer'),'phonemizer_release_revision':phonemizer_rev,'voice':'en-us','with_stress':False,'language_switch':'remove-flags','strip':True,'training_time_engine_version_proven':False,'training_time_phonemizer_version_proven':False,'reference_version_policy':'PINNED_REPRODUCIBLE_PRE_UPSTREAM_RELEASE_NOT_TRAINING_TIME_PROOF'}
           provider_digest=hashlib.sha256(json.dumps(provider_identity,sort_keys=True,separators=(',',':')).encode()).hexdigest()
           (meta/'REFERENCE_PROVIDER_IDENTITY.json').write_text(json.dumps({**provider_identity,'reference_provider_digest':provider_digest},indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
 
-          # Execute the exact upstream g2p.py provider, not a rewritten model-side oracle.
           sys.path.insert(0,str(up.resolve()))
           import g2p
           rows=[json.loads(x) for x in (ref/'C33_INPUT_SUITE.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
@@ -139,47 +111,30 @@ jobs:
           assert len(outputs)==512
           label_rows=[]
           for r,ipa in zip(rows,outputs):
-              ipa=unicodedata.normalize('NFC',str(ipa).strip())
-              assert ipa, r['case_id']
+              ipa=unicodedata.normalize('NFC',str(ipa).strip()); assert ipa,r['case_id']
               label_rows.append({'case_id':r['case_id'],'input':r['input_text'],'reference_ipa':ipa,'reference_provider_digest':provider_digest})
           labels=ref/'C33_REFERENCE_LABELS.jsonl'
           labels.write_text(''.join(json.dumps(x,ensure_ascii=False,sort_keys=True)+'\n' for x in label_rows),encoding='utf-8')
           labels_sha=sha(labels)
 
-          # Independent direct CLI cross-check on the presealed first 32 Latin rows.
-          # It is diagnostic only: upstream phonemizer remains canonical. Discrepancies are retained.
           espeak_bin=os.environ['ESPEAK_BIN']
           def canon(s):
               s=unicodedata.normalize('NFC',s).replace('ˈ','').replace('ˌ','')
               return ''.join(ch for ch in s if not ch.isspace())
           cli=[];matches=0
           for r,ipa in zip(rows[:32],outputs[:32]):
-              q=subprocess.run([espeak_bin,'-q','--ipa=3','-v','en-us',r['input_text']],capture_output=True,text=True,check=True).stdout.strip()
-              eq=canon(q)==canon(ipa);matches+=int(eq)
+              # Correct direct diagnostic: default --ipa matches the upstream phonemizer IPA mode.
+              q=subprocess.run([espeak_bin,'-q','--ipa','-v','en-us',r['input_text']],capture_output=True,text=True,check=True).stdout.strip()
+              eq=canon(q)==canon(ipa); matches+=int(eq)
               cli.append({'case_id':r['case_id'],'canonical_equal_after_stress_space_projection':eq,'phonemizer_sha256':hashlib.sha256(ipa.encode()).hexdigest(),'cli_sha256':hashlib.sha256(q.encode()).hexdigest()})
-          (meta/'REFERENCE_CLI_CROSSCHECK.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REFERENCE_CLI_CROSSCHECK_V1','subset_cases':32,'matches':matches,'mismatches':32-matches,'canonical_provider':'fast-indic-tts g2p.py + phonemizer','diagnostic_only':True,'rows':cli},indent=2,sort_keys=True)+'\n')
+          assert matches==32,(matches,32)
+          (meta/'REFERENCE_CLI_CROSSCHECK.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REFERENCE_CLI_CROSSCHECK_V2','subset_cases':32,'matches':matches,'mismatches':32-matches,'canonical_provider':'fast-indic-tts g2p.py + phonemizer','direct_cli_mode':'--ipa','projection':'NFC + remove primary/secondary stress + remove whitespace','diagnostic_only':True,'rows':cli},indent=2,sort_keys=True)+'\n')
+          (meta/'REFERENCE_CROSSCHECK_AMENDMENT_001.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REFERENCE_CROSSCHECK_AMENDMENT_001','timing':'BEFORE_ANY_MODEL_WEIGHT_OR_MODEL_OUTPUT','original_reference_labels_changed':False,'input_suite_changed':False,'thresholds_changed':False,'cause':'Initial independent CLI diagnostic used --ipa=3, which inserts ZWJ tie markers and is not the upstream phonemizer default IPA surface. Raw diagnostic showed default --ipa is phonemically identical after the predeclared stress/space projection.','resolution':'Use default --ipa only for independent diagnostic crosscheck; keep exact upstream phonemizer provider canonical.','resolved_subset_matches':32,'resolved_subset_mismatches':0,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0},indent=2,sort_keys=True)+'\n')
 
-          binding={
-              'schema':'LUCIA_AA_R22535_C33_RESOLVED_SOURCE_BINDING_V1',
-              'adapter_repo_id':adapter_repo,'adapter_revision':adapter_rev,'adapter_weight_sha256':adapter_expected_sha,
-              'adapter_weight_bytes':adapter_expected_bytes,
-              'base_repo_id':base_repo,'base_revision':base_rev,'base_weight_identity_digest':base_identity_digest,
-              'base_weight_files':base_weights,'training_time_base_revision_proven':False,
-              'reference_provider_repo':upstream_repo,'reference_provider_revision':upstream_rev,
-              'reference_provider_digest':provider_digest,'reference_engine':'espeak-ng','reference_engine_revision':espeak_rev,
-              'reference_engine_version':'1.52.0','reference_engine_version_status':'PINNED_REPRODUCIBLE_PRE_UPSTREAM_RELEASE_TRAINING_TIME_UNPROVEN',
-              'phonemizer_version':'3.3.0','phonemizer_revision':phonemizer_rev,'phonemizer_training_time_version_proven':False,
-              'reference_labels_sha256':labels_sha,'reference_rows':512,'raw_weight_bytes_downloaded':0,'model_outputs_observed':0
-          }
+          binding={'schema':'LUCIA_AA_R22535_C33_RESOLVED_SOURCE_BINDING_V1','adapter_repo_id':adapter_repo,'adapter_revision':adapter_rev,'adapter_weight_sha256':adapter_expected_sha,'adapter_weight_bytes':adapter_expected_bytes,'base_repo_id':base_repo,'base_revision':base_rev,'base_weight_identity_digest':base_identity_digest,'base_weight_files':base_weights,'training_time_base_revision_proven':False,'reference_provider_repo':upstream_repo,'reference_provider_revision':upstream_rev,'reference_provider_digest':provider_digest,'reference_engine':'espeak-ng','reference_engine_revision':espeak_rev,'reference_engine_version':'1.52.0','reference_engine_version_status':'PINNED_REPRODUCIBLE_PRE_UPSTREAM_RELEASE_TRAINING_TIME_UNPROVEN','phonemizer_version':'3.3.0','phonemizer_revision':phonemizer_rev,'phonemizer_training_time_version_proven':False,'reference_labels_sha256':labels_sha,'reference_rows':512,'reference_crosscheck':'32/32_PASS_AFTER_DOCUMENTED_PREMODEL_AMENDMENT','raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
           (meta/'R22535_C33_RESOLVED_SOURCE_BINDING.json').write_text(json.dumps(binding,indent=2,ensure_ascii=False,sort_keys=True)+'\n',encoding='utf-8')
-          (meta/'R22535_C33_REFERENCE_MATERIALIZATION_RECEIPT.json').write_text(json.dumps({
-              'schema':'LUCIA_AA_R22535_C33_REFERENCE_MATERIALIZATION_RECEIPT_V1','verdict':'PASS_REFERENCE_LABELS_MATERIALIZED_PRE_MODEL',
-              'input_suite_sha256':sha(ref/'C33_INPUT_SUITE.jsonl'),'reference_labels_sha256':labels_sha,'reference_rows':512,
-              'reference_provider_digest':provider_digest,'raw_weight_bytes_downloaded':0,'model_loads':0,'model_outputs_observed':0
-          },indent=2,sort_keys=True)+'\n')
+          (meta/'R22535_C33_REFERENCE_MATERIALIZATION_RECEIPT.json').write_text(json.dumps({'schema':'LUCIA_AA_R22535_C33_REFERENCE_MATERIALIZATION_RECEIPT_V1','verdict':'PASS_REFERENCE_LABELS_MATERIALIZED_AND_CROSSCHECKED_PRE_MODEL','input_suite_sha256':sha(ref/'C33_INPUT_SUITE.jsonl'),'reference_labels_sha256':labels_sha,'reference_rows':512,'reference_provider_digest':provider_digest,'independent_cli_crosscheck':'32/32','raw_weight_bytes_downloaded':0,'model_loads':0,'model_outputs_observed':0},indent=2,sort_keys=True)+'\n')
           PY
-
-          # Remove checked-out source trees/build products; artifact contains only raw-free metadata/reference labels.
           rm -rf tmp
 
       - name: Upload reference seal evidence
