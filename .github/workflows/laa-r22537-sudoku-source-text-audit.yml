@@ -1,0 +1,96 @@
+name: LAA R22537 Sudoku Source Text Audit
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  source_text:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Resolve exact source-text semantics without any model weight ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/pair out/companion out/meta
+          python -m pip install --disable-pip-version-check -q 'huggingface_hub==0.36.0'
+          python - <<'PY'
+          from huggingface_hub import HfApi,hf_hub_download
+          from pathlib import Path
+          import json,hashlib,re,shutil
+
+          pair='Avra98/sudoku-latent-backtracking'; prev='2a2f02efecb3481aa63d295bb1aab2ecfc1a11e1'
+          companion='Avra98/sudoku-gpt2-curriculum'
+          api=HfApi(); pi=api.model_info(pair,revision=prev,files_metadata=True); ci=api.model_info(companion,files_metadata=True)
+          assert pi.sha==prev
+          pair_files=[
+            'code/launch_s2_sweep.sh',
+            'logs/launch_s2_sweep.sh',
+            'logs/bt_rr03_nowarm.log',
+            'logs/s2_sweep_20260623_194131/logs/bt_rr03_nowarm.log',
+            'logs/s2_sweep_20260623_194131/logs/ctrl_nobt.log',
+            'logs/README_backtracking.md',
+            'code/latent_multi_output_cell_policy/sft_latent_multi_output_train.py',
+          ]
+          companion_candidates=[
+            'cc/multi_output_cell_policy/shared_multi_output_policy.py',
+            'cc/multi_output_cell_policy/prompt_builder.py',
+            'cc/multi_output_cell_policy/rewards.py',
+            'cc/aligned_cell_policy/shared_cell_policy.py',
+          ]
+          copied=[]
+          def cp(repo,rev,path,dst):
+              try:
+                  src=Path(hf_hub_download(repo,path,revision=rev))
+              except Exception as e:
+                  return {'path':path,'status':'MISSING','error':type(e).__name__}
+              dst.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(src,dst)
+              b=dst.read_bytes(); return {'path':path,'status':'COPIED','bytes':len(b),'sha256':hashlib.sha256(b).hexdigest()}
+          for x in pair_files: copied.append({'repo':pair,**cp(pair,prev,x,Path('out/pair')/x)})
+          for x in companion_candidates: copied.append({'repo':companion,**cp(companion,ci.sha,x,Path('out/companion')/x)})
+
+          texts={}
+          for root in [Path('out/pair'),Path('out/companion')]:
+              for p in root.rglob('*'):
+                  if p.is_file(): texts[p.relative_to(Path('out')).as_posix()]=p.read_text(encoding='utf8',errors='replace')
+          needles=['backtrack_pool_rows','limit_train_rows','remember_rate','backtrack_enable','latent_warmup_steps','stage_i_consistent_values','build_multi_output_cell_prompt','build_supervised_completion','score_prediction_text','checkpoint-step-01200']
+          hits=[]
+          for path,text in texts.items():
+              for i,line in enumerate(text.splitlines(),1):
+                  if any(n.lower() in line.lower() for n in needles): hits.append({'path':path,'line':i,'text':line[:800]})
+
+          # Extract launch flags for the exact matched pair when possible.
+          launch='\n'.join(v for k,v in texts.items() if k.endswith('launch_s2_sweep.sh'))
+          nowarm='\n'.join(v for k,v in texts.items() if k.endswith('bt_rr03_nowarm.log'))
+          ctrl='\n'.join(v for k,v in texts.items() if k.endswith('ctrl_nobt.log'))
+          obj={
+            'schema':'LUCIA_AA_R22537_SUDOKU_SOURCE_TEXT_AUDIT_V1',
+            'pair_repo':pair,'pair_revision':prev,
+            'companion_repo':companion,'companion_revision':ci.sha,
+            'copied':copied,'keyword_hits':hits,
+            'matched_pair':{
+              'control':'checkpoints/ctrl_nobt/checkpoint-step-01200',
+              'intervention':'checkpoints/bt_rr03_nowarm/checkpoint-step-01200',
+              'control_launch_mentions':len(re.findall(r'ctrl_nobt',launch,re.I)),
+              'intervention_launch_mentions':len(re.findall(r'bt_rr03_nowarm',launch,re.I)),
+              'control_log_mentions':len(re.findall(r'backtrack|remember_rate|pool_rows|latent_warmup',ctrl,re.I)),
+              'intervention_log_mentions':len(re.findall(r'backtrack|remember_rate|pool_rows|latent_warmup',nowarm,re.I)),
+            },
+            'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,
+          }
+          p=Path('out/meta/R22537_SUDOKU_SOURCE_TEXT_AUDIT.json');p.write_text(json.dumps(obj,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          # Delete HF caches; artifact contains source text only.
+          home=Path.home()/'.cache'/'huggingface'
+          if home.exists(): shutil.rmtree(home,ignore_errors=True)
+          PY
+          find out -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.model' \) -print -quit | grep -q . && exit 1 || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22537-sudoku-source-text-audit
+          path: out
+          retention-days: 1
+          compression-level: 6
