@@ -19,7 +19,7 @@ jobs:
           mkdir -p out
           python -m pip download --disable-pip-version-check --no-deps --only-binary=:all: \
             --python-version 313 --implementation cp --abi abi3 --platform manylinux_2_17_x86_64 \
-            -d out 'tokenizers==0.20.3'
+            -d out 'tokenizers==0.21.4'
           sha256sum out/* > out/SHA256.txt
           ls -lh out
       - name: Upload runtime ABI wheel
