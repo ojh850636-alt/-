@@ -1,0 +1,11 @@
+authorization_id=R22542-C39-FAST-BATCH-001
+authoritative_ingress_run=31484392389
+hf_redownload_authorized=0
+scientific_contract_changed=0
+suite_changed=0
+thresholds_changed=0
+teacher_batch_size=32
+generation_prompt_batch_size=4
+generation_k=8
+sampling_contract_changed=0
+authority_rule=FIRST_COMPLETE_INTERNALLY_CONSISTENT_EVIDENCE_SET_AUTHORITATIVE
