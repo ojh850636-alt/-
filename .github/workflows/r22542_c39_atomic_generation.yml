@@ -1,0 +1,83 @@
+name: LAA R22542 C39 atomic locked generation
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  generation:
+    strategy:
+      fail-fast: false
+      max-parallel: 6
+      matrix:
+        condition:
+          - BASE_seed42
+          - FULL_seed42
+          - RANDOM_seed42
+          - SHUFFLED_seed42
+          - FULL_seed224
+          - FULL_seed1337
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      C39_GEN_CONDITION: ${{ matrix.condition }}
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Recover sealed forge and authoritative source escrow only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --quiet origin laa-r22542-c39-runtime-only:refs/remotes/origin/c39-runtime
+          mkdir -p r22542_c39 work/source/base work/source/candidate escrow runtime_art torch_wheel
+          git show origin/c39-runtime:r22542_c39/lean_tactic_forge.py > r22542_c39/lean_tactic_forge.py
+          gh run download 31484392389 -R 'ojh850636-alt/-' -n r22542-c39-escrow-adapter -D escrow/adapter
+          gh run download 31484392389 -R 'ojh850636-alt/-' -n r22542-c39-escrow-meta -D escrow/meta
+          for i in $(seq -w 0 15); do gh run download 31484392389 -R 'ojh850636-alt/-' -n r22542-c39-base-$i -D escrow/base-$i; done
+          cat $(for i in $(seq -w 0 15); do printf 'escrow/base-%s/base.part.%s ' "$i" "$i"; done) > work/source/base/model.safetensors-00001-of-00001.safetensors
+          cp escrow/meta/config.json escrow/meta/model.safetensors.index.json escrow/meta/tokenizer.json escrow/meta/tokenizer_config.json work/source/base/
+          cp escrow/adapter/adapter_model.safetensors work/source/candidate/
+          cp escrow/meta/adapter_config.json work/source/candidate/
+          echo 'aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1  work/source/base/model.safetensors-00001-of-00001.safetensors' | sha256sum -c -
+          echo '4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312  work/source/candidate/adapter_model.safetensors' | sha256sum -c -
+          echo '5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42  work/source/base/tokenizer.json' | sha256sum -c -
+          gh run download 31491939184 -R 'ojh850636-alt/-' -n r22542-c39-runtime-wheelhouse -D runtime_art
+      - name: Install audited runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip download --no-deps --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0+cpu' -d torch_wheel
+          TW=$(find torch_wheel -name 'torch-2.10.0+cpu-*.whl' -o -name 'torch-2.10.0%2Bcpu-*.whl' | head -1)
+          test -n "$TW"
+          echo 'ee40b8a4b4b2cf0670c6fd4f35a7ef23871af956fecb238fbf5da15a72650b1d  '"$TW" | sha256sum -c -
+          python -m pip install --quiet "$TW" runtime_art/wheelhouse/*.whl
+      - name: Verify sealed suite and run one generation condition
+        shell: bash
+        run: |
+          set -euo pipefail
+          python r22542_c39/lean_tactic_forge.py work/C39_FRESH_LEAN_TACTIC_SUITE.jsonl > work/SUITE_RECEIPT.json
+          grep -q 'a081ee299a7035337bb6fa6f6c380fb6d8cbd328534b049cd45a5fbe032338f2' work/SUITE_RECEIPT.json
+          PYTHONPATH="$PWD/r22542_c39" WORK_ROOT="$PWD/work" python -B r22542_c39/c39_generation_condition.py
+      - name: Remove raw source/runtime before publication
+        if: always()
+        shell: bash
+        run: |
+          rm -rf work/source escrow runtime_art torch_wheel
+      - name: Upload raw-free generation condition
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-generation-${{ matrix.condition }}
+          path: |
+            work/result/
+            work/SUITE_RECEIPT.json
+          retention-days: 1
