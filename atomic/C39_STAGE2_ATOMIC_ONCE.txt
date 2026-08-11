@@ -1,0 +1,11 @@
+C39_STAGE2_ATOMIC_RESOURCE_MIGRATION_AUTHORIZED
+prior_stage2_run=31505149169
+prior_stage2_completed_target_artifacts=0
+prior_stage2_scientific_credit=0
+validation_targets=MLP_ALL,EARLY_BAND,EARLY_BAND&MLP_ALL
+labels=TARGET,RANDOM_0,RANDOM_1,RANDOM_2,ENERGY_TOP
+modes=ablation,only
+unique_configs=30
+source=AUTHORITATIVE_ESCROW_RUN_31484392389
+runtime=RUNTIME_WHEEL_ESCROW_RUN_31491939184
+hf_model_redownloads_authorized=0
