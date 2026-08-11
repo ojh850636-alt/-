@@ -1,0 +1,55 @@
+name: LAA R22542 C39 collect recovered Stage2
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['recovery/C39_STAGE2_COLLECT_RECOVERED_ONCE.txt']
+permissions: {contents: read, actions: read}
+jobs:
+  collect:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Download 29 completed atomic configs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'r22542-c39-stage2-atomic-*'
+          path: collected/original
+          merge-multiple: false
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31507487963
+      - name: Download the one recovered missing config
+        uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-stage2-atomic-MLP_ALL-TARGET-ablation
+          path: collected/recovery
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31532536631
+      - name: Download authoritative BASE teacher baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-fast-teacher-base
+          path: baseline/base
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31488582355
+      - name: Download authoritative FULL teacher baseline
+        uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-fast-teacher-full
+          path: baseline/full
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31488582355
+      - name: Require exact recovered 30 and select bounded survivor
+        run: python -B recovery/collect_and_select_stage2.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-stage2-recovered-combined
+          path: public/
+          retention-days: 1
