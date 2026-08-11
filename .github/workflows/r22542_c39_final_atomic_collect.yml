@@ -14,11 +14,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
       - uses: actions/download-artifact@v4
-        with: {name: r22542-c39-final-atomic-SEMANTIC, path: inputs/semantic, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535504153}
+        with: {name: r22542-c39-final-atomic-v3-SEMANTIC, path: inputs/semantic, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31536231051}
       - uses: actions/download-artifact@v4
-        with: {name: r22542-c39-final-atomic-TARGET_ONLY, path: inputs/only, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535504153}
+        with: {name: r22542-c39-final-atomic-v3-TARGET_ONLY, path: inputs/only, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31536231051}
       - uses: actions/download-artifact@v4
-        with: {name: r22542-c39-final-atomic-TARGET_ABLATION, path: inputs/ablation, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535504153}
+        with: {name: r22542-c39-final-atomic-v3-TARGET_ABLATION, path: inputs/ablation, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31536231051}
       - uses: actions/download-artifact@v4
         with: {name: r22542-c39-fast-gen-full42, path: inputs/full42, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31488582355}
       - name: Normalize atomic inputs
