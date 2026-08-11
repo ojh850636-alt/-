@@ -1,0 +1,41 @@
+name: LAA R22542 C39 terminal raw artifact deletion
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'laa/r22542/C39_DELETE_RAW_ARTIFACTS_ONCE.txt'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cleanup:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Delete all artifacts attached to authoritative and duplicate raw ingress runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p receipt
+          python - <<'PY'
+          import json,os,urllib.request
+          repo='ojh850636-alt/-'; runs=[31484392389,31484772671]; token=os.environ['GH_TOKEN']; rows=[]
+          def req(url,method='GET'):
+            r=urllib.request.Request(url,method=method,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LAA-R22542'})
+            with urllib.request.urlopen(r) as x:return x.read()
+          for run in runs:
+            u=f'https://api.github.com/repos/{repo}/actions/runs/{run}/artifacts?per_page=100'
+            before=json.loads(req(u)); deleted=[]
+            for a in before.get('artifacts',[]):
+              req(f'https://api.github.com/repos/{repo}/actions/artifacts/{a["id"]}','DELETE');deleted.append({'id':a['id'],'name':a['name'],'size_in_bytes':a['size_in_bytes']})
+            after=json.loads(req(u)); rows.append({'run_id':run,'before_count':before.get('total_count',0),'deleted':deleted,'after_count':after.get('total_count',0)})
+          out={'schema':'LUCIA_AA_R22542_C39_REMOTE_RAW_ARTIFACT_DELETION_V1','runs':rows,'verdict':'PASS' if all(r['after_count']==0 for r in rows) else 'FAIL','raw_git_commit_count':0}
+          open('receipt/R22542_C39_REMOTE_RAW_ARTIFACT_DELETION.json','w').write(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          assert out['verdict']=='PASS',out
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-raw-deletion-receipt, path: receipt/, retention-days: 1}
