@@ -1,0 +1,6 @@
+C39_CAUSAL_SCREEN_AUTHORIZED_AFTER_GREEN_BEHAVIOR
+behavior_authority_run=31488582355
+behavior_reproduction_gate=GREEN
+behavior_safety_gate=GREEN
+hypotheses=PREOUTPUT_SCIENTIFIC_CONTRACT_ONLY
+hf_model_redownloads_authorized=0
