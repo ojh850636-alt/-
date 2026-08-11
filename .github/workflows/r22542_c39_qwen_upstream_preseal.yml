@@ -21,10 +21,10 @@ jobs:
           git clone -q https://github.com/huggingface/transformers.git work/transformers
           git -C work/transformers checkout -q "$TX"
           python -m pip wheel --quiet --no-deps --wheel-dir work/wheels ./work/transformers
-          python -m pip download --quiet --no-deps --dest work/wheels 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2'
+          python -m pip download --quiet --no-deps --dest work/wheels 'peft==0.19.1' 'safetensors==0.8.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2'
           python -m pip download --quiet --no-deps --dest work/wheels --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
           TXW=$(ls work/wheels/transformers-*.whl | head -1)
-          python -m pip install --quiet "$TXW" 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2' --extra-index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet "$TXW" 'peft==0.19.1' 'safetensors==0.8.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2' --extra-index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
           echo "$TX" > report/TRANSFORMERS_COMMIT.txt
       - name: Prove Qwen3.5 native mapping and pin exact Base metadata
         shell: bash
@@ -51,7 +51,7 @@ jobs:
           wheels=[]
           for p in sorted(Path('work/wheels').glob('*.whl')):
             wheels.append({'file':p.name,'size_bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          out={'schema':'LUCIA_AA_R22542_C39_QWEN35_UPSTREAM_RUNTIME_V1','verdict':'PASS_EXACT_UPSTREAM_TRANSFORMERS_QWEN35_NATIVE','transformers_git_revision':tx,'candidate_repo':crepo,'candidate_revision':crev,'candidate_files':sel(c),'base_repo':brepo,'base_revision':b.sha,'base_files':sel(b),'base_config_sha256':hashlib.sha256(cb).hexdigest(),'base_config_size':len(cb),'config_class':type(cfg).__name__,'model_class':model_cls.__name__,'trust_remote_code':False,'imports':{'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'accelerate':accelerate.__version__,'huggingface_hub':huggingface_hub.__version__,'tokenizers':tokenizers.__version__},'primary_wheels':wheels,'pip_freeze':subprocess.check_output([sys.executable,'-m','pip','freeze'],text=True).splitlines(),'python':sys.version,'platform':platform.platform(),'candidate_model_weight_bytes_downloaded':0,'base_model_weight_bytes_downloaded':0,'model_outputs_observed':0,'training_time_exact_base_revision_proven':False}
+          out={'schema':'LUCIA_AA_R22542_C39_QWEN35_UPSTREAM_RUNTIME_V2','verdict':'PASS_EXACT_UPSTREAM_TRANSFORMERS_QWEN35_NATIVE','transformers_git_revision':tx,'transformers_dependency_contract':{'huggingface_hub':'>=1.5,<2','peft':'>=0.19.1','safetensors':'>=0.8.0','tokenizers':'>=0.22,<=0.23','torch':'>=2.5'},'candidate_repo':crepo,'candidate_revision':crev,'candidate_files':sel(c),'base_repo':brepo,'base_revision':b.sha,'base_files':sel(b),'base_config_sha256':hashlib.sha256(cb).hexdigest(),'base_config_size':len(cb),'config_class':type(cfg).__name__,'model_class':model_cls.__name__,'trust_remote_code':False,'imports':{'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'accelerate':accelerate.__version__,'huggingface_hub':huggingface_hub.__version__,'tokenizers':tokenizers.__version__},'primary_wheels':wheels,'pip_freeze':subprocess.check_output([sys.executable,'-m','pip','freeze'],text=True).splitlines(),'python':sys.version,'platform':platform.platform(),'candidate_model_weight_bytes_downloaded':0,'base_model_weight_bytes_downloaded':0,'model_outputs_observed':0,'training_time_exact_base_revision_proven':False}
           Path('report/R22542_C39_QWEN35_UPSTREAM_RUNTIME.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
