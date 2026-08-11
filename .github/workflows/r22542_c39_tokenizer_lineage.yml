@@ -1,0 +1,50 @@
+name: LAA R22542 C39 tokenizer lineage pointer forensics
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  lineage:
+    runs-on: ubuntu-24.04
+    env:
+      CAND_TOKENIZER_SHA: 87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4
+      CURRENT_MODEL_SHA: aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+    steps:
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Inspect Qwen git/LFS pointer history only, no LFS smudge
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report work
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q https://huggingface.co/Qwen/Qwen3.5-2B work/basegit
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess,re,json,os
+          repo=Path('work/basegit'); target=os.environ['CAND_TOKENIZER_SHA']; modelsha=os.environ['CURRENT_MODEL_SHA']
+          commits=subprocess.check_output(['git','-C',str(repo),'log','--all','--format=%H','--','tokenizer.json'],text=True).splitlines()
+          rows=[];matches=[]
+          for c in commits:
+            try: txt=subprocess.check_output(['git','-C',str(repo),'show',f'{c}:tokenizer.json'],text=True,stderr=subprocess.DEVNULL)
+            except Exception: continue
+            m=re.search(r'oid sha256:([0-9a-f]{64})',txt); tsha=m.group(1) if m else None
+            model=None
+            for mp in ('model.safetensors-00001-of-00001.safetensors','model.safetensors'):
+              try:
+                mt=subprocess.check_output(['git','-C',str(repo),'show',f'{c}:{mp}'],text=True,stderr=subprocess.DEVNULL)
+                mm=re.search(r'oid sha256:([0-9a-f]{64})',mt); model=mm.group(1) if mm else None
+                if model: break
+              except Exception: pass
+            date=subprocess.check_output(['git','-C',str(repo),'show','-s','--format=%cI',c],text=True).strip()
+            row={'commit':c,'date':date,'tokenizer_lfs_sha256':tsha,'model_lfs_sha256_same_commit':model}; rows.append(row)
+            if tsha==target: matches.append(row)
+          out={'schema':'LUCIA_AA_R22542_C39_TOKENIZER_LINEAGE_V1','candidate_tokenizer_sha256':target,'current_runtime_model_sha256':modelsha,'history_rows':rows,'matching_base_commits':matches,'candidate_tokenizer_bytes_downloaded':0,'base_weight_bytes_downloaded':0,'verdict':'MATCH_FOUND' if matches else 'NO_MATCH_FOUND','training_time_exact_base_revision_proven':False}
+          Path('report/R22542_C39_TOKENIZER_LINEAGE.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print('matches',len(matches))
+          for x in matches: print(x)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: r22542-c39-tokenizer-lineage, path: report/, retention-days: 1}
