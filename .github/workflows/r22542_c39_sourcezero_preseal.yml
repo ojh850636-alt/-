@@ -1,0 +1,113 @@
+name: LAA R22542 C39 source-zero Lean runtime preseal
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  preseal:
+    runs-on: ubuntu-24.04
+    env:
+      CANDIDATE_REPO: markm39/openproof-tactic-2b
+      CANDIDATE_REV: 26b4c66606de4e73139a377f8026df93907c12b9
+      BASE_REPO: Qwen/Qwen3.5-2B
+      SUITE_SHA: ca0338cbb067c4f4b807bac0d389e8b946780906ed5562cd0949bd9541ba58a2
+      CANONICAL_SHA: 966f240d6a07c6abc868dd5cd0341a55f20ab19c6b18ffdf4ce8ea882462d54b
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Source-zero Python dependency closure and Base metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report work/wheels
+          python -m pip download --quiet --dest work/wheels --only-binary=:all: 'transformers==5.0.0' 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==0.36.0'
+          python -m pip download --quiet --dest work/wheels --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet --no-index --find-links work/wheels 'torch==2.10.0' 'transformers==5.0.0' 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==0.36.0'
+          python - <<'PY'
+          import hashlib,json,platform,sys
+          from pathlib import Path
+          import torch,transformers,peft,safetensors,accelerate,huggingface_hub
+          from huggingface_hub import HfApi,hf_hub_download
+          from transformers import AutoConfig,AutoModelForCausalLM
+          api=HfApi(); brepo='Qwen/Qwen3.5-2B'; crepo='markm39/openproof-tactic-2b'; crev='26b4c66606de4e73139a377f8026df93907c12b9'
+          b=api.model_info(brepo,files_metadata=True); c=api.model_info(crepo,revision=crev,files_metadata=True)
+          cfgp=Path(hf_hub_download(brepo,filename='config.json',revision=b.sha)); cfg_bytes=cfgp.read_bytes()
+          cfg=AutoConfig.from_pretrained(brepo,revision=b.sha,trust_remote_code=False)
+          model_cls=AutoModelForCausalLM._model_mapping[type(cfg)]
+          def sibs(info):
+            out=[]
+            for s in info.siblings:
+              if s.rfilename.endswith('.safetensors') or s.rfilename in {'config.json','generation_config.json','tokenizer_config.json','tokenizer.json','adapter_config.json'}:
+                l=getattr(s,'lfs',None)
+                out.append({'path':s.rfilename,'size':getattr(s,'size',None),'lfs_sha256':getattr(l,'sha256',None) if l else None})
+            return out
+          wheels=[]
+          for p in sorted(Path('work/wheels').glob('*.whl')):
+            wheels.append({'file':p.name,'size_bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          out={'schema':'LUCIA_AA_R22542_C39_SOURCE_ZERO_PYTHON_BASE_BINDING_V1','verdict':'PASS','candidate_repo':crepo,'candidate_revision':crev,'candidate_files':sibs(c),'base_repo':brepo,'base_revision':b.sha,'base_files':sibs(b),'base_config_sha256':hashlib.sha256(cfg_bytes).hexdigest(),'base_config_size':len(cfg_bytes),'config_class':type(cfg).__name__,'model_class':model_cls.__name__,'trust_remote_code':False,'python':sys.version,'platform':platform.platform(),'imports':{'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'accelerate':accelerate.__version__,'huggingface_hub':huggingface_hub.__version__},'primary_wheels':wheels,'candidate_model_weight_bytes_downloaded':0,'base_model_weight_bytes_downloaded':0,'model_outputs_observed':0,'training_time_exact_base_revision_proven':False}
+          Path('report/R22542_C39_PYTHON_BASE_BINDING.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Pin OpenProof and OpenProof-ML reference commits
+        shell: bash
+        run: |
+          set -euo pipefail
+          OP=$(git ls-remote https://github.com/mxthematic/openproof.git refs/heads/master | awk '{print $1}')
+          ML=$(git ls-remote https://github.com/mxthematic/openproof-ml.git refs/heads/master | awk '{print $1}')
+          test -n "$OP" && test -n "$ML"
+          git clone -q https://github.com/mxthematic/openproof.git work/openproof
+          git -C work/openproof checkout -q "$OP"
+          git clone -q https://github.com/mxthematic/openproof-ml.git work/openproof-ml
+          git -C work/openproof-ml checkout -q "$ML"
+          python - <<PY
+          import hashlib,json
+          from pathlib import Path
+          op='$OP'; ml='$ML'
+          paths=[Path('work/openproof/lean/lean-toolchain'),Path('work/openproof/lean/lakefile.toml')]
+          rows=[{'path':str(p).split('work/openproof/',1)[1],'size_bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest(),'text':p.read_text()} for p in paths]
+          out={'schema':'LUCIA_AA_R22542_C39_UPSTREAM_REFERENCE_BINDING_V1','verdict':'PASS_REFERENCE_CURRENT_NOT_TRAINING_TIME_PROOF','openproof_repo':'mxthematic/openproof','openproof_revision':op,'openproof_ml_repo':'mxthematic/openproof-ml','openproof_ml_revision':ml,'runtime_files':rows,'training_time_exact_code_revision_proven':False,'model_outputs_observed':0}
+          Path('report/R22542_C39_UPSTREAM_REFERENCE_BINDING.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Generate exact fresh suite from precommitted generator and validate hash
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo 'ZnJvbSBfX2Z1dHVyZV9fIGltcG9ydCBhbm5vdGF0aW9ucwppbXBvcnQgaGFzaGxpYiwganNvbiwgcmFuZG9tCmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKU0VFRCA9IDIyNTQyMDAzOQpTQ0hFTUEgPSAiTFVDSUFfQUFfUjIyNTQyX0MzOV9GUkVTSF9MRUFOX1RBQ1RJQ19TVUlURV9WMSIKCiMgVHdvIGRlbGliZXJhdGVseSBzZXBhcmF0ZSBnZW5lcmF0b3IgaW1wbGVtZW50YXRpb25zLiBOZWl0aGVyIGNvbnN1bWVzIE9wZW5Qcm9vZiByb3dzLgpkZWYgX2dlbl9hKGk6IGludCwgc3BsaXQ6IHN0cikgLT4gZGljdDoKICAgIGs9aSU4OyBzPWYie2k6MDNkfSIKICAgIGZhbT1bXQogICAgaWYgaz09MDoKICAgICAgICBnb2FsPWYizrF7c30gOiBUeXBlXG54e3N9IHl7c30gOiDOsXtzfVxuaHtzfSA6IHh7c30gPSB5e3N9XG7iiqIgeXtzfSA9IHh7c30iCiAgICAgICAgc3JjPWYidGhlb3JlbSBjMzlfYV97c30gKM6xe3N9IDogVHlwZSkgKHh7c30geXtzfSA6IM6xe3N9KSAoaHtzfSA6IHh7c30gPSB5e3N9KSA6IHl7c30gPSB4e3N9IDo9IGJ5XG4gIGV4YWN0IGh7c30uc3ltbSIKICAgICAgICB0YWM9ZiJleGFjdCBoe3N9LnN5bW0iOyBmYW1pbHk9IkVRX1NZTU0iCiAgICBlbGlmIGs9PTE6CiAgICAgICAgZ29hbD1mIlB7c30gUXtzfSA6IFByb3Bcbmh7c30gOiBQe3N9IOKIpyBRe3N9XG7iiqIgUXtzfSDiiKcgUHtzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAoUHtzfSBRe3N9IDogUHJvcCkgKGh7c30gOiBQe3N9IOKIpyBRe3N9KSA6IFF7c30g4oinIFB7c30gOj0gYnlcbiAgZXhhY3Qg4p+oaHtzfS4yLCBoe3N9LjHin6kiCiAgICAgICAgdGFjPWYiZXhhY3Qg4p+oaHtzfS4yLCBoe3N9LjHin6kiOyBmYW1pbHk9IkFORF9TV0FQIgogICAgZWxpZiBrPT0yOgogICAgICAgIGdvYWw9ZiLOsXtzfSA6IFR5cGVcblB7c30gOiDOsXtzfSDihpIgUHJvcFxuYXtzfSA6IM6xe3N9XG5oe3N9IDog4oiAIHgsIFB7c30geFxu4oqiIFB7c30gYXtzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAozrF7c30gOiBUeXBlKSAoUHtzfSA6IM6xe3N9IOKGkiBQcm9wKSAoYXtzfSA6IM6xe3N9KSAoaHtzfSA6IOKIgCB4LCBQe3N9IHgpIDogUHtzfSBhe3N9IDo9IGJ5XG4gIGV4YWN0IGh7c30gYXtzfSIKICAgICAgICB0YWM9ZiJleGFjdCBoe3N9IGF7c30iOyBmYW1pbHk9IkZPUkFMTF9BUFBMWSIKICAgIGVsaWYgaz09MzoKICAgICAgICBnb2FsPWYiYXtzfSBie3N9IDogTmF0XG7iiqIgYXtzfSArIGJ7c30gPSBie3N9ICsgYXtzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAoYXtzfSBie3N9IDogTmF0KSA6IGF7c30gKyBie3N9ID0gYntzfSArIGF7c30gOj0gYnlcbiAgb21lZ2EiCiAgICAgICAgdGFjPSJvbWVnYSI7IGZhbWlseT0iTkFUX0FERF9DT01NIgogICAgZWxpZiBrPT00OgogICAgICAgIGdvYWw9ZiJhe3N9IGJ7c30gOiBOYXRcbuKKoiBhe3N9IOKJpCBhe3N9ICsgYntzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAoYXtzfSBie3N9IDogTmF0KSA6IGF7c30g4omkIGF7c30gKyBie3N9IDo9IGJ5XG4gIG9tZWdhIgogICAgICAgIHRhYz0ib21lZ2EiOyBmYW1pbHk9Ik5BVF9MRV9BREQiCiAgICBlbGlmIGs9PTU6CiAgICAgICAgZ29hbD1mInh7c30geXtzfSA6IEludFxu4oqiICh4e3N9ICsgeXtzfSleMiA9IHh7c31eMiArIDIqeHtzfSp5e3N9ICsgeXtzfV4yIgogICAgICAgIHNyYz1mInRoZW9yZW0gYzM5X2Ffe3N9ICh4e3N9IHl7c30gOiBJbnQpIDogKHh7c30gKyB5e3N9KV4yID0geHtzfV4yICsgMip4e3N9Knl7c30gKyB5e3N9XjIgOj0gYnlcbiAgcmluZyIKICAgICAgICB0YWM9InJpbmciOyBmYW1pbHk9IklOVF9SSU5HX1NRVUFSRSIKICAgIGVsaWYgaz09NjoKICAgICAgICBnb2FsPWYizrF7c30gOiBUeXBlXG54c3tzfSB5c3tzfSA6IExpc3QgzrF7c31cbuKKoiAoeHN7c30gKysgeXN7c30pLmxlbmd0aCA9IHhze3N9Lmxlbmd0aCArIHlze3N9Lmxlbmd0aCIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAozrF7c30gOiBUeXBlKSAoeHN7c30geXN7c30gOiBMaXN0IM6xe3N9KSA6ICh4c3tzfSArKyB5c3tzfSkubGVuZ3RoID0geHN7c30ubGVuZ3RoICsgeXN7c30ubGVuZ3RoIDo9IGJ5XG4gIHNpbXAiCiAgICAgICAgdGFjPSJzaW1wIjsgZmFtaWx5PSJMSVNUX0xFTkdUSF9BUFBFTkQiCiAgICBlbHNlOgogICAgICAgIGdvYWw9ZiJQe3N9IFF7c30gOiBQcm9wXG5oe3N9IDogUHtzfSDihpIgUXtzfVxuaHB7c30gOiBQe3N9XG7iiqIgUXtzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9hX3tzfSAoUHtzfSBRe3N9IDogUHJvcCkgKGh7c30gOiBQe3N9IOKGkiBRe3N9KSAoaHB7c30gOiBQe3N9KSA6IFF7c30gOj0gYnlcbiAgZXhhY3QgaHtzfSBocHtzfSIKICAgICAgICB0YWM9ZiJleGFjdCBoe3N9IGhwe3N9IjsgZmFtaWx5PSJJTVBMX0FQUExZIgogICAgcmV0dXJuIF9yb3coaSxzcGxpdCwiR0VORVJBVE9SX0EiLGZhbWlseSxnb2FsLHNyYyx0YWMsVHJ1ZSkKCmRlZiBfZ2VuX2IoaTogaW50LCBzcGxpdDogc3RyKSAtPiBkaWN0OgogICAgaj0xMDAwK2k7IHM9ZiJ7ajowNGR9Ijsgaz1pJTgKICAgIGlmIGs9PTA6CiAgICAgICAgZ29hbD1mIlB7c30gUXtzfSA6IFByb3Bcbmh7c30gOiBQe3N9IOKIqCBRe3N9XG7iiqIgUXtzfSDiiKggUHtzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9iX3tzfSAoUHtzfSBRe3N9IDogUHJvcCkgKGh7c30gOiBQe3N9IOKIqCBRe3N9KSA6IFF7c30g4oioIFB7c30gOj0gYnlcbiAgcmNhc2VzIGh7c30gd2l0aCBoIHwgaCA8Oz4gc2ltcCBbaF0iCiAgICAgICAgdGFjPWYicmNhc2VzIGh7c30gd2l0aCBoIHwgaCA8Oz4gc2ltcCBbaF0iOyBmYW1pbHk9Ik9SX1NXQVAiCiAgICBlbGlmIGs9PTE6CiAgICAgICAgZ29hbD1mIs6xe3N9IDogVHlwZVxuUHtzfSA6IM6xe3N9IOKGkiBQcm9wXG5he3N9IDogzrF7c31cbmh7c30gOiBQe3N9IGF7c31cbuKKoiDiiIMgeCwgUHtzfSB4IgogICAgICAgIHNyYz1mInRoZW9yZW0gYzM5X2Jfe3N9ICjOsXtzfSA6IFR5cGUpIChQe3N9IDogzrF7c30g4oaSIFByb3ApIChhe3N9IDogzrF7c30pIChoe3N9IDogUHtzfSBhe3N9KSA6IOKIgyB4LCBQe3N9IHggOj0gYnlcbiAgZXhhY3Qg4p+oYXtzfSwgaHtzfeKfqSIKICAgICAgICB0YWM9ZiJleGFjdCDin6hhe3N9LCBoe3N94p+pIjsgZmFtaWx5PSJFWElTVFNfV0lUTkVTUyIKICAgIGVsaWYgaz09MjoKICAgICAgICBnb2FsPWYiUHtzfSBRe3N9IFJ7c30gOiBQcm9wXG5oe3N9IDogKFB7c30g4oinIFF7c30pIOKIpyBSe3N9XG7iiqIgUHtzfSDiiKcgKFF7c30g4oinIFJ7c30pIgogICAgICAgIHNyYz1mInRoZW9yZW0gYzM5X2Jfe3N9IChQe3N9IFF7c30gUntzfSA6IFByb3ApIChoe3N9IDogKFB7c30g4oinIFF7c30pIOKIpyBSe3N9KSA6IFB7c30g4oinIChRe3N9IOKIpyBSe3N9KSA6PSBieVxuICBleGFjdCDin6hoe3N9LjEuMSwgaHtzfS4xLjIsIGh7c30uMuKfqSIKICAgICAgICB0YWM9ZiJleGFjdCDin6hoe3N9LjEuMSwgaHtzfS4xLjIsIGh7c30uMuKfqSI7IGZhbWlseT0iQU5EX0FTU09DIgogICAgZWxpZiBrPT0zOgogICAgICAgIGdvYWw9ZiJhe3N9IGJ7c30gOiBOYXRcbuKKoiBhe3N9ICogYntzfSA9IGJ7c30gKiBhe3N9IgogICAgICAgIHNyYz1mInRoZW9yZW0gYzM5X2Jfe3N9IChhe3N9IGJ7c30gOiBOYXQpIDogYXtzfSAqIGJ7c30gPSBie3N9ICogYXtzfSA6PSBieVxuICBvbWVnYSIKICAgICAgICB0YWM9Im9tZWdhIjsgZmFtaWx5PSJOQVRfTVVMX0NPTU0iCiAgICBlbGlmIGs9PTQ6CiAgICAgICAgZ29hbD1mInh7c30geXtzfSA6IEludFxuaHtzfSA6IHh7c30gPSB5e3N9ICsgM1xu4oqiIHh7c30gLSB5e3N9ID0gMyIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9iX3tzfSAoeHtzfSB5e3N9IDogSW50KSAoaHtzfSA6IHh7c30gPSB5e3N9ICsgMykgOiB4e3N9IC0geXtzfSA9IDMgOj0gYnlcbiAgb21lZ2EiCiAgICAgICAgdGFjPSJvbWVnYSI7IGZhbWlseT0iSU5UX0xJTkVBUiIKICAgIGVsaWYgaz09NToKICAgICAgICBnb2FsPWYizrF7c30gOiBUeXBlXG54c3tzfSA6IExpc3QgzrF7c31cbuKKoiB4c3tzfS5yZXZlcnNlLnJldmVyc2UgPSB4c3tzfSIKICAgICAgICBzcmM9ZiJ0aGVvcmVtIGMzOV9iX3tzfSAozrF7c30gOiBUeXBlKSAoeHN7c30gOiBMaXN0IM6xe3N9KSA6IHhze3N9LnJldmVyc2UucmV2ZXJzZSA9IHhze3N9IDo9IGJ5XG4gIHNpbXAiCiAgICAgICAgdGFjPSJzaW1wIjsgZmFtaWx5PSJMSVNUX1JFVkVSU0VfSU5WIgogICAgZWxpZiBrPT02OgogICAgICAgIGdvYWw9ZiLOsXtzfSDOsntzfSA6IFR5cGVcbmZ7c30gOiDOsXtzfSDihpIgzrJ7c31cbnh7c30geXtzfSA6IM6xe3N9XG5oe3N9IDogeHtzfSA9IHl7c31cbuKKoiBme3N9IHh7c30gPSBme3N9IHl7c30iCiAgICAgICAgc3JjPWYidGhlb3JlbSBjMzlfYl97c30gKM6xe3N9IM6ye3N9IDogVHlwZSkgKGZ7c30gOiDOsXtzfSDihpIgzrJ7c30pICh4e3N9IHl7c30gOiDOsXtzfSkgKGh7c30gOiB4e3N9ID0geXtzfSkgOiBme3N9IHh7c30gPSBme3N9IHl7c30gOj0gYnlcbiAgc2ltcGEgW2h7c31dIgogICAgICAgIHRhYz1mInNpbXBhIFtoe3N9XSI7IGZhbWlseT0iQ09OR1JfQVJHIgogICAgZWxzZToKICAgICAgICBnb2FsPWYiUHtzfSBRe3N9IFJ7c30gOiBQcm9wXG5oMXtzfSA6IFB7c30g4oaSIFF7c31cbmgye3N9IDogUXtzfSDihpIgUntzfVxu4oqiIFB7c30g4oaSIFJ7c30iCiAgICAgICAgc3JjPWYidGhlb3JlbSBjMzlfYl97c30gKFB7c30gUXtzfSBSe3N9IDogUHJvcCkgKGgxe3N9IDogUHtzfSDihpIgUXtzfSkgKGgye3N9IDogUXtzfSDihpIgUntzfSkgOiBQe3N9IOKGkiBSe3N9IDo9IGJ5XG4gIGludHJvIGhwOyBleGFjdCBoMntzfSAoaDF7c30gaHApIgogICAgICAgIHRhYz1mImludHJvIGhwOyBleGFjdCBoMntzfSAoaDF7c30gaHApIjsgZmFtaWx5PSJJTVBMX0NPTVBPU0UiCiAgICByZXR1cm4gX3JvdyhqLHNwbGl0LCJHRU5FUkFUT1JfQiIsZmFtaWx5LGdvYWwsc3JjLHRhYyxUcnVlKQoKZGVmIF9uZWcoaTogaW50KSAtPiBkaWN0OgogICAgaj05MDAwK2k7IHM9ZiJ7ajowNGR9Ijsgaz1pJTUKICAgIGlmIGs9PTA6CiAgICAgICAgZ29hbD1mInV7c30gOiBVbml0XG7iiqIgRmFsc2UiOyBzcmM9ZiJ0aGVvcmVtIGMzOV9uX3tzfSAodXtzfSA6IFVuaXQpIDogRmFsc2UgOj0gYnlcbiAgX19DQU5ESURBVEVfVEFDVElDX18iOyBmYW09Ik5FR19GQUxTRSIKICAgIGVsaWYgaz09MToKICAgICAgICBnb2FsPWYibntzfSA6IE5hdFxu4oqiIG57c30gKyAxID0gbntzfSI7IHNyYz1mInRoZW9yZW0gYzM5X25fe3N9IChue3N9IDogTmF0KSA6IG57c30gKyAxID0gbntzfSA6PSBieVxuICBfX0NBTkRJREFURV9UQUNUSUNfXyI7IGZhbT0iTkVHX05BVF9TVUNDX0VRIgogICAgZWxpZiBrPT0yOgogICAgICAgIGdvYWw9ZiJQe3N9IDogUHJvcFxu4oqiIFB7c30iOyBzcmM9ZiJ0aGVvcmVtIGMzOV9uX3tzfSAoUHtzfSA6IFByb3ApIDogUHtzfSA6PSBieVxuICBfX0NBTkRJREFURV9UQUNUSUNfXyI7IGZhbT0iTkVHX0FSQklUUkFSWV9QUk9QIgogICAgZWxpZiBrPT0zOgogICAgICAgIGdvYWw9ZiJhe3N9IGJ7c30gOiBOYXRcbuKKoiBhe3N9ID0gYntzfSI7IHNyYz1mInRoZW9yZW0gYzM5X25fe3N9IChhe3N9IGJ7c30gOiBOYXQpIDogYXtzfSA9IGJ7c30gOj0gYnlcbiAgX19DQU5ESURBVEVfVEFDVElDX18iOyBmYW09Ik5FR19BUkJJVFJBUllfRVEiCiAgICBlbHNlOgogICAgICAgIGdvYWw9ZiLOsXtzfSA6IFR5cGVcbnhze3N9IDogTGlzdCDOsXtzfVxu4oqiIHhze3N9ID0gW10iOyBzcmM9ZiJ0aGVvcmVtIGMzOV9uX3tzfSAozrF7c30gOiBUeXBlKSAoeHN7c30gOiBMaXN0IM6xe3N9KSA6IHhze3N9ID0gW10gOj0gYnlcbiAgX19DQU5ESURBVEVfVEFDVElDX18iOyBmYW09Ik5FR19BUkJJVFJBUllfTElTVCIKICAgIHJldHVybiBfcm93KGosIk5FR0FUSVZFX1VOUFJPVkFCTEUiLCJHRU5FUkFUT1JfTkVHIixmYW0sZ29hbCxzcmMsTm9uZSxGYWxzZSkKCmRlZiBfcm93KGksc3BsaXQsZ2VuZXJhdG9yLGZhbWlseSxnb2FsLHNvdXJjZSx0YWN0aWMscG9zaXRpdmUpOgogICAgcmV0dXJuIHsKICAgICAgICAiY2FzZV9pZCI6IGYiQzM5LXtpOjA1ZH0iLCAic3BsaXQiOiBzcGxpdCwgImdlbmVyYXRvciI6IGdlbmVyYXRvciwKICAgICAgICAiZmFtaWx5IjogZmFtaWx5LCAiZ29hbF9zdGF0ZSI6IGdvYWwsICJwcm9tcHQiOiBnb2FsKyI6OjoiLAogICAgICAgICJzdGFuZGFsb25lX3NvdXJjZSI6IHNvdXJjZSwgImNhbm9uaWNhbF90YWN0aWMiOiB0YWN0aWMsCiAgICAgICAgInBvc2l0aXZlIjogYm9vbChwb3NpdGl2ZSksICJtb2RlbF9vdXRwdXRfb2JzZXJ2ZWQiOiBGYWxzZSwKICAgICAgICAidHJhaW5pbmdfZGF0YXNldF9yb3dfdXNlZCI6IEZhbHNlLAogICAgfQoKZGVmIGJ1aWxkKCkgLT4gbGlzdFtkaWN0XToKICAgIHJvd3M9W10KICAgICMgQS1nZW5lcmF0b3IgSUQvZGlzY292ZXJ5IGFuZCBjb25maXJtYXRpb24uCiAgICBmb3IgaSBpbiByYW5nZSg2NCk6IHJvd3MuYXBwZW5kKF9nZW5fYShpLCJESVNDT1ZFUlkiKSkKICAgIGZvciBpIGluIHJhbmdlKDY0LDEyOCk6IHJvd3MuYXBwZW5kKF9nZW5fYShpLCJDT05GSVJNQVRJT04iKSkKICAgICMgSW5kZXBlbmRlbnQgaW1wbGVtZW50YXRpb24gaG9sZG91dC4KICAgIGZvciBpIGluIHJhbmdlKDY0KTogcm93cy5hcHBlbmQoX2dlbl9iKGksIkdFTkVSQVRPUl9IT0xET1VUIikpCiAgICAjIEFscGhhLXJlbmFtZWQgT09EOiBnZW5lcmF0b3IgQiB3aXRoIGRpc2pvaW50IGlkZW50aWZpZXJzL2ZhbWlsaWVzLgogICAgZm9yIGkgaW4gcmFuZ2UoNjQsMTEyKTogcm93cy5hcHBlbmQoX2dlbl9iKGksIkFMUEhBX1JFTkFNRV9PT0QiKSkKICAgICMgSHlwb3RoZXNpcy1vcmRlciBzdHlsZSBPT0Q6IGdlbmVyYXRvciBBIGNhc2VzIGFyZSBkZXRlcm1pbmlzdGljYWxseSBsaW5lLXJlb3JkZXJlZCBpbiBwcm9tcHQgb25seS4KICAgIGZvciBpIGluIHJhbmdlKDEyOCwxNzYpOgogICAgICAgIHI9X2dlbl9hKGksIkhZUF9PUkRFUl9PT0QiKQogICAgICAgIGxpbmVzPXJbImdvYWxfc3RhdGUiXS5zcGxpdGxpbmVzKCk7IGN0eD1saW5lc1s6LTFdOyB0YXJnZXQ9bGluZXNbLTFdCiAgICAgICAgaWYgbGVuKGN0eCk+MTogY3R4PWxpc3QocmV2ZXJzZWQoY3R4KSkKICAgICAgICByWyJnb2FsX3N0YXRlIl09IlxuIi5qb2luKGN0eCtbdGFyZ2V0XSk7IHJbInByb21wdCJdPXJbImdvYWxfc3RhdGUiXSsiOjo6IgogICAgICAgIHJvd3MuYXBwZW5kKHIpCiAgICAjIENvbXBvc2l0aW9uYWwgT09EOiB1c2UgZnJlc2ggQiBmYW1pbGllczsgZXhlY3V0aW9uLCBub3QgZXhhY3QgdGFjdGljLCBpcyBhdXRob3JpdHkuCiAgICBmb3IgaSBpbiByYW5nZSgxMTIsMTYwKTogcm93cy5hcHBlbmQoX2dlbl9iKGksIkNPTVBPU0lUSU9OQUxfT09EIikpCiAgICBmb3IgaSBpbiByYW5nZSg0OCk6IHJvd3MuYXBwZW5kKF9uZWcoaSkpCiAgICBhc3NlcnQgbGVuKHJvd3MpPT0zODQKICAgIGlkcz1bclsnY2FzZV9pZCddIGZvciByIGluIHJvd3NdOyBhc3NlcnQgbGVuKGlkcyk9PWxlbihzZXQoaWRzKSkKICAgIHByb21wdHM9W3JbJ3Byb21wdCddIGZvciByIGluIHJvd3NdOyBhc3NlcnQgbGVuKHByb21wdHMpPT1sZW4oc2V0KHByb21wdHMpKQogICAgcmV0dXJuIHJvd3MKCmRlZiB3cml0ZV9qc29ubChwYXRoOiBzdHJ8UGF0aCkgLT4gZGljdDoKICAgIHJvd3M9YnVpbGQoKTsgcD1QYXRoKHBhdGgpOyBwLnBhcmVudC5ta2RpcihwYXJlbnRzPVRydWUsZXhpc3Rfb2s9VHJ1ZSkKICAgIHAud3JpdGVfdGV4dCgnJy5qb2luKGpzb24uZHVtcHMocixzb3J0X2tleXM9VHJ1ZSxzZXBhcmF0b3JzPSgnLCcsJzonKSxlbnN1cmVfYXNjaWk9RmFsc2UpKydcbicgZm9yIHIgaW4gcm93cyksZW5jb2Rpbmc9J3V0Zi04JykKICAgIHNwbGl0X2NvdW50cz17czpzdW0oclsnc3BsaXQnXT09cyBmb3IgciBpbiByb3dzKSBmb3IgcyBpbiBzb3J0ZWQoe3JbJ3NwbGl0J10gZm9yIHIgaW4gcm93c30pfQogICAgcmV0dXJuIHsic2NoZW1hIjpTQ0hFTUEsImNhc2VzIjpsZW4ocm93cyksInBvc2l0aXZlX2Nhc2VzIjpzdW0oclsncG9zaXRpdmUnXSBmb3IgciBpbiByb3dzKSwibmVnYXRpdmVfY2FzZXMiOnN1bShub3QgclsncG9zaXRpdmUnXSBmb3IgciBpbiByb3dzKSwic3BsaXRfY291bnRzIjpzcGxpdF9jb3VudHMsImdlbmVyYXRvcnMiOnNvcnRlZCh7clsnZ2VuZXJhdG9yJ10gZm9yIHIgaW4gcm93c30pLCJzaGEyNTYiOmhhc2hsaWIuc2hhMjU2KHAucmVhZF9ieXRlcygpKS5oZXhkaWdlc3QoKSwibW9kZWxfb3V0cHV0c19vYnNlcnZlZCI6MCwidHJhaW5pbmdfZGF0YXNldF9yb3dzX3VzZWQiOjB9CgppZiBfX25hbWVfXz09J19fbWFpbl9fJzoKICAgIGltcG9ydCBzeXM7IHByaW50KGpzb24uZHVtcHMod3JpdGVfanNvbmwoc3lzLmFyZ3ZbMV0pLGluZGVudD0yLHNvcnRfa2V5cz1UcnVlKSkK' | base64 -d > work/forge.py
+          python work/forge.py work/suite.jsonl > work/suite_receipt.json
+          test "$(sha256sum work/suite.jsonl | awk '{print $1}')" = "$SUITE_SHA"
+          python - <<'PY'
+          import importlib.util,hashlib
+          spec=importlib.util.spec_from_file_location('f','work/forge.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          rows=m.build(); pos=[r for r in rows if r['positive']]
+          text='import Mathlib\n\n'+'\n\n'.join(r['standalone_source'] for r in pos)+'\n'
+          open('work/C39_CANONICAL_POSITIVE.lean','w',encoding='utf-8').write(text)
+          assert len(pos)==336
+          assert hashlib.sha256(text.encode()).hexdigest()=='966f240d6a07c6abc868dd5cd0341a55f20ab19c6b18ffdf4ce8ea882462d54b'
+          PY
+      - name: Lean 4.28.0 and Mathlib v4.28.0 canonical kernel validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o work/elan-init.sh
+          sh work/elan-init.sh -y --default-toolchain leanprover/lean4:v4.28.0
+          export PATH="$HOME/.elan/bin:$PATH"
+          lean --version | tee report/LEAN_VERSION.txt
+          cd work/openproof/lean
+          lake update
+          lake exe cache get
+          cp ../../C39_CANONICAL_POSITIVE.lean ./C39Canonical.lean
+          lake env lean C39Canonical.lean
+          cd ../../..
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          out={'schema':'LUCIA_AA_R22542_C39_LEAN_CANONICAL_VALIDATION_V1','verdict':'PASS_336_CANONICAL_PROOFS_LEAN_KERNEL','lean_version':Path('report/LEAN_VERSION.txt').read_text().strip(),'mathlib_pin':'v4.28.0','suite_sha256':'ca0338cbb067c4f4b807bac0d389e8b946780906ed5562cd0949bd9541ba58a2','canonical_source_sha256':'966f240d6a07c6abc868dd5cd0341a55f20ab19c6b18ffdf4ce8ea882462d54b','positive_cases_compiled':336,'training_dataset_rows_used':0,'model_outputs_observed':0,'model_weight_bytes_downloaded':0}
+          Path('report/R22542_C39_LEAN_CANONICAL_VALIDATION.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22542-c39-sourcezero-preseal
+          path: report/
+          retention-days: 1
