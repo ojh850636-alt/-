@@ -1,0 +1,3 @@
+R22542 C39 final validation authorization.
+Exact target is bound only by the deterministic Stage2 recovered collector: EARLY_BAND&MLP_ALL (24 LoRA sites).
+Run one fresh process only: recompute Base/Full/target-ablation/target-only semantic effects on locked Confirmation+GeneratorHoldout; generate TARGET_ONLY and TARGET_ABLATION on the 48 locked generation cases with seed 42, k=8; delete source before verification; verify tactics in Lean 4.28.0/Mathlib 4.28.0; compare ablation against authoritative Full42 Lean behavior run 31488582355. Negative success must remain zero. No E4/E5/algorithm/student/promotion credit is permitted. No HF model redownload; authoritative source escrow run 31484392389 only.
