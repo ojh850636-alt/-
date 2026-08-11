@@ -12,3 +12,4 @@ conditions=BASE,FULL,RANDOM_42,SHUFFLED,FULL_SEEDS_42_224_1337
 doses=0,0.25,0.5,1.0,1.5
 lean_kernel=4.28.0
 mathlib=v4.28.0
+trigger_nonce=2
