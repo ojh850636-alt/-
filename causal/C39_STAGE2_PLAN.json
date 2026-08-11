@@ -1,0 +1,31 @@
+{
+  "claim_cap": "E3_EXPLORATORY_TOKENIZER_PROVENANCE_HOLD",
+  "derived_minimality_intersections": [
+    "EARLY_BAND&MLP_ALL"
+  ],
+  "fresh_process_replay_required": true,
+  "generation_validation_required_for_final_survivors": true,
+  "locked_splits": [
+    "CONFIRMATION",
+    "GENERATOR_HOLDOUT"
+  ],
+  "matched_random_controls_per_target": 3,
+  "measures": [
+    "necessity_ablation",
+    "candidate_only_sufficiency"
+  ],
+  "model_output_dependent_hypothesis_additions_allowed": false,
+  "pass_rule": "TARGET_DIRECTION_POSITIVE_BOTH_SPLITS_AND_TARGET_MEAN_EFFECT_EXCEEDS_ALL_THREE_MATCHED_RANDOM_CONTROLS_FOR_BOTH_NECESSITY_AND_SUFFICIENCY",
+  "random_seed_base": 22542,
+  "schema": "LUCIA_AA_R22542_C39_CAUSAL_STAGE2_PLAN_V1",
+  "source_stage1": "evidence/r22542_c39/C39_CAUSAL_STAGE1_AGGREGATE.json",
+  "stage1_survivors": [
+    "MLP_ALL",
+    "EARLY_BAND"
+  ],
+  "validation_targets": [
+    "MLP_ALL",
+    "EARLY_BAND",
+    "EARLY_BAND&MLP_ALL"
+  ]
+}
