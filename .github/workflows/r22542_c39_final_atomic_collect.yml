@@ -1,0 +1,38 @@
+name: LAA R22542 C39 collect atomic final validation
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['final_atomic/C39_FINAL_ATOMIC_COLLECT_ONCE.txt']
+permissions: {contents: read, actions: read}
+jobs:
+  collect:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-final-atomic-SEMANTIC, path: inputs/semantic, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535000000}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-final-atomic-TARGET_ONLY, path: inputs/only, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535000000}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-final-atomic-TARGET_ABLATION, path: inputs/ablation, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31535000000}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-fast-gen-full42, path: inputs/full42, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31488582355}
+      - name: Normalize atomic inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f inputs/semantic/SEMANTIC_REPLAY.json
+          test -f inputs/only/LEAN_SHARD.json
+          test -f inputs/ablation/LEAN_SHARD.json
+          test -f inputs/full42/LEAN_SHARD.json
+      - name: Aggregate final validation
+        run: python -B final/aggregate_final_validation.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-final-validation-atomic-combined
+          path: public/
+          retention-days: 1
