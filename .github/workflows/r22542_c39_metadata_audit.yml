@@ -1,0 +1,70 @@
+name: LAA R22542 C39 source-zero candidate metadata audit
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install metadata client only
+        run: python -m pip install --quiet 'huggingface-hub==0.36.0'
+      - name: Audit three candidates without model bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          python - <<'PY'
+          from huggingface_hub import HfApi, hf_hub_download
+          from pathlib import Path
+          import json, hashlib
+          api=HfApi()
+          candidates=[
+            ('BEAMPERL','tphage/BeamPERL'),
+            ('OPENPROOF_TACTIC','markm39/openproof-tactic-2b'),
+            ('MATHLIB_SEARCH','Isaac74/qwen3-0.6b-lightweight-semantic-mathlib-search-adapter'),
+          ]
+          SMALL_NAMES={'README.md','adapter_config.json','config.json','generation_config.json','sentence_bert_config.json','modules.json'}
+          out={'schema':'LUCIA_AA_R22542_C39_METADATA_AUDIT_V1','model_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':[]}
+          for cid,repo in candidates:
+            info=api.model_info(repo,files_metadata=True)
+            row={'candidate_key':cid,'repo_id':repo,'sha':info.sha,'library_name':getattr(info,'library_name',None),'pipeline_tag':getattr(info,'pipeline_tag',None),'tags':list(getattr(info,'tags',[]) or []),'cardData':dict(info.cardData or {}),'siblings':[],'small_files':{}}
+            for s in info.siblings:
+              lfs=getattr(s,'lfs',None)
+              rfilename=s.rfilename
+              ent={'path':rfilename,'size':getattr(s,'size',None)}
+              if lfs:
+                ent['lfs']={'size':getattr(lfs,'size',None),'sha256':getattr(lfs,'sha256',None),'pointer_size':getattr(lfs,'pointer_size',None)}
+              row['siblings'].append(ent)
+              base=Path(rfilename).name
+              if base in SMALL_NAMES and (getattr(s,'size',0) or 0) < 2_000_000:
+                try:
+                  p=Path(hf_hub_download(repo,filename=rfilename,revision=info.sha))
+                  b=p.read_bytes()
+                  # Source-zero metadata only; reject binary weight-like extensions.
+                  assert p.suffix.lower() not in {'.safetensors','.bin','.pt','.pth','.gguf','.h5','.msgpack'}
+                  row['small_files'][rfilename]={'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'text':b.decode('utf-8','replace')[:120000]}
+                except Exception as exc:
+                  row['small_files'][rfilename]={'error':repr(exc)}
+            out['candidates'].append(row)
+          Path('report/R22542_C39_METADATA_AUDIT.json').write_text(json.dumps(out,indent=2,sort_keys=True,ensure_ascii=False)+'\n',encoding='utf-8')
+          PY
+          python - <<'PY'
+          import json
+          d=json.load(open('report/R22542_C39_METADATA_AUDIT.json',encoding='utf-8'))
+          assert d['model_weight_bytes_downloaded']==0
+          assert d['model_outputs_observed']==0
+          assert len(d['candidates'])==3
+          print('PASS source-zero metadata audit')
+          for r in d['candidates']:
+            print(r['candidate_key'],r['repo_id'],r['sha'],r['cardData'].get('license'),r['cardData'].get('base_model'))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-metadata-audit
+          path: report/
+          retention-days: 1
