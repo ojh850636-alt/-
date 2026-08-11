@@ -1,0 +1,89 @@
+name: LAA R22542 C39 causal stage2 locked validation
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'causal/C39_STAGE2_ONCE.txt'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  plan:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - id: m
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f causal/C39_STAGE2_PLAN.json
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          d=json.load(open('causal/C39_STAGE2_PLAN.json'))
+          xs=d['validation_targets']; assert xs and len(xs)==len(set(xs))
+          print('matrix='+json.dumps({'target':xs},separators=(',',':')))
+          PY
+  target:
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ubuntu-24.04
+    env:
+      C39_STAGE2_TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22542-c39-base-*', path: recovered/base_parts, merge-multiple: true, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-runtime-wheelhouse, path: runtime_escrow, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31491939184}
+      - name: Recover exact authoritative source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors | awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors | awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+          git fetch -q origin a2c307d7778ca5504b741eb17d7a623c4f4de39b --depth=1
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_behavior.py > causal/c39_behavior_pinned.py
+      - name: Install exact audited runtime from escrow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+          python - <<'PY'
+          import transformers,peft,tokenizers,safetensors,accelerate,huggingface_hub
+          assert transformers.__version__=='5.16.0.dev0'
+          assert peft.__version__=='0.19.1'
+          assert tokenizers.__version__=='0.22.2'
+          assert safetensors.__version__=='0.8.0'
+          assert accelerate.__version__=='1.14.0'
+          assert huggingface_hub.__version__=='1.16.1'
+          PY
+      - name: Run one precomputed Stage2 target
+        run: python -B causal/c39_stage2_worker.py
+      - name: Delete raw source/runtime before publication
+        if: always()
+        run: rm -rf source recovered runtime_escrow causal/c39_behavior_pinned.py "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: r22542-c39-stage2-${{ matrix.target }}
+          path: public/
+          retention-days: 1
