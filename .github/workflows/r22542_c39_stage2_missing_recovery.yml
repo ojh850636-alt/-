@@ -1,0 +1,98 @@
+name: LAA R22542 C39 recover missing Stage2 config
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['recovery/C39_STAGE2_MLP_TARGET_ABLATION_RECOVER_ONCE.txt']
+permissions: {contents: read, actions: write}
+jobs:
+  recover:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    env:
+      C39_TARGET: MLP_ALL
+      C39_LABEL: TARGET
+      C39_MODE: ablation
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-00, path: recovered/base_parts/00, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-01, path: recovered/base_parts/01, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-02, path: recovered/base_parts/02, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-03, path: recovered/base_parts/03, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-04, path: recovered/base_parts/04, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-05, path: recovered/base_parts/05, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-06, path: recovered/base_parts/06, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-07, path: recovered/base_parts/07, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-08, path: recovered/base_parts/08, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-09, path: recovered/base_parts/09, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-10, path: recovered/base_parts/10, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-11, path: recovered/base_parts/11, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-12, path: recovered/base_parts/12, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-13, path: recovered/base_parts/13, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-14, path: recovered/base_parts/14, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-15, path: recovered/base_parts/15, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-runtime-wheelhouse, path: runtime_escrow, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31491939184}
+      - name: Recover exact source and pinned helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          parts=$(find recovered/base_parts -type f -name 'base.part.*' | sort)
+          test "$(printf '%s\n' "$parts" | sed '/^$/d' | wc -l)" -eq 16
+          cat $parts > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors|awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors|awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+          git fetch -q origin a2c307d7778ca5504b741eb17d7a623c4f4de39b --depth=1
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_behavior.py > atomic/c39_behavior_pinned.py
+      - name: Install exact audited runtime from escrow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+          python - <<'PY'
+          import transformers,peft,tokenizers,safetensors,accelerate,huggingface_hub
+          assert transformers.__version__=='5.16.0.dev0'
+          assert peft.__version__=='0.19.1'
+          assert tokenizers.__version__=='0.22.2'
+          assert safetensors.__version__=='0.8.0'
+          assert accelerate.__version__=='1.14.0'
+          assert huggingface_hub.__version__=='1.16.1'
+          PY
+      - name: Run only missing precommitted config
+        run: python -B atomic/c39_stage2_condition.py
+      - name: Delete raw source/runtime before publication
+        if: always()
+        run: rm -rf source recovered runtime_escrow atomic/c39_behavior_pinned.py "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: r22542-c39-stage2-atomic-MLP_ALL-TARGET-ablation
+          path: public/
+          retention-days: 1
