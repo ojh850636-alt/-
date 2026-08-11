@@ -1,0 +1,5 @@
+R22542 C39 Stage2 single-config recovery authorization.
+Target: MLP_ALL
+Label: TARGET
+Mode: ablation
+Reason: prior atomic attempts failed before model forward while actions/download-artifact fetched 16 base escrow parts in parallel and hit Node24 self-signed-certificate transport errors. Scientific output from failed attempts: 0. This recovery changes transport only: the same 16 exact authoritative base part artifacts are downloaded sequentially, then the same source hashes, pinned helper, audited runtime escrow, cases, intervention, and metric are used. No other Stage2 config may run in this workflow.
