@@ -1,0 +1,9 @@
+C39_STAGE2_AUTHORIZED
+stage1_survivors=MLP_ALL,EARLY_BAND
+precommitted_intersection=EARLY_BAND&MLP_ALL
+validation_targets=MLP_ALL,EARLY_BAND,EARLY_BAND&MLP_ALL
+locked_splits=CONFIRMATION,GENERATOR_HOLDOUT
+matched_random_controls_per_target=3
+energy_top_control=true
+hf_model_redownloads_authorized=0
+source=AUTHORITATIVE_ESCROW_RUN_31484392389
