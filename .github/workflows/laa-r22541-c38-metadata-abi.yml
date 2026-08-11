@@ -1,0 +1,150 @@
+name: LAA R22541 C38 source-zero metadata ABI
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  metadata-abi:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve exact source identities without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'huggingface-hub==0.36.0'
+          mkdir -p report/private_source
+          python - <<'PY'
+          from huggingface_hub import HfApi, hf_hub_download
+          from pathlib import Path
+          import hashlib, json, shutil
+
+          out = Path('report')
+          priv = out/'private_source'
+          api = HfApi()
+          candidate_repo = 'Avra98/sudoku-latent-backtracking'
+          checkpoint_prefix = 'checkpoints/bt_rr05_adapt/checkpoint-step-01200/'
+          candidate_revision_request = 'cc153c5'
+          base_repo = 'Qwen/Qwen2.5-1.5B-Instruct'
+          base_revision_request = '989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+          prompt_repo = 'Avra98/curriculum-cot-code'
+          prompt_revision = '48c96cfd6a5955d62e58c1d708be4c80c62dc844'
+
+          cand = api.model_info(candidate_repo, revision=candidate_revision_request, files_metadata=True)
+          base = api.model_info(base_repo, revision=base_revision_request, files_metadata=True)
+          prompt = api.model_info(prompt_repo, revision=prompt_revision, files_metadata=True)
+          current = api.model_info(candidate_repo, revision='main', files_metadata=True)
+
+          def sibling_row(s):
+              lfs = getattr(s, 'lfs', None)
+              return {
+                  'rfilename': s.rfilename,
+                  'size': getattr(s, 'size', None),
+                  'lfs_sha256': (lfs or {}).get('sha256') if isinstance(lfs, dict) else getattr(lfs, 'sha256', None),
+                  'blob_id': getattr(s, 'blob_id', None),
+              }
+
+          cand_rows = [sibling_row(s) for s in cand.siblings]
+          base_rows = [sibling_row(s) for s in base.siblings]
+          adapter_path = checkpoint_prefix + 'adapter_model.safetensors'
+          adapter = next((r for r in cand_rows if r['rfilename'] == adapter_path), None)
+          base_weight = next((r for r in base_rows if r['rfilename'] == 'model.safetensors'), None)
+          if not adapter or not base_weight:
+              raise SystemExit('required LFS identity missing')
+
+          downloaded=[]
+          def fetch(repo, rev, filename, label):
+              p = Path(hf_hub_download(repo, filename=filename, revision=rev))
+              data=p.read_bytes()
+              dst=priv/f'{label}__{filename.replace("/","__")}'
+              dst.parent.mkdir(parents=True, exist_ok=True)
+              dst.write_bytes(data)
+              downloaded.append({'repo':repo,'revision':rev,'filename':filename,'label':label,'size_bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'private_artifact_path':str(dst.relative_to(out))})
+
+          # Exact checkpoint metadata only; never adapter tensor bytes.
+          cand_files = {s.rfilename for s in cand.siblings}
+          for name in ['README.md','adapter_config.json','tokenizer_config.json','special_tokens_map.json','added_tokens.json']:
+              f=checkpoint_prefix+name
+              if f in cand_files:
+                  fetch(candidate_repo, cand.sha, f, 'candidate_checkpoint')
+
+          # Exact Base metadata only; never model tensor bytes.
+          base_files={s.rfilename for s in base.siblings}
+          for f in ['config.json','generation_config.json','tokenizer_config.json','special_tokens_map.json','added_tokens.json']:
+              if f in base_files:
+                  fetch(base_repo, base.sha, f, 'runtime_base')
+
+          # Author prompt/policy source at exact forensic snapshot.
+          pfiles=api.list_repo_files(prompt_repo, revision=prompt.sha)
+          wanted=[]
+          for f in pfiles:
+              low=f.lower()
+              if any(k in low for k in ['prompt_builder.py','format_utils_icon.py','shared_multi_output_policy.py']):
+                  wanted.append(f)
+          if not wanted:
+              raise SystemExit('prompt ABI source files not found')
+          for f in sorted(set(wanted)):
+              fetch(prompt_repo, prompt.sha, f, 'prompt_source')
+
+          # Current public recurrent-hidden implementation, bound as compatibility reference only.
+          cfiles=api.list_repo_files(candidate_repo, revision=current.sha)
+          latent=[f for f in cfiles if f.endswith('grpo_residual_projector_latent_train.py')]
+          if not latent:
+              raise SystemExit('latent ABI source file not found')
+          for f in sorted(latent):
+              fetch(candidate_repo, current.sha, f, 'latent_current_reference')
+
+          result={
+              'schema':'LUCIA_AA_R22541_C38_SOURCE_ZERO_METADATA_ABI_CAPTURE_V1',
+              'verdict':'PASS_SOURCE_ZERO_METADATA_CAPTURE',
+              'candidate_repo':candidate_repo,
+              'candidate_revision_requested':candidate_revision_request,
+              'candidate_revision_resolved':cand.sha,
+              'candidate_checkpoint_prefix':checkpoint_prefix,
+              'adapter_lfs':adapter,
+              'base_repo':base_repo,
+              'base_revision_requested':base_revision_request,
+              'base_revision_resolved':base.sha,
+              'base_weight_lfs':base_weight,
+              'prompt_repo':prompt_repo,
+              'prompt_revision_resolved':prompt.sha,
+              'candidate_current_code_revision_resolved':current.sha,
+              'training_time_base_revision_proven':False,
+              'training_time_prompt_code_revision_proven':False,
+              'training_time_latent_code_revision_proven':False,
+              'downloaded_metadata_and_source':downloaded,
+              'candidate_model_weight_bytes_downloaded':0,
+              'base_model_weight_bytes_downloaded':0,
+              'model_outputs_observed':0,
+          }
+          (out/'R22541_C38_SOURCE_ZERO_METADATA_CAPTURE.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Verify no model weight material entered artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! find report -type f | grep -Ei '(adapter_model\.safetensors|model\.safetensors)$'
+          python - <<'PY'
+          import json
+          d=json.load(open('report/R22541_C38_SOURCE_ZERO_METADATA_CAPTURE.json'))
+          assert d['candidate_model_weight_bytes_downloaded']==0
+          assert d['base_model_weight_bytes_downloaded']==0
+          assert d['model_outputs_observed']==0
+          print(d['candidate_revision_resolved'])
+          print(d['base_revision_resolved'])
+          PY
+      - name: Upload temporary source-zero metadata ABI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-metadata-abi
+          path: report/
+          retention-days: 1
+          if-no-files-found: error
