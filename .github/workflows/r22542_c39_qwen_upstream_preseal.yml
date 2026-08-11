@@ -1,0 +1,62 @@
+name: LAA R22542 C39 exact upstream Qwen3.5 source-zero preseal
+on:
+  pull_request:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  qwen-upstream:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build exact Transformers main wheel and dependency closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report work/wheels
+          TX=$(git ls-remote https://github.com/huggingface/transformers.git refs/heads/main | awk '{print $1}')
+          test -n "$TX"
+          git clone -q https://github.com/huggingface/transformers.git work/transformers
+          git -C work/transformers checkout -q "$TX"
+          python -m pip wheel --quiet --no-deps --wheel-dir work/wheels ./work/transformers
+          python -m pip download --quiet --no-deps --dest work/wheels 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2'
+          python -m pip download --quiet --no-deps --dest work/wheels --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          TXW=$(ls work/wheels/transformers-*.whl | head -1)
+          python -m pip install --quiet "$TXW" 'peft==0.18.1' 'safetensors==0.7.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2' --extra-index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          echo "$TX" > report/TRANSFORMERS_COMMIT.txt
+      - name: Prove Qwen3.5 native mapping and pin exact Base metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib,json,platform,sys,subprocess
+          from pathlib import Path
+          import torch,transformers,peft,safetensors,accelerate,huggingface_hub,tokenizers
+          from huggingface_hub import HfApi,hf_hub_download
+          from transformers import AutoConfig,AutoModelForCausalLM
+          tx=Path('report/TRANSFORMERS_COMMIT.txt').read_text().strip(); crepo='markm39/openproof-tactic-2b'; crev='26b4c66606de4e73139a377f8026df93907c12b9'; brepo='Qwen/Qwen3.5-2B'
+          api=HfApi(); c=api.model_info(crepo,revision=crev,files_metadata=True); b=api.model_info(brepo,files_metadata=True)
+          cfgp=Path(hf_hub_download(brepo,filename='config.json',revision=b.sha)); cb=cfgp.read_bytes()
+          cfg=AutoConfig.from_pretrained(brepo,revision=b.sha,trust_remote_code=False)
+          model_cls=AutoModelForCausalLM._model_mapping[type(cfg)]
+          assert 'Qwen3_5' in type(cfg).__name__ or 'Qwen3_5' in model_cls.__name__,(type(cfg).__name__,model_cls.__name__)
+          def sel(info):
+            rows=[]
+            for s in info.siblings:
+              if s.rfilename.endswith('.safetensors') or s.rfilename in {'config.json','generation_config.json','tokenizer_config.json','tokenizer.json','adapter_config.json','model.safetensors.index.json'}:
+                l=getattr(s,'lfs',None); rows.append({'path':s.rfilename,'size':getattr(s,'size',None),'lfs_sha256':getattr(l,'sha256',None) if l else None})
+            return rows
+          wheels=[]
+          for p in sorted(Path('work/wheels').glob('*.whl')):
+            wheels.append({'file':p.name,'size_bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          out={'schema':'LUCIA_AA_R22542_C39_QWEN35_UPSTREAM_RUNTIME_V1','verdict':'PASS_EXACT_UPSTREAM_TRANSFORMERS_QWEN35_NATIVE','transformers_git_revision':tx,'candidate_repo':crepo,'candidate_revision':crev,'candidate_files':sel(c),'base_repo':brepo,'base_revision':b.sha,'base_files':sel(b),'base_config_sha256':hashlib.sha256(cb).hexdigest(),'base_config_size':len(cb),'config_class':type(cfg).__name__,'model_class':model_cls.__name__,'trust_remote_code':False,'imports':{'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'accelerate':accelerate.__version__,'huggingface_hub':huggingface_hub.__version__,'tokenizers':tokenizers.__version__},'primary_wheels':wheels,'pip_freeze':subprocess.check_output([sys.executable,'-m','pip','freeze'],text=True).splitlines(),'python':sys.version,'platform':platform.platform(),'candidate_model_weight_bytes_downloaded':0,'base_model_weight_bytes_downloaded':0,'model_outputs_observed':0,'training_time_exact_base_revision_proven':False}
+          Path('report/R22542_C39_QWEN35_UPSTREAM_RUNTIME.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22542-c39-qwen-upstream-sourcezero
+          path: report/
+          retention-days: 1
