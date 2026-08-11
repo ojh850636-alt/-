@@ -1,0 +1,14 @@
+analysis_authorization=R22542-C39-ESCROW-ANALYSIS-001
+authoritative_ingress_run=31484392389
+hf_redownload_authorized=0
+source_recovery=GITHUB_ESCROW_ONLY
+candidate_tokenizer_status=LOST_FROM_FLAT_ESCROW_NAMESPACE
+runtime_tokenizer_policy=RUNTIME_REFERENCE_BASE_TOKENIZER_EXPLORATORY_ONLY
+max_claim=E3_EXPLORATORY_TOKENIZER_PROVENANCE_HOLD
+teacher_forced_positive_cases=336
+generation_locked_cases=48
+generation_k=8
+conditions=BASE,FULL,RANDOM_42,SHUFFLED,FULL_SEEDS_42_224_1337
+doses=0,0.25,0.5,1.0,1.5
+lean_kernel=4.28.0
+mathlib=v4.28.0
