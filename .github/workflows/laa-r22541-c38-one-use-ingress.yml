@@ -1,0 +1,158 @@
+name: LAA R22541 C38 one-use exact ingress
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  HF_HUB_DOWNLOAD_TIMEOUT: '180'
+  HF_HUB_ETAG_TIMEOUT: '30'
+
+jobs:
+  one-use-ingress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install transport client only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'huggingface-hub==0.36.0' 'hf-xet==1.6.0'
+      - name: Exact one-use source capture and validation
+        id: capture
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/candidate source/base report parts wheelhouse
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+          import hashlib, json, shutil, traceback
+          CREPO='Avra98/sudoku-latent-backtracking'; CREV='cc153c52885bc204e56d89326d908529b9c6601c'
+          PREFIX='checkpoints/bt_rr05_adapt/checkpoint-step-01200/'
+          BREPO='Qwen/Qwen2.5-1.5B-Instruct'; BREV='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+          cfiles=['adapter_config.json','adapter_model.safetensors','tokenizer_config.json','tokenizer.json','special_tokens_map.json','added_tokens.json','vocab.json','merges.txt']
+          bfiles=['config.json','generation_config.json','tokenizer_config.json','tokenizer.json','model.safetensors']
+          expected={
+            'candidate/adapter_model.safetensors':(147770496,'cf081a5860d47920fe81780dfb6849f29d85cd5ee78b3782c08d29b80d25182c'),
+            'candidate/tokenizer.json':(11421896,'9c5ae00e602b8860cbd784ba82a8aa14e8feecec692e7076590d014d7b7fdafa'),
+            'base/model.safetensors':(3087467144,'dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee'),
+          }
+          receipt={'schema':'LUCIA_AA_R22541_C38_ONE_USE_INGRESS_RECEIPT_V1','authorization_id':'R22541-C38-ONE-USE-INGRESS-001','candidate_repo':CREPO,'candidate_revision':CREV,'base_repo':BREPO,'base_revision':BREV,'status':'RUNNING_FIRST_SOURCE_BYTE_CONSUMED','files':[],'source_redownload_attempts':0,'model_outputs_observed':0}
+          Path('report/FIRST_SOURCE_BYTE_CONSUMED.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          try:
+            for name in cfiles:
+              src=Path(hf_hub_download(CREPO,filename=PREFIX+name,revision=CREV))
+              dst=Path('source/candidate')/name; shutil.copyfile(src,dst)
+            for name in bfiles:
+              src=Path(hf_hub_download(BREPO,filename=name,revision=BREV))
+              dst=Path('source/base')/name; shutil.copyfile(src,dst)
+            for p in sorted(Path('source').rglob('*')):
+              if not p.is_file(): continue
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                for b in iter(lambda:f.read(8*1024*1024),b''): h.update(b)
+              rel=p.relative_to('source').as_posix(); row={'path':rel,'size_bytes':p.stat().st_size,'sha256':h.hexdigest()}; receipt['files'].append(row)
+              if rel in expected:
+                es,eh=expected[rel]; assert row['size_bytes']==es,(rel,row['size_bytes'],es); assert row['sha256']==eh,(rel,row['sha256'],eh)
+            receipt['status']='PASS_EXACT_ONE_USE_SOURCE_CAPTURE'
+          except Exception as exc:
+            receipt['status']='FAIL_SOURCE_CAPTURE_NO_RETRY_AUTHORIZED'; receipt['error']=repr(exc); receipt['traceback']=traceback.format_exc()[-4000:]
+            Path('report/R22541_C38_ONE_USE_INGRESS_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+            raise
+          Path('report/R22541_C38_ONE_USE_INGRESS_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Safetensors header smoke and source manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'safetensors==0.7.0'
+          python - <<'PY'
+          from safetensors import safe_open
+          from pathlib import Path
+          import json,hashlib
+          rows=[]
+          for rel in ['source/candidate/adapter_model.safetensors','source/base/model.safetensors']:
+            with safe_open(rel,framework='pt',device='cpu') as f:
+              keys=list(f.keys()); shapes={k:list(f.get_slice(k).get_shape()) for k in keys}
+            rows.append({'path':rel,'tensor_count':len(keys),'first_keys':keys[:16],'shape_digest':hashlib.sha256(json.dumps(shapes,sort_keys=True).encode()).hexdigest()})
+          Path('report/R22541_C38_SAFETENSORS_HEADER.json').write_text(json.dumps({'schema':'LUCIA_AA_R22541_C38_SAFETENSORS_HEADER_V1','verdict':'PASS','files':rows},indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Split exact Base bytes for transport recovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          split -b 450000000 -d -a 2 source/base/model.safetensors parts/base.part.
+          sha256sum parts/base.part.* | sort > report/BASE_PART_SHA256SUMS.txt
+          stat -c '%n %s' parts/base.part.* | sort > report/BASE_PART_SIZES.txt
+          ls -lh parts/base.part.*
+      - name: Download exact primary runtime wheels already source-zero hashed
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip download --no-deps --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0' -d wheelhouse
+          python -m pip download --no-deps --only-binary=:all: 'transformers==4.57.1' 'peft==0.17.1' 'safetensors==0.7.0' 'tokenizers==0.22.1' 'accelerate==1.14.0' 'huggingface-hub==0.36.0' -d wheelhouse
+          sha256sum wheelhouse/* | sort > report/INGRESS_WHEEL_SHA256SUMS.txt
+      - name: Upload ingress receipts always
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-ingress-receipts
+          path: report/
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Upload candidate and Base metadata source
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-candidate-base-meta
+          path: |
+            source/candidate/
+            source/base/config.json
+            source/base/generation_config.json
+            source/base/tokenizer_config.json
+            source/base/tokenizer.json
+          retention-days: 1
+          compression-level: 0
+      - name: Upload runtime wheels
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-runtime-wheels
+          path: wheelhouse/
+          retention-days: 1
+          compression-level: 0
+      - name: Upload Base part 00
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-00, path: parts/base.part.00, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 01
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-01, path: parts/base.part.01, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 02
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-02, path: parts/base.part.02, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 03
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-03, path: parts/base.part.03, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 04
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-04, path: parts/base.part.04, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 05
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-05, path: parts/base.part.05, retention-days: 1, compression-level: 0}
+      - name: Upload Base part 06
+        if: success()
+        uses: actions/upload-artifact@v4
+        with: {name: r22541-c38-base-06, path: parts/base.part.06, retention-days: 1, compression-level: 0}
