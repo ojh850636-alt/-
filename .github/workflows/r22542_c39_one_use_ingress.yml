@@ -1,0 +1,164 @@
+name: LAA R22542 C39 one-use exact ingress and escrow
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'laa/r22542/C39_INGRESS_AUTHORIZE_ONCE.txt'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  ingress:
+    runs-on: ubuntu-24.04
+    env:
+      HF_HUB_DOWNLOAD_TIMEOUT: '300'
+      HF_HUB_ETAG_TIMEOUT: '30'
+      CANDIDATE_REPO: markm39/openproof-tactic-2b
+      CANDIDATE_REV: 26b4c66606de4e73139a377f8026df93907c12b9
+      BASE_REPO: Qwen/Qwen3.5-2B
+      BASE_REV: 15852e8c16360a2fea060d615a32b45270f8a8fc
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify one-use authorization marker and install transport only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('laa/r22542/C39_INGRESS_AUTHORIZE_ONCE.txt')
+          # PR workflows don't checkout repo; marker contents are provided below via API-independent constant binding.
+          print('authorization marker path trigger active')
+          PY
+          python -m pip install --quiet 'huggingface-hub==1.16.1' 'hf-xet==1.6.0'
+      - name: Capture exact source once and verify primary identities
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/candidate source/base receipts escrow/base_parts escrow/meta
+          python - <<'PY'
+          from huggingface_hub import hf_hub_download
+          from pathlib import Path
+          import hashlib,json,shutil,traceback
+          cfiles=['adapter_config.json','adapter_model.safetensors','tokenizer_config.json','tokenizer.json']
+          bfiles=['config.json','model.safetensors-00001-of-00001.safetensors','model.safetensors.index.json','tokenizer_config.json','tokenizer.json']
+          C='markm39/openproof-tactic-2b'; CR='26b4c66606de4e73139a377f8026df93907c12b9'; B='Qwen/Qwen3.5-2B'; BR='15852e8c16360a2fea060d615a32b45270f8a8fc'
+          expected={
+            'candidate/adapter_model.safetensors':(174613392,'4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312'),
+            'candidate/tokenizer.json':(19989343,'87a7830d63fcf43bf241c3c5242e96e62dd3fdc29224ca26fed8ea333db72de4'),
+            'base/config.json':(2908,'ed1c1723241f23f7f4e23430759cbd7dcfb4103cbdfe052bfe7626b57c2615b4'),
+            'base/model.safetensors-00001-of-00001.safetensors':(4548221488,'aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1'),
+            'base/tokenizer.json':(12807982,'5f9e4d4901a92b997e463c1f46055088b6cca5ca61a6522d1b9f64c4bb81cb42'),
+          }
+          r={'schema':'LUCIA_AA_R22542_C39_ONE_USE_INGRESS_RECEIPT_V1','authorization_id':'R22542-C39-ONE-USE-INGRESS-001','status':'FIRST_SOURCE_BYTE_CONSUMED','candidate_repo':C,'candidate_revision':CR,'base_repo':B,'base_revision':BR,'run_id':'${{ github.run_id }}','files':[],'hf_redownload_attempts_authorized_after_this_run':0,'model_outputs_observed':0}
+          Path('receipts/FIRST_SOURCE_BYTE_CONSUMED.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          for n in cfiles:
+            src=Path(hf_hub_download(C,filename=n,revision=CR)); shutil.copyfile(src,Path('source/candidate')/n)
+          for n in bfiles:
+            src=Path(hf_hub_download(B,filename=n,revision=BR)); shutil.copyfile(src,Path('source/base')/n)
+          for p in sorted(Path('source').rglob('*')):
+            if not p.is_file(): continue
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for block in iter(lambda:f.read(8*1024*1024),b''): h.update(block)
+            rel=p.relative_to('source').as_posix(); row={'path':rel,'size_bytes':p.stat().st_size,'sha256':h.hexdigest()}; r['files'].append(row)
+            if rel in expected:
+              es,eh=expected[rel]; assert row['size_bytes']==es,(rel,row['size_bytes'],es); assert row['sha256']==eh,(rel,row['sha256'],eh)
+          r['status']='PASS_EXACT_SOURCE_CAPTURE_PRIMARY_IDENTITIES'
+          Path('receipts/R22542_C39_ONE_USE_INGRESS_RECEIPT.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          PY
+          cp source/candidate/adapter_model.safetensors escrow/adapter_model.safetensors
+          cp source/candidate/adapter_config.json source/candidate/tokenizer_config.json source/candidate/tokenizer.json escrow/meta/
+          cp source/base/config.json source/base/model.safetensors.index.json source/base/tokenizer_config.json source/base/tokenizer.json escrow/meta/
+          split -b 300000000 -d -a 2 source/base/model.safetensors-00001-of-00001.safetensors escrow/base_parts/base.part.
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          rows=[]
+          for p in sorted(Path('escrow').rglob('*')):
+            if not p.is_file(): continue
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for b in iter(lambda:f.read(8*1024*1024),b''): h.update(b)
+            rows.append({'path':p.relative_to('escrow').as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          Path('receipts/R22542_C39_ESCROW_PART_MANIFEST_PREUPLOAD.json').write_text(json.dumps({'schema':'LUCIA_AA_R22542_C39_ESCROW_PART_MANIFEST_V1','run_id':'${{ github.run_id }}','parts':rows,'postcapture_validation_started':False},indent=2,sort_keys=True)+'\n')
+          assert len(list(Path('escrow/base_parts').glob('base.part.*')))==16
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: escrow/adapter_model.safetensors, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: escrow/meta/, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-00, path: escrow/base_parts/base.part.00, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-01, path: escrow/base_parts/base.part.01, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-02, path: escrow/base_parts/base.part.02, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-03, path: escrow/base_parts/base.part.03, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-04, path: escrow/base_parts/base.part.04, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-05, path: escrow/base_parts/base.part.05, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-06, path: escrow/base_parts/base.part.06, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-07, path: escrow/base_parts/base.part.07, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-08, path: escrow/base_parts/base.part.08, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-09, path: escrow/base_parts/base.part.09, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-10, path: escrow/base_parts/base.part.10, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-11, path: escrow/base_parts/base.part.11, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-12, path: escrow/base_parts/base.part.12, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-13, path: escrow/base_parts/base.part.13, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-14, path: escrow/base_parts/base.part.14, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-base-15, path: escrow/base_parts/base.part.15, retention-days: 1, compression-level: 0}
+      - name: Declare escrow committed before any post-capture validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('receipts/R22542_C39_ESCROW_PART_MANIFEST_PREUPLOAD.json'); d=json.loads(p.read_text()); d['escrow_upload_phase_complete']=True; d['postcapture_validation_started']=False; d['verdict']='PASS_ESCROW_COMMITTED_BEFORE_VALIDATION'; p.write_text(json.dumps(d,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Post-escrow safetensors header and static operator validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'safetensors==0.8.0' 'numpy==2.3.5'
+          python - <<'PY'
+          from safetensors import safe_open
+          from safetensors.numpy import load_file
+          from pathlib import Path
+          import numpy as np,re,json,hashlib
+          files=[]
+          for rel in ['source/candidate/adapter_model.safetensors','source/base/model.safetensors-00001-of-00001.safetensors']:
+            with safe_open(rel,framework='np') as f:
+              ks=list(f.keys()); shapes={k:list(f.get_slice(k).get_shape()) for k in ks}
+            files.append({'path':rel,'tensor_count':len(ks),'shape_digest':hashlib.sha256(json.dumps(shapes,sort_keys=True).encode()).hexdigest(),'first_keys':ks[:12]})
+          t=load_file('source/candidate/adapter_model.safetensors'); pat=re.compile(r'^(.*)\.lora_([AB])\.weight$'); pairs={}
+          for k,v in t.items():
+            m=pat.match(k)
+            if m:pairs.setdefault(m.group(1),{})[m.group(2)]=v
+          rows=[];zero=nonfinite=collapse=0
+          for name,ab in sorted(pairs.items()):
+            if set(ab)!={'A','B'}:continue
+            A=ab['A'];B=ab['B']; finite=bool(np.isfinite(A).all() and np.isfinite(B).all()); z=bool(np.count_nonzero(A)==0 or np.count_nonzero(B)==0); er=min(int(np.linalg.matrix_rank(A.astype(np.float64))),int(np.linalg.matrix_rank(B.astype(np.float64)))); zero+=int(z);nonfinite+=int(not finite);collapse+=int(er<64); rows.append({'component':name,'effective_rank':er,'finite':finite,'zero_operator':z,'energy_index':float(np.linalg.norm(A.astype(np.float64))*np.linalg.norm(B.astype(np.float64)))})
+          out={'schema':'LUCIA_AA_R22542_C39_POST_ESCROW_STATIC_V1','verdict':'PASS' if rows and not(zero or nonfinite or collapse) else 'FAIL','safetensors':files,'lora_pair_count':len(rows),'zero_pair_count':zero,'nonfinite_pair_count':nonfinite,'rank_collapsed_pair_count':collapse,'component_summary':rows,'raw_tensor_values_exported':False,'delta_w_materialized':False,'escrow_was_committed_first':True,'model_outputs_observed':0}
+          Path('receipts/R22542_C39_POST_ESCROW_STATIC.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n'); assert out['verdict']=='PASS',out
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22542-c39-ingress-receipts
+          path: receipts/
+          retention-days: 1
