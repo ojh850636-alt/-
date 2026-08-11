@@ -1,7 +1,10 @@
 from __future__ import annotations
-import hashlib,json,os
+import hashlib,importlib.util,json,os,sys
 from pathlib import Path
-import final.c39_final_worker as w
+
+def load_worker():
+    p=Path(__file__).with_name('c39_final_worker.py');spec=importlib.util.spec_from_file_location('c39_final_worker_bound',p);m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m);return m
+w=load_worker()
 
 def dump(p,o):
     p=Path(p);p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(o,indent=2,sort_keys=True,ensure_ascii=False)+'\n',encoding='utf-8')
