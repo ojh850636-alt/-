@@ -29,10 +29,17 @@ jobs:
             ('MATHLIB_SEARCH','Isaac74/qwen3-0.6b-lightweight-semantic-mathlib-search-adapter'),
           ]
           SMALL_NAMES={'README.md','adapter_config.json','config.json','generation_config.json','sentence_bert_config.json','modules.json'}
-          out={'schema':'LUCIA_AA_R22542_C39_METADATA_AUDIT_V1','model_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':[]}
+          out={'schema':'LUCIA_AA_R22542_C39_METADATA_AUDIT_V2','model_weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':[]}
           for cid,repo in candidates:
             info=api.model_info(repo,files_metadata=True)
-            row={'candidate_key':cid,'repo_id':repo,'sha':info.sha,'library_name':getattr(info,'library_name',None),'pipeline_tag':getattr(info,'pipeline_tag',None),'tags':list(getattr(info,'tags',[]) or []),'cardData':dict(info.cardData or {}),'siblings':[],'small_files':{}}
+            cd=info.cardData
+            if cd is None:
+              card={}
+            elif hasattr(cd,'to_dict'):
+              card=cd.to_dict()
+            else:
+              card={k:v for k,v in vars(cd).items() if not k.startswith('_')}
+            row={'candidate_key':cid,'repo_id':repo,'sha':info.sha,'library_name':getattr(info,'library_name',None),'pipeline_tag':getattr(info,'pipeline_tag',None),'tags':list(getattr(info,'tags',[]) or []),'cardData':card,'siblings':[],'small_files':{}}
             for s in info.siblings:
               lfs=getattr(s,'lfs',None)
               rfilename=s.rfilename
@@ -45,7 +52,6 @@ jobs:
                 try:
                   p=Path(hf_hub_download(repo,filename=rfilename,revision=info.sha))
                   b=p.read_bytes()
-                  # Source-zero metadata only; reject binary weight-like extensions.
                   assert p.suffix.lower() not in {'.safetensors','.bin','.pt','.pth','.gguf','.h5','.msgpack'}
                   row['small_files'][rfilename]={'size_bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'text':b.decode('utf-8','replace')[:120000]}
                 except Exception as exc:
@@ -64,6 +70,7 @@ jobs:
             print(r['candidate_key'],r['repo_id'],r['sha'],r['cardData'].get('license'),r['cardData'].get('base_model'))
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: r22542-c39-metadata-audit
           path: report/
