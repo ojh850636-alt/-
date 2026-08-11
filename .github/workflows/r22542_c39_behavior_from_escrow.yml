@@ -1,0 +1,135 @@
+name: LAA R22542 C39 behavior from authoritative escrow
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'laa/r22542/C39_ANALYZE_FROM_ESCROW_ONCE.txt'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  behavior:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    env:
+      INGRESS_RUN_ID: '31484392389'
+      TRANSFORMERS_REV: c7e57f79348480f73d3ef0ad8c47f807ef1378c8
+      OMP_NUM_THREADS: '4'
+      MKL_NUM_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Recover authoritative adapter escrow only
+        uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-escrow-adapter
+          path: recovered/adapter
+          github-token: ${{ github.token }}
+          repository: ojh850636-alt/-
+          run-id: 31484392389
+      - name: Recover authoritative metadata escrow only
+        uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-escrow-meta
+          path: recovered/meta
+          github-token: ${{ github.token }}
+          repository: ojh850636-alt/-
+          run-id: 31484392389
+      - name: Recover all authoritative Base parts only
+        uses: actions/download-artifact@v4
+        with:
+          pattern: r22542-c39-base-*
+          path: recovered/base_parts
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          repository: ojh850636-alt/-
+          run-id: 31484392389
+      - name: Reassemble and reverify exact source bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public private
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(stat -c%s source/base/model.safetensors-00001-of-00001.safetensors)" = 4548221488
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors | awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(stat -c%s source/adapter/adapter_model.safetensors)" = 174613392
+          test "$(sha256sum source/adapter/adapter_model.safetensors | awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+          rm -rf recovered/base_parts
+      - name: Install exact Qwen3.5 runtime from presealed upstream commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          git clone -q https://github.com/huggingface/transformers.git runtime-transformers
+          git -C runtime-transformers checkout -q "$TRANSFORMERS_REV"
+          python -m pip install --quiet ./runtime-transformers 'peft==0.19.1' 'safetensors==0.8.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2' 'kernels==0.16.0'
+      - name: Meta-construction smoke before first model forward
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from accelerate import init_empty_weights
+          from transformers import AutoConfig,AutoModelForCausalLM
+          c=AutoConfig.from_pretrained('source/base',local_files_only=True,trust_remote_code=False)
+          with init_empty_weights(): m=AutoModelForCausalLM.from_config(c,trust_remote_code=False)
+          Path('public/R22542_C39_META_CONSTRUCTION.json').write_text(json.dumps({'schema':'LUCIA_AA_R22542_C39_META_CONSTRUCTION_V1','verdict':'PASS','config_class':type(c).__name__,'model_class':type(m).__name__,'model_outputs_observed':0,'trust_remote_code':False},indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Run full teacher-forced and private generation analysis
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -B laa/r22542/c39_behavior.py --base source/base --adapter source/adapter --out public --private private
+      - name: Remove heavy model source before Lean verification
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf source recovered runtime-transformers "$HOME/.cache/huggingface" "$HOME/.cache/pip"
+      - name: Install exact current OpenProof Lean runtime
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/mxthematic/openproof.git openproof
+          git -C openproof checkout -q d49b7e3223962f806aeabf330f6717b3ecdc914b
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain leanprover/lean4:v4.28.0
+          export PATH="$HOME/.elan/bin:$PATH"
+          cd openproof/lean
+          lake update
+          lake exe cache get
+      - name: Verify every generated tactic with Lean kernel and compute gates
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.elan/bin:$PATH"
+          python -B laa/r22542/c39_lean_verify.py --private private/C39_GENERATED_TACTICS_PRIVATE.jsonl --teacher public/R22542_C39_TEACHER_BEHAVIOR.json --lean-root openproof/lean --out public
+          rm -rf private openproof "$HOME/.elan" "$HOME/.cache"
+      - name: Assert raw-free public evidence
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e private/C39_GENERATED_TACTICS_PRIVATE.jsonl
+          ! grep -RIl --binary-files=without-match -E 'adapter_model\.safetensors|model\.safetensors-00001|"tactic"[[:space:]]*:' public || true
+          python - <<'PY'
+          import json,glob,os
+          for p in glob.glob('public/*.json'):
+            json.load(open(p))
+          print('PUBLIC_JSON_PASS',len(glob.glob('public/*.json')))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: r22542-c39-behavior-public-evidence
+          path: public/
+          retention-days: 1
