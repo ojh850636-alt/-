@@ -1,0 +1,10 @@
+C39_O_PROJ_RECOVERY_AUTHORIZED
+main_v2_run=31501795482
+failed_job=93813408430
+failure_stage=RUNTIME_INSTALL_TRANSFORMERS_GIT_CLONE
+causal_model_output_before_failure=0
+hypothesis=O_PROJ_UNCHANGED_PRECOMMITTED
+source=AUTHORITATIVE_ESCROW_RUN_31484392389
+runtime=RUNTIME_WHEEL_ESCROW_RUN_31491939184
+hf_model_redownloads_authorized=0
+scientific_credit_for_failed_attempt=0
