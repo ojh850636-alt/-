@@ -1,0 +1,7 @@
+C39_CAUSAL_SCREEN_V2_AUTHORIZED
+behavior_authority_run=31488582355
+behavior_reproduction_gate=GREEN
+v1_science_credit=0
+v1_model_output_before_failure=0
+hypotheses=UNCHANGED_PREOUTPUT_12_OBJECTS
+hf_model_redownloads_authorized=0
