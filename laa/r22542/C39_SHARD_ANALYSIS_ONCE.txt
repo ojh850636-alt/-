@@ -1,0 +1,11 @@
+authorization_id=R22542-C39-RESOURCE-SHARD-ANALYSIS-001
+authoritative_ingress_run=31484392389
+hf_redownload_authorized=0
+scientific_contract_changed=0
+suite_changed=0
+thresholds_changed=0
+teacher_conditions=7
+generation_conditions=6
+locked_generation_cases=48
+generation_k=8
+rule=FIRST_COMPLETE_INTERNALLY_CONSISTENT_EVIDENCE_SET_AUTHORITATIVE; LATER_DUPLICATE_EXECUTION_CREDIT_ZERO
