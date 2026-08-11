@@ -1,0 +1,30 @@
+name: LAA R22542 C39 collect atomic Stage2
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['atomic/C39_STAGE2_COLLECT_ONCE.txt']
+permissions: {contents: read, actions: read}
+jobs:
+  collect:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'r22542-c39-stage2-atomic-*'
+          path: collected
+          merge-multiple: false
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31507487963
+      - name: Require exact 30 and combine
+        run: python -B atomic/collect_stage2.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-stage2-combined
+          path: public/
+          retention-days: 1
