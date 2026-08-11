@@ -1,0 +1,74 @@
+name: LAA R22541 C38 source-zero dependency closure
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-closure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download exact primary wheels for hashing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p wheelhouse report
+          python -m pip download --no-deps --only-binary=:all: --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0' -d wheelhouse
+          python -m pip download --no-deps --only-binary=:all: \
+            'transformers==4.57.1' \
+            'peft==0.17.1' \
+            'safetensors==0.7.0' \
+            'tokenizers==0.22.1' \
+            'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0' \
+            -d wheelhouse
+          sha256sum wheelhouse/* | sort > report/WHEEL_SHA256SUMS.txt
+          stat -c '%n %s' wheelhouse/* | sort > report/WHEEL_SIZES.txt
+      - name: Disposable runtime import closure
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv runtime
+          runtime/bin/python -m pip install --upgrade pip
+          runtime/bin/python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          runtime/bin/python -m pip install \
+            'transformers==4.57.1' \
+            'peft==0.17.1' \
+            'safetensors==0.7.0' \
+            'tokenizers==0.22.1' \
+            'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0'
+          runtime/bin/python - <<'PY'
+          import hashlib, importlib, json, pathlib, platform, sys
+          modules = ['torch','transformers','peft','safetensors','tokenizers','accelerate','huggingface_hub']
+          rows=[]
+          for name in modules:
+              mod=importlib.import_module(name)
+              rows.append({'module':name,'version':str(getattr(mod,'__version__','UNKNOWN')),'file_basename':pathlib.Path(getattr(mod,'__file__','')).name})
+          sums={}
+          for line in pathlib.Path('report/WHEEL_SHA256SUMS.txt').read_text().splitlines():
+              sha,path=line.split(maxsplit=1); sums[pathlib.Path(path).name]=sha
+          sizes={}
+          for line in pathlib.Path('report/WHEEL_SIZES.txt').read_text().splitlines():
+              path,size=line.rsplit(' ',1); sizes[pathlib.Path(path).name]=int(size)
+          wheel_rows=[{'file':name,'sha256':sums[name],'size_bytes':sizes[name]} for name in sorted(sums)]
+          out={'schema':'LUCIA_AA_R22541_C38_SOURCE_ZERO_DEPENDENCY_CLOSURE_V1','verdict':'PASS_IMPORT_CLOSURE_SOURCE_ZERO','python':platform.python_version(),'platform':platform.platform(),'imports':rows,'primary_wheels':wheel_rows,'candidate_model_bytes_downloaded':0,'model_outputs_observed':0}
+          pathlib.Path('report/R22541_C38_DEPENDENCY_CLOSURE.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+          runtime/bin/python -m pip freeze | sort > report/R22541_C38_RUNTIME_FREEZE.txt
+      - name: Upload source-zero receipt only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-sourcezero
+          path: report/
+          retention-days: 1
+          if-no-files-found: error
