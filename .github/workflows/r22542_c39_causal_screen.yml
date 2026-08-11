@@ -1,0 +1,63 @@
+name: LAA R22542 C39 precommitted causal broad screen
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'causal/C39_CAUSAL_SCREEN_ONCE.txt'
+permissions:
+  contents: read
+  actions: write
+jobs:
+  object:
+    if: github.run_number == 1
+    strategy:
+      fail-fast: false
+      matrix:
+        object: [ATTENTION_ALL, MLP_ALL, EARLY_BAND, MIDDLE_BAND, LATE_BAND, Q_PROJ, K_PROJ, V_PROJ, O_PROJ, GATE_PROJ, UP_PROJ, DOWN_PROJ]
+    runs-on: ubuntu-24.04
+    env:
+      C39_CAUSAL_OBJECT: ${{ matrix.object }}
+      TRANSFORMERS_REV: c7e57f79348480f73d3ef0ad8c47f807ef1378c8
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22542-c39-base-*', path: recovered/base_parts, merge-multiple: true, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: 31484392389}
+      - name: Recover exact authoritative source only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors | awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors | awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+          git fetch -q origin a2c307d7778ca5504b741eb17d7a623c4f4de39b --depth=1
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_behavior.py > causal/c39_behavior_pinned.py
+      - name: Install audited runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          git clone -q https://github.com/huggingface/transformers.git runtime-transformers
+          git -C runtime-transformers checkout -q "$TRANSFORMERS_REV"
+          python -m pip install --quiet ./runtime-transformers 'peft==0.19.1' 'safetensors==0.8.0' 'accelerate==1.14.0' 'huggingface-hub==1.16.1' 'tokenizers==0.22.2' 'kernels==0.16.0'
+      - name: Run exactly one precommitted causal object
+        run: python -B causal/c39_causal_screen.py
+      - name: Delete raw source/runtime before publication
+        if: always()
+        run: rm -rf source recovered runtime-transformers causal/c39_behavior_pinned.py "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: r22542-c39-causal-${{ matrix.object }}
+          path: public/
+          retention-days: 1
