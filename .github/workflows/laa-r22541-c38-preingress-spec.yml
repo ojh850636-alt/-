@@ -1,0 +1,74 @@
+name: LAA R22541 C38 preingress source spec
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  preingress-spec:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve all exact allowlist identities without downloading weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'huggingface-hub==0.36.0'
+          mkdir -p report
+          python - <<'PY'
+          from huggingface_hub import HfApi
+          import json, pathlib
+          api=HfApi()
+          crepo='Avra98/sudoku-latent-backtracking'
+          crev='cc153c52885bc204e56d89326d908529b9c6601c'
+          prefix='checkpoints/bt_rr05_adapt/checkpoint-step-01200/'
+          brepo='Qwen/Qwen2.5-1.5B-Instruct'
+          brev='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+          ci=api.model_info(crepo,revision=crev,files_metadata=True)
+          bi=api.model_info(brepo,revision=brev,files_metadata=True)
+          assert ci.sha==crev and bi.sha==brev
+          def row(s):
+            l=getattr(s,'lfs',None)
+            sha=(l or {}).get('sha256') if isinstance(l,dict) else getattr(l,'sha256',None)
+            return {'path':s.rfilename,'size_bytes':getattr(s,'size',None),'lfs_sha256':sha,'blob_id':getattr(s,'blob_id',None)}
+          crows=sorted((row(s) for s in ci.siblings if s.rfilename.startswith(prefix)),key=lambda x:x['path'])
+          brows=sorted((row(s) for s in bi.siblings if s.rfilename in {'config.json','generation_config.json','tokenizer_config.json','tokenizer.json','special_tokens_map.json','added_tokens.json','model.safetensors'}),key=lambda x:x['path'])
+          amap={r['path']:r for r in crows}; bmap={r['path']:r for r in brows}
+          required_c=[prefix+'adapter_config.json',prefix+'adapter_model.safetensors',prefix+'tokenizer_config.json',prefix+'tokenizer.json',prefix+'special_tokens_map.json',prefix+'added_tokens.json']
+          missing=[p for p in required_c if p not in amap]
+          if missing: raise SystemExit('candidate required files missing: '+repr(missing))
+          required_b=['config.json','model.safetensors']
+          missing=[p for p in required_b if p not in bmap]
+          if missing: raise SystemExit('base required files missing: '+repr(missing))
+          assert amap[prefix+'adapter_model.safetensors']['lfs_sha256']=='cf081a5860d47920fe81780dfb6849f29d85cd5ee78b3782c08d29b80d25182c'
+          assert int(amap[prefix+'adapter_model.safetensors']['size_bytes'])==147770496
+          assert bmap['model.safetensors']['lfs_sha256']=='dd924a11b4c220f385b51ffa522daea7c9f3d850e31b162bb5661df483c6d3ee'
+          assert int(bmap['model.safetensors']['size_bytes'])==3087467144
+          all_paths=api.list_repo_files(crepo,revision=crev)
+          run_paths=sorted(p for p in all_paths if 'bt_rr05_adapt' in p)
+          out={
+            'schema':'LUCIA_AA_R22541_C38_PREINGRESS_SOURCE_SPEC_CAPTURE_V1',
+            'verdict':'PASS_EXACT_PREINGRESS_IDENTITIES_SOURCE_ZERO',
+            'candidate_repo':crepo,'candidate_revision':crev,'checkpoint_prefix':prefix,
+            'candidate_checkpoint_files':crows,'candidate_required_allowlist':required_c,
+            'base_repo':brepo,'base_revision':brev,'base_files':brows,'base_required_allowlist':required_b,
+            'run_family_paths':run_paths,
+            'training_time_exact_base_revision_proven':False,
+            'exact_checkpoint_phase_proven':False,
+            'candidate_model_weight_bytes_downloaded':0,'base_model_weight_bytes_downloaded':0,'model_outputs_observed':0,
+          }
+          pathlib.Path('report/R22541_C38_PREINGRESS_SOURCE_SPEC_CAPTURE.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Upload exact source-zero spec
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22541-c38-preingress-spec
+          path: report/R22541_C38_PREINGRESS_SOURCE_SPEC_CAPTURE.json
+          retention-days: 1
+          if-no-files-found: error
