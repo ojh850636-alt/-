@@ -1,0 +1,90 @@
+name: LAA R22542 C39 atomic final validation V3
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['final_atomic/C39_FINAL_ATOMIC_V3_ONCE.txt']
+permissions: {contents: read, actions: read}
+jobs:
+  phase:
+    if: github.run_number == 1
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [SEMANTIC, TARGET_ONLY, TARGET_ABLATION]
+    runs-on: ubuntu-24.04
+    env:
+      C39_ATOMIC_FINAL_MODE: ${{ matrix.mode }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Stream exact escrow artifacts sequentially with archive digest verification
+        run: python -B final/download_c39_escrow.py
+      - name: Recover exact source and pinned helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public private laa/r22542
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          parts=$(find recovered/base_parts -type f -name 'base.part.*' | sort)
+          test "$(printf '%s\n' "$parts" | sed '/^$/d' | wc -l)" -eq 16
+          cat $parts > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors|awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors|awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+          git fetch -q origin a2c307d7778ca5504b741eb17d7a623c4f4de39b --depth=1
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_behavior.py > final/c39_behavior_pinned.py
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_lean_verify.py > laa/r22542/c39_lean_verify.py
+          git show a2c307d7778ca5504b741eb17d7a623c4f4de39b:laa/r22542/c39_verify_shard.py > laa/r22542/c39_verify_shard.py
+      - name: Install exact audited model runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+          python - <<'PY'
+          import transformers,peft,tokenizers,safetensors,accelerate,huggingface_hub
+          assert transformers.__version__=='5.16.0.dev0';assert peft.__version__=='0.19.1';assert tokenizers.__version__=='0.22.2';assert safetensors.__version__=='0.8.0';assert accelerate.__version__=='1.14.0';assert huggingface_hub.__version__=='1.16.1'
+          PY
+      - name: Run exactly one final atomic source phase
+        run: python -B final/c39_final_atomic_worker.py
+      - name: Delete raw model source before publication or Lean verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf source recovered runtime_escrow final/c39_behavior_pinned.py "$HOME/.cache/huggingface" "$HOME/.cache/pip"
+          test ! -e source && test ! -e recovered && test ! -e runtime_escrow
+          mv escrow_stream_receipt.json public/ESCROW_STREAM_RECEIPT.json
+          python - <<'PY'
+          import json,pathlib,os
+          pathlib.Path('public/SOURCE_DELETE_RECEIPT.json').write_text(json.dumps({'schema':'LUCIA_AA_R22542_C39_FINAL_ATOMIC_SOURCE_DELETE_V3','condition':os.environ['C39_ATOMIC_FINAL_MODE'],'source_deleted':True,'raw_source_present':False},indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Install exact Lean kernel reference
+        if: matrix.mode != 'SEMANTIC'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/mxthematic/openproof.git openproof
+          git -C openproof checkout -q d49b7e3223962f806aeabf330f6717b3ecdc914b
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain leanprover/lean4:v4.28.0
+          export PATH="$HOME/.elan/bin:$PATH"
+          cd openproof/lean && lake update && lake exe cache get
+      - name: Verify generated tactics in Lean
+        if: matrix.mode != 'SEMANTIC'
+        shell: bash
+        run: |
+          set -euo pipefail; export PATH="$HOME/.elan/bin:$PATH"
+          python -B laa/r22542/c39_verify_shard.py --private "private/${C39_ATOMIC_FINAL_MODE}.jsonl" --lean-root openproof/lean --out public/LEAN_SHARD.json
+      - name: Remove private verifier/runtime remnants
+        if: always()
+        run: rm -rf private openproof "$HOME/.elan" "$HOME/.cache" elan-init.sh laa/r22542/c39_lean_verify.py laa/r22542/c39_verify_shard.py || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: r22542-c39-final-atomic-v3-${{ matrix.mode }}
+          path: public/
+          retention-days: 1
