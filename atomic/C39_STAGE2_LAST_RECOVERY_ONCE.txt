@@ -1,0 +1,11 @@
+C39_STAGE2_LAST_RECOVERY_AUTHORIZED
+missing_config=MLP_ALL,TARGET,ablation
+prior_transport_failures=2
+prior_causal_model_outputs=0
+third_attempt_is_final=true
+science_contract_changed=false
+source=AUTHORITATIVE_ESCROW_RUN_31484392389
+runtime=RUNTIME_WHEEL_ESCROW_RUN_31491939184
+base_transport=16_SEQUENTIAL_EXACT_NAME_ARTIFACTS
+hf_model_redownloads_authorized=0
+other_stage2_configs_reexecuted=0
