@@ -1,0 +1,142 @@
+name: LAA R22543 C40 capture-first ingress and atomic behavior
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22543/C40_BINARY_INGRESS_ONCE.txt']
+permissions: {contents: read, actions: read}
+env:
+  MODEL_REPO: chkrishna2001/psm-memory-qwen0.5b
+  MODEL_REV: 2c4bf2005f93695dfe9eb047ee72e5aa8b3e80d0
+  BASE_REPO: Qwen/Qwen2.5-0.5B-Instruct
+  BASE_REV: 7ae557604adf67be50417f59c2c2f167def9a775
+jobs:
+  capture:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install --quiet 'huggingface_hub==0.27.1'
+      - name: Capture exact Base and exactly three selected LoRAs; no model import
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapters public
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib,json,os,urllib.request
+          from pathlib import Path
+          from huggingface_hub import hf_hub_download
+          MR=os.environ['MODEL_REPO'];MREV=os.environ['MODEL_REV'];BR=os.environ['BASE_REPO'];BREV=os.environ['BASE_REV']
+          UA={'User-Agent':'LAA-R22543-C40-ingress'}
+          def get(url):
+            req=urllib.request.Request(url,headers=UA)
+            with urllib.request.urlopen(req,timeout=90) as r:return r.read()
+          def jget(url):return json.loads(get(url))
+          mi=jget(f'https://huggingface.co/api/models/{MR}?blobs=true');bi=jget(f'https://huggingface.co/api/models/{BR}?blobs=true')
+          assert mi['sha']==MREV,(mi['sha'],MREV);assert bi['sha']==BREV,(bi['sha'],BREV)
+          bs={x['rfilename']:x for x in bi.get('siblings',[])};ms={x['rfilename']:x for x in mi.get('siblings',[])}
+          # Resolve only official PyTorch runtime files. No ONNX/GGUF/checkpoint duplicates.
+          meta=[x for x in ['config.json','generation_config.json','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt','special_tokens_map.json'] if x in bs]
+          if 'model.safetensors.index.json' in bs:
+            idx_raw=get(f'https://huggingface.co/{BR}/resolve/{BREV}/model.safetensors.index.json?download=false');Path('source/base/model.safetensors.index.json').write_bytes(idx_raw);meta.append('model.safetensors.index.json');idx=json.loads(idx_raw);weights=sorted(set(idx['weight_map'].values()))
+          else:
+            assert 'model.safetensors' in bs;weights=['model.safetensors']
+          for f in meta:
+            if f=='model.safetensors.index.json':continue
+            p=hf_hub_download(BR,f,revision=BREV,local_dir='source/base');assert Path(p).exists()
+          for f in weights:
+            p=hf_hub_download(BR,f,revision=BREV,local_dir='source/base');assert Path(p).exists()
+          roles={'storage':'lora/storage','retrieval_plan':'lora/retrieval_plan','consolidation':'lora/consolidation'}
+          expected={'storage':'791a1933e48a67245d2427eeda0d3f10743814b338d45c4fbd00656ebac04389','retrieval_plan':'812e4587df9773fc5f1cb1a20d4bb0503c92a39d10e2f194af73acf83255367a','consolidation':'94b86dbb9bd3b648bdb0d69b91bd47c158c71beee9f50dddc0b85804bfc4da72'}
+          for role,d in roles.items():
+            out=Path('source/adapters')/role;out.mkdir(parents=True,exist_ok=True)
+            for f in ['adapter_config.json','adapter_model.safetensors']:
+              rp=f'{d}/{f}';assert rp in ms;src=Path(hf_hub_download(MR,rp,revision=MREV));(out/f).write_bytes(src.read_bytes())
+            h=hashlib.sha256((out/'adapter_model.safetensors').read_bytes()).hexdigest();assert h==expected[role],(role,h)
+          def rec(root):
+            z=[]
+            for p in sorted(Path(root).rglob('*')):
+              if p.is_file():z.append({'path':str(p.relative_to(root)),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+            return z
+          base_files=rec('source/base');adapter_files=rec('source/adapters')
+          receipt={'schema':'LUCIA_AA_R22543_C40_SOURCE_CAPTURE_V1','model_repo':MR,'model_revision':MREV,'base_repo':BR,'base_revision':BREV,'base_files':base_files,'adapter_files':adapter_files,'base_bytes':sum(x['bytes'] for x in base_files),'adapter_bytes':sum(x['bytes'] for x in adapter_files),'selected_adapter_count':3,'forbidden_duplicate_formats_downloaded':0,'model_imports':0,'model_outputs':0,'hf_model_ingress_count':1,'source_capture_complete':True}
+          Path('public/C40_SOURCE_CAPTURE_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'base_bytes':receipt['base_bytes'],'adapter_bytes':receipt['adapter_bytes'],'base_files':len(base_files),'adapter_files':len(adapter_files)},indent=2))
+          PY
+      - name: Escrow Base before any validator/model import
+        uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-base-escrow, path: source/base/, retention-days: 1, compression-level: 0}
+      - name: Escrow three selected LoRAs before any validator/model import
+        uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-adapters-escrow, path: source/adapters/, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-source-capture-receipt, path: public/, retention-days: 7}
+      - name: Delete runner-local source after verified artifact uploads
+        if: always()
+        run: rm -rf source "$HOME/.cache/huggingface" || true
+  static:
+    if: github.run_number == 1
+    needs: capture
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22543-c40-adapters-escrow, path: source/adapters}
+      - run: python -m pip install --quiet 'numpy==2.2.2' 'safetensors==0.4.5'
+      - run: mkdir -p public && python -B laa/r22543/c40_static.py --root source/adapters --out public/C40_STATIC_TRIAD.json
+      - name: Delete raw adapters before publication
+        run: rm -rf source "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-static-triad, path: public/, retention-days: 7}
+  behavior:
+    if: github.run_number == 1
+    needs: capture
+    strategy:
+      fail-fast: false
+      max-parallel: 9
+      matrix:
+        condition: [BASE, STORAGE_FULL, RETRIEVAL_PLAN, CONSOLIDATION, STORAGE_RANDOM_SIGN, STORAGE_LAYER_SHUFFLE, STORAGE_DOSE_0.25, STORAGE_DOSE_0.5, STORAGE_DOSE_1.5]
+    runs-on: ubuntu-24.04
+    env:
+      CONDITION: '${{ matrix.condition }}'
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22543-c40-base-escrow, path: source/base}
+      - uses: actions/download-artifact@v4
+        with: {name: r22543-c40-adapters-escrow, path: source/adapters}
+      - name: Install exact audited runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet 'transformers==4.48.3' 'peft==0.14.0' 'accelerate==1.2.1' 'safetensors==0.4.5'
+      - name: Run one unique precommitted behavior condition
+        run: mkdir -p public && PYTHONPATH=laa/r22543 python -B laa/r22543/c40_behavior.py --condition "$CONDITION" --base source/base --adapters source/adapters --out public/RESULT.json --batch 8
+      - name: Delete all raw source/runtime cache before publication
+        if: always()
+        run: rm -rf source "$HOME/.cache/huggingface" "$HOME/.cache/pip" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with: {name: 'r22543-c40-behavior-${{ matrix.condition }}', path: public/, retention-days: 7}
+  aggregate:
+    if: github.run_number == 1
+    needs: behavior
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: r22543-c40-behavior-*, path: collected, merge-multiple: false}
+      - run: mkdir -p public && python -B laa/r22543/c40_behavior_aggregate.py --root collected --out public/C40_BEHAVIOR_GATE.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-behavior-gate, path: public/, retention-days: 7}
