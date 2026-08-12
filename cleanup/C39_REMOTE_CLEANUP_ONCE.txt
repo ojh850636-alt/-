@@ -1,0 +1,12 @@
+C39_REMOTE_RAW_ESCROW_CLEANUP_AUTHORIZED
+final_atomic_authority_run=31561494665
+final_atomic_jobs=12
+final_atomic_jobs_success=12
+final_causal_pass=true
+source_run=31484392389
+runtime_run=31491939184
+expected_source_raw_artifacts=18
+expected_runtime_raw_artifacts=1
+preserve_behavior_causal_final_evidence=true
+hf_model_redownloads=0
+terminal_cleanup_once=true
