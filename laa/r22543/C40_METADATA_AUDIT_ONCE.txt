@@ -1,0 +1,6 @@
+C40_METADATA_AUDIT_AUTHORIZED
+raw_weight_bytes=0
+model_outputs=0
+candidate_families=MEMORY_LIFECYCLE_CONTROL,BOARD_GAME_MOVE_POLICY,PROMPT_INJECTION_BINARY_POLICY
+selection_requires_source_zero_audit=true
+binary_authorization=false
