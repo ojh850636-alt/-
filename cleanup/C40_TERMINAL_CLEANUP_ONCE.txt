@@ -1,0 +1,9 @@
+C40_TERMINAL_CLEANUP_AUTHORIZED
+behavior_authority_run=31568603611
+behavior_gate=RED
+behavior_conditions_complete=9
+causal_lane=CLOSED_NOT_RUN
+causal_model_executions=0
+delete_exact_artifact_ids=9130423756,9130424384,9130044632,9130117339,9130179946
+preserve_public_evidence=true
+hf_model_redownloads_after_cleanup=0
