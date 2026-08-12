@@ -1,0 +1,10 @@
+C39_STAGE2_SPLIT_COLLECT_AUTHORIZED
+original_atomic_run=31507487963
+original_successful_unique_configs=29
+missing_config=MLP_ALL,TARGET,ablation
+final_recovery_run=31558693277
+final_recovery_success=true
+expected_total_unique_configs=30
+expected_targets=MLP_ALL,EARLY_BAND,EARLY_BAND&MLP_ALL
+scientific_contract_changed=false
+hf_model_redownloads=0
