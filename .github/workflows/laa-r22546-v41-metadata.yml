@@ -1,0 +1,59 @@
+name: Temporary LAA R22546 PondLLM V4.1 metadata courier
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture exact Hugging Face metadata without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22546_V41_METADATA"
+          mkdir -p "$ROOT"
+          REPO='Xnizzorg/pondllm-qwen3.5-0.8b-base-v4-1-rich-reachability'
+          EXPECTED_ADAPTER_SHA='40353df97bd33fccd894f18ee32da6973dcd14c7d357577da13ebb0d56666a05'
+          curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/api/models/${REPO}?blobs=true" -o "$ROOT/model_api.json"
+          HF_REV="$(python - <<'PY'
+          import json,os
+          p=os.path.join(os.environ['RUNNER_TEMP'],'LAA_R22546_V41_METADATA','model_api.json')
+          print(json.load(open(p,encoding='utf-8'))['sha'])
+          PY
+          )"
+          curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/${REPO}/resolve/${HF_REV}/adapter_config.json?download=true" -o "$ROOT/adapter_config.json"
+          curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/${REPO}/resolve/${HF_REV}/README.md?download=true" -o "$ROOT/README.md"
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22546_V41_METADATA'
+          api=json.loads((root/'model_api.json').read_text(encoding='utf-8'))
+          cfg=json.loads((root/'adapter_config.json').read_text(encoding='utf-8'))
+          expected='40353df97bd33fccd894f18ee32da6973dcd14c7d357577da13ebb0d56666a05'
+          siblings={x.get('rfilename'):x for x in api.get('siblings',[])}
+          weight=siblings.get('adapter_model.safetensors',{})
+          lfs=weight.get('lfs') or {}
+          blob_sha=(lfs.get('sha256') or '').lower()
+          size=lfs.get('size') or weight.get('size')
+          if blob_sha and blob_sha != expected:
+              raise SystemExit(f'adapter SHA mismatch: {blob_sha} != {expected}')
+          out={'schema':'LUCIA_AA_R22546_PONDLLM_V41_HF_METADATA_V1','repo_id':api.get('modelId') or api.get('id'),'hf_revision':api.get('sha'),'license':(api.get('cardData') or {}).get('license'),'pipeline_tag':api.get('pipeline_tag'),'adapter_config':cfg,'adapter_expected_sha256':expected,'adapter_api_sha256':blob_sha or None,'adapter_size_bytes':size,'siblings':[x.get('rfilename') for x in api.get('siblings',[])],'base_model_name_or_path':cfg.get('base_model_name_or_path'),'revision_in_adapter_config':cfg.get('revision'),'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'metadata_only':True}
+          (root/'METADATA_RECEIPT.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          for name in ('model_api.json','adapter_config.json','README.md','METADATA_RECEIPT.json'):
+              p=root/name; print(hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_size, name)
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22546_V41_METADATA_ONLY
+          path: ${{ runner.temp }}/LAA_R22546_V41_METADATA
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
