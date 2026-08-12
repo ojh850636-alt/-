@@ -1,0 +1,37 @@
+name: LAA R22542 C39 collect split-run Stage2
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['atomic/C39_STAGE2_SPLIT_COLLECT_ONCE.txt']
+permissions: {contents: read, actions: read}
+jobs:
+  collect:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: 'r22542-c39-stage2-atomic-*'
+          path: collected/original
+          merge-multiple: false
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31507487963
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22542-c39-stage2-atomic-MLP_ALL-TARGET-ablation
+          path: collected/recovery
+          github-token: '${{ github.token }}'
+          repository: ojh850636-alt/-
+          run-id: 31558693277
+      - name: Require exact 30 unique and combine
+        run: python -B atomic/collect_stage2_split_runs.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22542-c39-stage2-combined
+          path: public/
+          retention-days: 1
