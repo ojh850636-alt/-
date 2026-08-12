@@ -1,0 +1,7 @@
+C40_TRAINING_LINEAGE_SOURCEZERO_AUTHORIZED
+selected_primary=storage
+inspect_rounds=v17,v16b,v16
+current_storage_adapter_sha256=791a1933e48a67245d2427eeda0d3f10743814b338d45c4fbd00656ebac04389
+raw_model_weight_bytes=0
+model_outputs=0
+binary_authorization=false
