@@ -1,0 +1,73 @@
+name: LAA R22543 C40 presealed broad causal stage1
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['causal/C40_CAUSAL_STAGE1_ONCE.txt']
+permissions: {contents: read, actions: read}
+env:
+  SOURCE_RUN: '31568603611'
+  INGRESS_COMMIT: '30c34ceb7fbd7a10247af2d612a2b93280387d7e'
+jobs:
+  screen:
+    if: github.run_number == 1
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        object: [EARLY_BAND, MIDDLE_BAND, LATE_BAND, ATTENTION_ALL, MLP_ALL, Q_PROJ, K_PROJ, V_PROJ, O_PROJ, GATE_PROJ, UP_PROJ, DOWN_PROJ]
+        mode: [NECESSITY, SUFFICIENCY]
+    runs-on: ubuntu-24.04
+    env:
+      OBJ: '${{ matrix.object }}'
+      MODE: '${{ matrix.mode }}'
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22543-c40-base-escrow, path: source/base, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22543-c40-adapters-escrow, path: source/adapters, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - name: Recover exact pre-output behavior helper without new model ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pinned public
+          git fetch -q origin "$INGRESS_COMMIT" --depth=1
+          git show "$INGRESS_COMMIT":laa/r22543/c40_behavior.py > pinned/c40_behavior.py
+          git show "$INGRESS_COMMIT":laa/r22543/c40_suite.py > pinned/c40_suite.py
+          test "$(sha256sum pinned/c40_suite.py | awk '{print $1}')" != ''
+      - name: Install exact audited runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet 'transformers==4.48.3' 'peft==0.14.0' 'accelerate==1.2.1' 'safetensors==0.4.5'
+      - name: Run exactly one precommitted causal config
+        run: PYTHONPATH=pinned python -B causal/c40_causal_condition.py --object "$OBJ" --mode "$MODE" --base source/base --adapter source/adapters/storage --helper pinned/c40_behavior.py --out public/RESULT.json --batch 8
+      - name: Delete all raw source and helper/runtime caches before publication
+        if: always()
+        run: rm -rf source pinned "$HOME/.cache/huggingface" "$HOME/.cache/pip" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: 'r22543-c40-causal-${{ matrix.object }}-${{ matrix.mode }}'
+          path: public/
+          retention-days: 3
+  aggregate:
+    if: github.run_number == 1
+    needs: screen
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: r22543-c40-causal-*, path: collected/causal, merge-multiple: false}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22543-c40-behavior-BASE', path: collected/baseline/base, merge-multiple: false, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22543-c40-behavior-STORAGE_FULL', path: collected/baseline/full, merge-multiple: false, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - run: mkdir -p public && python -B causal/c40_causal_aggregate.py --root collected/causal --baseline-root collected/baseline --out public/C40_CAUSAL_STAGE1_AGGREGATE.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-causal-stage1-aggregate, path: public/, retention-days: 7}
