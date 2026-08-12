@@ -1,0 +1,127 @@
+name: LAA R22542 C39 atomic final bounded causal validation
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22542/C39_FINAL_ATOMIC_ONCE.txt']
+permissions: {contents: read, actions: write}
+jobs:
+  shard:
+    if: github.run_number == 1
+    strategy:
+      fail-fast: false
+      max-parallel: 12
+      matrix:
+        include:
+          - {name: sem-only-confirmation, mode: semantic, condition: TARGET_ONLY, split: CONFIRMATION}
+          - {name: sem-only-holdout, mode: semantic, condition: TARGET_ONLY, split: GENERATOR_HOLDOUT}
+          - {name: sem-ablation-confirmation, mode: semantic, condition: TARGET_ABLATION, split: CONFIRMATION}
+          - {name: sem-ablation-holdout, mode: semantic, condition: TARGET_ABLATION, split: GENERATOR_HOLDOUT}
+          - {name: gen-only-confirmation, mode: generation, condition: TARGET_ONLY, split: CONFIRMATION}
+          - {name: gen-only-holdout, mode: generation, condition: TARGET_ONLY, split: GENERATOR_HOLDOUT}
+          - {name: gen-only-alpha, mode: generation, condition: TARGET_ONLY, split: ALPHA_RENAME_OOD}
+          - {name: gen-only-negative, mode: generation, condition: TARGET_ONLY, split: NEGATIVE_UNPROVABLE}
+          - {name: gen-ablation-confirmation, mode: generation, condition: TARGET_ABLATION, split: CONFIRMATION}
+          - {name: gen-ablation-holdout, mode: generation, condition: TARGET_ABLATION, split: GENERATOR_HOLDOUT}
+          - {name: gen-ablation-alpha, mode: generation, condition: TARGET_ABLATION, split: ALPHA_RENAME_OOD}
+          - {name: gen-ablation-negative, mode: generation, condition: TARGET_ABLATION, split: NEGATIVE_UNPROVABLE}
+    runs-on: ubuntu-24.04
+    env:
+      MODE: '${{ matrix.mode }}'
+      CONDITION: '${{ matrix.condition }}'
+      SPLIT: '${{ matrix.split }}'
+      SOURCE_RUN: '31484392389'
+      RUNTIME_RUN: '31491939184'
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-00, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-01, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-02, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-03, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-04, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-05, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-06, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-07, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-08, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-09, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-10, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-11, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-12, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-13, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-14, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-base-15, path: recovered/base_parts, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-runtime-wheelhouse, path: runtime_escrow, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.RUNTIME_RUN }}'}
+      - name: Reassemble exact authoritative source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base source/adapter public private
+          cp recovered/adapter/adapter_model.safetensors source/adapter/
+          cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors | awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors | awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+      - name: Install exact audited model runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+      - name: Run exactly one final atomic shard
+        run: |
+          if [ "$MODE" = semantic ]; then
+            python -B laa/r22542/c39_final_atomic.py --mode semantic --condition "$CONDITION" --split "$SPLIT" --base source/base --adapter source/adapter --out public/RESULT.json
+          else
+            python -B laa/r22542/c39_final_atomic.py --mode generation --condition "$CONDITION" --split "$SPLIT" --base source/base --adapter source/adapter --out public/GEN_RECEIPT.json --private private/TACTICS.jsonl
+          fi
+      - name: Delete model source before any verifier/publication
+        run: rm -rf source recovered runtime_escrow "$HOME/.cache/huggingface" "$HOME/.cache/pip"
+      - name: Install exact Lean verifier environment
+        if: matrix.mode == 'generation'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/mxthematic/openproof.git openproof
+          git -C openproof checkout -q d49b7e3223962f806aeabf330f6717b3ecdc914b
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain leanprover/lean4:v4.28.0
+          export PATH="$HOME/.elan/bin:$PATH"
+          cd openproof/lean && lake update && lake exe cache get
+      - name: True Lean verification then private tactic deletion
+        if: matrix.mode == 'generation'
+        shell: bash
+        run: |
+          export PATH="$HOME/.elan/bin:$PATH"
+          python -B laa/r22542/c39_verify_shard.py --private private/TACTICS.jsonl --lean-root openproof/lean --out public/LEAN_RESULT.json
+          test ! -e private/TACTICS.jsonl
+      - name: Remove remnants
+        if: always()
+        run: rm -rf source recovered runtime_escrow private openproof "$HOME/.elan" "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: 'r22542-c39-final-atomic-${{ matrix.name }}'
+          path: public/
+          retention-days: 1
