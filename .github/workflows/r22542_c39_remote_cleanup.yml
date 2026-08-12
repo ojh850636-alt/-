@@ -1,0 +1,43 @@
+name: LAA R22542 C39 terminal remote raw cleanup
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['cleanup/C39_REMOTE_CLEANUP_ONCE.txt']
+permissions: {contents: read, actions: write}
+jobs:
+  cleanup:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: '${{ github.token }}'
+      REPO: ojh850636-alt/-
+      SOURCE_RUN: '31484392389'
+      RUNTIME_RUN: '31491939184'
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - name: Delete exact C39 raw source/runtime escrow artifacts and verify absence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          curl -fsSL "${auth[@]}" "$api/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > /tmp/source_before.json
+          curl -fsSL "${auth[@]}" "$api/actions/runs/$RUNTIME_RUN/artifacts?per_page=100" > /tmp/runtime_before.json
+          jq '[.artifacts[] | select((.name|startswith("r22542-c39-base-")) or .name=="r22542-c39-escrow-adapter" or .name=="r22542-c39-escrow-meta") | {id,name,size_in_bytes,digest}]' /tmp/source_before.json > /tmp/source_targets.json
+          jq '[.artifacts[] | select(.name=="r22542-c39-runtime-wheelhouse") | {id,name,size_in_bytes,digest}]' /tmp/runtime_before.json > /tmp/runtime_targets.json
+          test "$(jq length /tmp/source_targets.json)" -eq 18
+          test "$(jq length /tmp/runtime_targets.json)" -eq 1
+          jq -r '.[].id' /tmp/source_targets.json /tmp/runtime_targets.json | while read -r id; do
+            code=$(curl -sS -o /tmp/del.out -w '%{http_code}' -X DELETE "${auth[@]}" "$api/actions/artifacts/$id")
+            test "$code" = 204
+          done
+          curl -fsSL "${auth[@]}" "$api/actions/runs/$SOURCE_RUN/artifacts?per_page=100" > /tmp/source_after.json
+          curl -fsSL "${auth[@]}" "$api/actions/runs/$RUNTIME_RUN/artifacts?per_page=100" > /tmp/runtime_after.json
+          sleft=$(jq '[.artifacts[] | select((.name|startswith("r22542-c39-base-")) or .name=="r22542-c39-escrow-adapter" or .name=="r22542-c39-escrow-meta")] | length' /tmp/source_after.json)
+          rleft=$(jq '[.artifacts[] | select(.name=="r22542-c39-runtime-wheelhouse")] | length' /tmp/runtime_after.json)
+          test "$sleft" -eq 0; test "$rleft" -eq 0
+          jq -n --slurpfile s /tmp/source_targets.json --slurpfile r /tmp/runtime_targets.json --argjson sleft "$sleft" --argjson rleft "$rleft" '{schema:"LUCIA_AA_R22542_C39_REMOTE_RAW_ESCROW_CLEANUP_V1",source_run:31484392389,runtime_run:31491939184,deleted_source_artifacts:$s[0],deleted_runtime_artifacts:$r[0],deleted_source_artifact_count:($s[0]|length),deleted_runtime_artifact_count:($r[0]|length),remaining_matching_source_artifacts:$sleft,remaining_matching_runtime_artifacts:$rleft,verdict:(if $sleft==0 and $rleft==0 then "PASS" else "FAIL" end)}' > public/REMOTE_CLEANUP_RECEIPT.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22542-c39-remote-cleanup-receipt, path: public/, retention-days: 7}
