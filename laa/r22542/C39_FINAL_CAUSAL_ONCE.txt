@@ -20,3 +20,4 @@ preoutput_attempt_31559854249=SCIENCE_CREDIT_0_MODULE_IMPORT_FAILURE
 preoutput_model_forwards=0
 amendment=FILE_PATH_HELPER_IMPORT_ONLY
 science_contract_changed=false
+execution_gate=ALLOW_EXACT_WORKFLOW_RUN_NUMBER_4_ONLY
