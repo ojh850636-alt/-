@@ -1,8 +1,10 @@
 from __future__ import annotations
-import argparse,contextlib,hashlib,json
+import argparse,contextlib,hashlib,importlib.util,json,sys
 from pathlib import Path
 
 def dump(p,o): Path(p).write_text(json.dumps(o,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+def load_helper():
+    p=Path('laa/r22542/c39_behavior.py');spec=importlib.util.spec_from_file_location('c39_behavior_final_helper',p);m=importlib.util.module_from_spec(spec);sys.modules[spec.name]=m;spec.loader.exec_module(m);return m
 def target_names(ctl):
     boundary=max(1,ctl.nl//3)
     return sorted(x['name'] for x in ctl.mods if x['layer']<boundary and x['proj'] in {'gate_proj','up_proj','down_proj'})
@@ -34,9 +36,8 @@ def compact_score(model,tok,rows,bs=8):
           v=lp[i,-n-1:-1,:].gather(-1,ii[i,-n:].unsqueeze(-1)).squeeze(-1);out.append({'case_id':r['case_id'],'split':r['split'],'family':r['family'],'mean_logprob':float(v.mean().cpu()),'token_count':n})
     return out
 
-def generation(model,tok,rows,condition,seed=42,k=8,prompt_batch=4):
+def generation(model,tok,rows,condition,h,seed=42,k=8,prompt_batch=4):
     import torch
-    import laa.r22542.c39_behavior as h
     tok.padding_side='left';tok.pad_token=tok.pad_token or tok.eos_token;torch.manual_seed(seed);out=[];model.eval()
     with torch.inference_mode():
       for i in range(0,len(rows),prompt_batch):
@@ -51,7 +52,7 @@ def load(base,adapter):
     import torch
     from transformers import AutoModelForCausalLM,AutoTokenizer
     from peft import PeftModel
-    import laa.r22542.c39_behavior as h
+    h=load_helper()
     torch.set_num_threads(4);tok=AutoTokenizer.from_pretrained(base,local_files_only=True,trust_remote_code=False,use_fast=True);tok.pad_token=tok.pad_token or tok.eos_token
     b=AutoModelForCausalLM.from_pretrained(base,local_files_only=True,trust_remote_code=False,dtype=torch.bfloat16,device_map={'':'cpu'},low_cpu_mem_usage=True,use_safetensors=True);m=PeftModel.from_pretrained(b,adapter,local_files_only=True,is_trainable=False);ctl=h.Controller(m);assert len(ctl.mods)==96; names=target_names(ctl);assert len(names)==24;return m,tok,ctl,h,names
 
@@ -66,5 +67,5 @@ def main():
     else:
       assert a.condition and a.private;apply_target(ctl,a.condition);rows=[]
       for sp in ('CONFIRMATION','GENERATOR_HOLDOUT','ALPHA_RENAME_OOD','NEGATIVE_UNPROVABLE'): rows+=sorted([r for r in h.build_suite() if r['split']==sp],key=lambda x:x['case_id'])[:12]
-      rec=generation(m,tok,rows,a.condition);Path(a.private).write_text(''.join(json.dumps(x,sort_keys=True,ensure_ascii=False)+'\n' for x in rec),encoding='utf-8');dump(a.out,{'schema':'LUCIA_AA_R22542_C39_FINAL_CAUSAL_GENERATION_RECEIPT_V1','target':'EARLY_BAND&MLP_ALL','site_count':24,'site_names_sha256':site_sha,'condition':a.condition,'seed':42,'locked_cases':48,'records':len(rec),'raw_tactics_exported_public':False})
+      rec=generation(m,tok,rows,a.condition,h);Path(a.private).write_text(''.join(json.dumps(x,sort_keys=True,ensure_ascii=False)+'\n' for x in rec),encoding='utf-8');dump(a.out,{'schema':'LUCIA_AA_R22542_C39_FINAL_CAUSAL_GENERATION_RECEIPT_V1','target':'EARLY_BAND&MLP_ALL','site_count':24,'site_names_sha256':site_sha,'condition':a.condition,'seed':42,'locked_cases':48,'records':len(rec),'raw_tactics_exported_public':False})
 if __name__=='__main__': main()
