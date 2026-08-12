@@ -1,0 +1,79 @@
+name: LAA R22543 C40 storage prompt ABI source-zero audit
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22543/C40_PROMPT_ABI_ONCE.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Inspect latest storage curriculum schema only; model bytes zero
+        run: |
+          set -euo pipefail
+          mkdir -p public private
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib,json,re,urllib.request
+          from pathlib import Path
+          repo='chkrishna2001/psm-memory-training-data'
+          UA={'User-Agent':'LAA-R22543-C40-prompt-abi'}
+          def get(url):
+            req=urllib.request.Request(url,headers=UA)
+            with urllib.request.urlopen(req,timeout=90) as r:return r.read()
+          info=json.loads(get(f'https://huggingface.co/api/datasets/{repo}?blobs=true'))
+          head=info['sha']; paths=[x['rfilename'] for x in info.get('siblings',[])]
+          storage=[p for p in paths if p.lower().endswith(('.jsonl','.json')) and 'storage' in p.lower() and 'training-data/' in p]
+          assert storage, 'no storage curriculum files'
+          def version_key(p):
+            # favor v16b then higher v numbers, non-pilot/non-raw
+            lo=p.lower(); nums=[int(x) for x in re.findall(r'v(\d+)',lo)]
+            return (('v16b' in lo), max(nums or [0]), 'pilot' not in lo, 'raw' not in lo, p)
+          storage=sorted(storage,key=version_key,reverse=True)
+          selected=storage[0]
+          raw=get(f'https://huggingface.co/datasets/{repo}/resolve/{head}/{selected}?download=false')
+          sha=hashlib.sha256(raw).hexdigest()
+          text=raw.decode('utf-8','replace')
+          rows=[]
+          if selected.endswith('.jsonl'):
+            for line in text.splitlines():
+              line=line.strip()
+              if line: rows.append(json.loads(line))
+          else:
+            z=json.loads(text); rows=z if isinstance(z,list) else z.get('items') or z.get('cases') or z.get('data') or []
+          assert rows
+          first=rows[0]
+          Path('private/STORAGE_TRAINING_FIRST_ROW.json').write_text(json.dumps(first,indent=2,ensure_ascii=False)+'\n')
+          def shape(o,depth=0):
+            if depth>6:return type(o).__name__
+            if isinstance(o,dict):return {k:shape(o[k],depth+1) for k in sorted(o)}
+            if isinstance(o,list):return {'list_len':len(o),'item':shape(o[0],depth+1) if o else None}
+            return type(o).__name__
+          roles=[]; completions=[]
+          def walk(o,key=''):
+            if isinstance(o,dict):
+              if 'role' in o and isinstance(o.get('role'),str): roles.append(o['role'])
+              for k,v in o.items():walk(v,k)
+            elif isinstance(o,list):
+              for v in o:walk(v,key)
+            elif isinstance(o,str) and key.lower() in {'completion','output','answer','label','action','response','assistant'} and len(o)<200:
+              completions.append(o)
+          for r in rows[:200]:walk(r)
+          public={
+            'schema':'LUCIA_AA_R22543_C40_STORAGE_PROMPT_ABI_V1','dataset_repo':repo,'dataset_head':head,
+            'candidate_storage_files':storage[:30],'selected_training_file':selected,'selected_training_file_sha256':sha,
+            'row_count':len(rows),'first_row_shape':shape(first),'observed_roles':sorted(set(roles)),
+            'short_completion_like_values':sorted(set(completions))[:100],
+            'raw_model_weight_bytes_downloaded':0,'model_outputs_observed':0,
+          }
+          Path('public/C40_STORAGE_PROMPT_ABI.json').write_text(json.dumps(public,indent=2,sort_keys=True,ensure_ascii=False)+'\n')
+          print(json.dumps(public,indent=2,ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-storage-prompt-abi, path: public/, retention-days: 3}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-private-training-row, path: private/, retention-days: 1}
