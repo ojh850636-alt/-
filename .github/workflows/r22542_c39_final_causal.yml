@@ -9,7 +9,7 @@ env:
   RUNTIME_RUN: '31491939184'
 jobs:
   semantic:
-    if: github.run_number == 1
+    if: github.run_number == 4
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -45,7 +45,7 @@ jobs:
         if: success()
         with: {name: r22542-c39-final-semantic, path: public/, retention-days: 1}
   generation:
-    if: github.run_number == 1
+    if: github.run_number == 4
     strategy:
       fail-fast: false
       matrix:
