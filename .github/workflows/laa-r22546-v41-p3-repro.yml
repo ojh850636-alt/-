@@ -1,4 +1,4 @@
-name: Temporary LAA R22546 PondLLM V4.1 source-only dataset reproduction
+name: Temporary LAA R22546 PondLLM V4.1 historical source-only dataset reproduction
 
 on:
   pull_request:
@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Reproduce public deterministic dataset chain without model weights
+      - name: Replay historical deterministic generator chain without model weights
         shell: bash
         run: |
           set -euo pipefail
@@ -24,43 +24,64 @@ jobs:
           mkdir -p "$OUT"
           git clone --filter=blob:none --no-checkout https://github.com/Xnizzorg/PondLLM.git "$SRC"
           cd "$SRC"
-          git checkout 340131a4f130218fff3d90a87bd1b9577a9e17d0
-          test "$(git rev-parse HEAD)" = "340131a4f130218fff3d90a87bd1b9577a9e17d0"
-          test -z "$(git status --porcelain)"
-          export PYTHONPATH="$SRC/src"
+
+          checkout_clean() {
+            local REV="$1"
+            git checkout --force "$REV"
+            test "$(git rev-parse HEAD)" = "$REV"
+            test -z "$(git status --porcelain)"
+            export PYTHONPATH="$SRC/src"
+          }
+
+          # V1/V2 were already documented in the initial public commit.
+          checkout_clean 03ec066eb54287c4dda674e6fb001dcf5dd2b7f8
           python -m pondllm dataset --episodes 16 --steps 60 --seed 1000 --output "$OUT/sft.jsonl"
           python -m pondllm dataset-balanced --base "$OUT/sft.jsonl" --episodes 128 --seed 2000 --minimum-per-action 1000 --output "$OUT/sft-v2-balanced.jsonl"
+
+          # V4 must use the exact V4 source generation rather than the later V4.1 implementation.
+          checkout_clean 353a4a2166842c7566ddeaf5212b4d43af7c697c
           python -m pondllm dataset-v4 --base "$OUT/sft-v2-balanced.jsonl" --scenes 1000 --survival-scenes 1000 --seed 52000 --output "$OUT/sft-v4-simulator-native.jsonl"
+
+          # V4.1 training manifest records this exact clean commit.
+          checkout_clean 340131a4f130218fff3d90a87bd1b9577a9e17d0
           python -m pondllm dataset-v41 --base "$OUT/sft-v4-simulator-native.jsonl" --rich-scenes 1000 --reachability-scenes 1000 --seed 61000 --output "$OUT/sft-v4.1-rich-reachability.jsonl"
+
           python - <<'PY'
           import hashlib,json,os,pathlib
           root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22546_V41_P3'
           out=root/'out'
-          target='84f5bae00fcd2a1a98737e9a98371dd534961dd01e0f704e6a4356dfea585815'
+          published={
+            'v41':'84f5bae00fcd2a1a98737e9a98371dd534961dd01e0f704e6a4356dfea585815',
+            'v41_records':43322,
+          }
           def sha(p):
               h=hashlib.sha256()
               with p.open('rb') as f:
                   for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
               return h.hexdigest()
+          specs=[
+            ('V1','03ec066eb54287c4dda674e6fb001dcf5dd2b7f8','sft.jsonl'),
+            ('V2','03ec066eb54287c4dda674e6fb001dcf5dd2b7f8','sft-v2-balanced.jsonl'),
+            ('V4','353a4a2166842c7566ddeaf5212b4d43af7c697c','sft-v4-simulator-native.jsonl'),
+            ('V4.1','340131a4f130218fff3d90a87bd1b9577a9e17d0','sft-v4.1-rich-reachability.jsonl'),
+          ]
           rows=[]
-          for name in ['sft.jsonl','sft-v2-balanced.jsonl','sft-v4-simulator-native.jsonl','sft-v4.1-rich-reachability.jsonl']:
+          for stage,commit,name in specs:
               p=out/name
-              digest=sha(p)
-              count=sum(1 for _ in p.open('rb'))
-              rows.append({'path':name,'sha256':digest,'size_bytes':p.stat().st_size,'records':count})
+              rows.append({'stage':stage,'source_git_commit':commit,'path':name,'sha256':sha(p),'size_bytes':p.stat().st_size,'records':sum(1 for _ in p.open('rb'))})
           final=rows[-1]
           rec={
-            'schema':'LUCIA_AA_R22546_PONDLLM_V41_DATASET_REPRO_V1',
-            'source_git_commit':'340131a4f130218fff3d90a87bd1b9577a9e17d0',
+            'schema':'LUCIA_AA_R22546_PONDLLM_V41_HISTORICAL_CHAIN_REPRO_V2',
+            'source_git_commits':{r['stage']:r['source_git_commit'] for r in rows},
             'source_git_dirty':False,
-            'commands':'README-documented V1 -> V2 -> V4 -> V4.1 deterministic chain',
+            'commands':'historical README-documented V1/V2 -> exact V4 source commit -> exact clean V4.1 training commit',
             'artifacts':rows,
-            'published_v41_dataset_sha256':target,
+            'published_v41_dataset_sha256':published['v41'],
             'reproduced_v41_dataset_sha256':final['sha256'],
+            'published_v41_records':published['v41_records'],
             'reproduced_v41_records':final['records'],
-            'published_v41_records':43322,
-            'sha_match':final['sha256']==target,
-            'record_count_match':final['records']==43322,
+            'sha_match':final['sha256']==published['v41'],
+            'record_count_match':final['records']==published['v41_records'],
             'model_weight_bytes_downloaded':0,
             'model_outputs_observed':0,
             'dataset_bytes_retained_in_artifact':0,
