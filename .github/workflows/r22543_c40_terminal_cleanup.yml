@@ -1,0 +1,49 @@
+name: LAA R22543 C40 terminal raw and private cleanup
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['cleanup/C40_TERMINAL_CLEANUP_ONCE.txt']
+permissions: {contents: read, actions: write}
+jobs:
+  cleanup:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: '${{ github.token }}'
+      REPO: ojh850636-alt/-
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - name: Delete exact raw/private artifacts and verify absence
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          api="https://api.github.com/repos/$REPO"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28")
+          ids=(9130423756 9130424384 9130044632 9130117339 9130179946)
+          names=(r22543-c40-base-escrow r22543-c40-adapters-escrow r22543-c40-private-fixture-abi r22543-c40-private-training-row r22543-c40-private-training-first-rows)
+          printf '[]' > /tmp/deleted.json
+          for i in ${!ids[@]}; do
+            id=${ids[$i]}; name=${names[$i]}
+            before=$(curl -sS -o /tmp/get.json -w '%{http_code}' "${auth[@]}" "$api/actions/artifacts/$id")
+            if [ "$before" = 200 ]; then
+              size=$(jq -r '.size_in_bytes' /tmp/get.json); digest=$(jq -r '.digest // ""' /tmp/get.json)
+              code=$(curl -sS -o /tmp/del.out -w '%{http_code}' -X DELETE "${auth[@]}" "$api/actions/artifacts/$id")
+              test "$code" = 204
+              jq --argjson id "$id" --arg name "$name" --argjson size "$size" --arg digest "$digest" '. += [{id:$id,name:$name,size_in_bytes:$size,digest:$digest,delete_http:204}]' /tmp/deleted.json > /tmp/x && mv /tmp/x /tmp/deleted.json
+            elif [ "$before" = 404 ]; then
+              jq --argjson id "$id" --arg name "$name" '. += [{id:$id,name:$name,already_absent:true}]' /tmp/deleted.json > /tmp/x && mv /tmp/x /tmp/deleted.json
+            else
+              echo "unexpected GET $before for $id" >&2; exit 1
+            fi
+          done
+          remain=0
+          for id in "${ids[@]}"; do
+            code=$(curl -sS -o /tmp/check.out -w '%{http_code}' "${auth[@]}" "$api/actions/artifacts/$id")
+            if [ "$code" != 404 ]; then remain=$((remain+1)); fi
+          done
+          test "$remain" -eq 0
+          jq -n --slurpfile d /tmp/deleted.json --argjson remain "$remain" '{schema:"LUCIA_AA_R22543_C40_REMOTE_RAW_PRIVATE_CLEANUP_V1",deleted_or_already_absent:$d[0],target_count:5,remaining_target_artifacts:$remain,raw_base_escrow_absent:true,raw_adapter_escrow_absent:true,private_training_rows_absent:true,public_evidence_artifacts_deleted:false,verdict:(if $remain==0 then "PASS" else "FAIL" end)}' > public/C40_REMOTE_CLEANUP_RECEIPT.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-terminal-cleanup-receipt, path: public/, retention-days: 7}
