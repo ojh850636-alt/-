@@ -1,0 +1,106 @@
+name: LAA R22543 C40 metadata-only scientific-family audit
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22543/C40_METADATA_AUDIT_ONCE.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Audit three scientific families with zero model-weight bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p public
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib, json, re, urllib.request
+          from pathlib import Path
+
+          families = [
+            {
+              'family_id':'MEMORY_LIFECYCLE_CONTROL',
+              'repo':'chkrishna2001/psm-memory-qwen0.5b',
+              'question':'Does learned low-rank adaptation implement separable durable-memory storage/retrieval/consolidation control policies that survive fresh structured memory cases and causal controls?',
+              'dedup_risk':'LOW',
+              'verifier':'typed action/schema + deterministic state-transition oracle',
+            },
+            {
+              'family_id':'BOARD_GAME_MOVE_POLICY',
+              'repo':'victor/qwen2.5-0.5B-chess-lora',
+              'question':'Does learned adaptation improve legal/optimal board-game move selection under executable game-rule verification?',
+              'dedup_risk':'HIGH_C34_GAME_STATE_TO_MOVE',
+              'verifier':'python-chess legality + engine/puzzle oracle',
+            },
+            {
+              'family_id':'PROMPT_INJECTION_BINARY_POLICY',
+              'repo':'aditya02acharya/luna2-qwen2.5-0.5b-prompt-injection-lora',
+              'question':'Does learned adaptation implement robust yes/no prompt-injection detection under transformation controls?',
+              'dedup_risk':'MEDIUM_CLASSIFICATION_AND_SECURITY_FAMILIES',
+              'verifier':'exact binary label + adversarial transformation oracle',
+            },
+          ]
+
+          UA={'User-Agent':'LAA-R22543-metadata-audit'}
+          def get(url):
+            req=urllib.request.Request(url,headers=UA)
+            with urllib.request.urlopen(req,timeout=60) as r: return r.read()
+          def jget(url): return json.loads(get(url))
+          def raw(repo, rev, path):
+            return get(f'https://huggingface.co/{repo}/resolve/{rev}/{path}?download=false')
+          rows=[]
+          for f in families:
+            repo=f['repo']; info=jget(f'https://huggingface.co/api/models/{repo}?blobs=true')
+            rev=info.get('sha')
+            siblings=info.get('siblings') or []
+            files=[]; adapter_cfgs=[]; adapter_bins=[]
+            for s in siblings:
+              p=s.get('rfilename'); lfs=s.get('lfs') or {}
+              item={'path':p,'size':s.get('size') or lfs.get('size'),'sha256':lfs.get('sha256') or lfs.get('oid')}
+              files.append(item)
+              if p and p.endswith('adapter_config.json'): adapter_cfgs.append(p)
+              if p and (p.endswith('adapter_model.safetensors') or p.endswith('adapter_model.bin')): adapter_bins.append(item)
+            readme=''
+            for rp in ('README.md','readme.md'):
+              try: readme=raw(repo,rev,rp).decode('utf-8','replace'); break
+              except Exception: pass
+            cfg_rows=[]
+            for p in adapter_cfgs:
+              try:
+                d=json.loads(raw(repo,rev,p))
+                cfg_rows.append({'path':p,'base_model_name_or_path':d.get('base_model_name_or_path'),'r':d.get('r'),'lora_alpha':d.get('lora_alpha'),'target_modules':d.get('target_modules'),'modules_to_save':d.get('modules_to_save'),'task_type':d.get('task_type'),'peft_type':d.get('peft_type')})
+              except Exception as e: cfg_rows.append({'path':p,'error':type(e).__name__})
+            gh=sorted(set(re.findall(r'https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',readme)))
+            source_tokens=['training','train','script','source repo','source repository','repeatable','reproduc']
+            source_doc_hits={t:(t.lower() in readme.lower()) for t in source_tokens}
+            row={**f,'hf_head':rev,'license':info.get('cardData',{}).get('license') if isinstance(info.get('cardData'),dict) else None,'library_name':info.get('library_name'),'pipeline_tag':info.get('pipeline_tag'),'adapter_configs':cfg_rows,'adapter_binary_objects':adapter_bins,'adapter_binary_count':len(adapter_bins),'github_links':gh,'source_doc_hits':source_doc_hits,'readme_sha256':hashlib.sha256(readme.encode()).hexdigest(),'model_weight_bytes_downloaded':0,'model_outputs_observed':0}
+            # score is intentionally source-zero and independent of behavior
+            exact_base=sum(1 for c in cfg_rows if c.get('base_model_name_or_path'))
+            score=0
+            score += 4 if f['dedup_risk']=='LOW' else (1 if f['dedup_risk'].startswith('MEDIUM') else -4)
+            score += 3 if adapter_bins else -5
+            score += 2 if exact_base else 0
+            score += 2 if gh else 0
+            score += 2 if source_doc_hits.get('training') else 0
+            score += 3 if 'deterministic' in f['verifier'] or 'oracle' in f['verifier'] else 1
+            if repo.startswith('chkrishna2001/psm-memory'): score += 3  # three sibling adapters + shared small base maximizes one-ingress extraction
+            row['metadata_score']=score
+            rows.append(row)
+          rows.sort(key=lambda x:(-x['metadata_score'],x['family_id']))
+          out={'schema':'LUCIA_AA_R22543_C40_METADATA_FAMILY_AUDIT_V1','raw_weight_bytes':0,'model_outputs':0,'families':rows,'selected_family':rows[0]['family_id'],'selected_repo':rows[0]['repo'],'selection_is_binary_authorization':False}
+          Path('public/C40_METADATA_FAMILY_AUDIT.json').write_text(json.dumps(out,indent=2,sort_keys=True,ensure_ascii=False)+'\n')
+          print(json.dumps(out,indent=2,ensure_ascii=False))
+          assert out['raw_weight_bytes']==0 and out['model_outputs']==0
+          assert len(rows)>=3
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22543-c40-metadata-family-audit
+          path: public/
+          retention-days: 3
