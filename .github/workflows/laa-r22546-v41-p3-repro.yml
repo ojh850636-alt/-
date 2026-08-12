@@ -1,0 +1,78 @@
+name: Temporary LAA R22546 PondLLM V4.1 source-only dataset reproduction
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reproduce public deterministic dataset chain without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22546_V41_P3"
+          SRC="$ROOT/PondLLM"
+          OUT="$ROOT/out"
+          mkdir -p "$OUT"
+          git clone --filter=blob:none --no-checkout https://github.com/Xnizzorg/PondLLM.git "$SRC"
+          cd "$SRC"
+          git checkout 340131a4f130218fff3d90a87bd1b9577a9e17d0
+          test "$(git rev-parse HEAD)" = "340131a4f130218fff3d90a87bd1b9577a9e17d0"
+          test -z "$(git status --porcelain)"
+          export PYTHONPATH="$SRC/src"
+          python -m pondllm dataset --episodes 16 --steps 60 --seed 1000 --output "$OUT/sft.jsonl"
+          python -m pondllm dataset-balanced --base "$OUT/sft.jsonl" --episodes 128 --seed 2000 --minimum-per-action 1000 --output "$OUT/sft-v2-balanced.jsonl"
+          python -m pondllm dataset-v4 --base "$OUT/sft-v2-balanced.jsonl" --scenes 1000 --survival-scenes 1000 --seed 52000 --output "$OUT/sft-v4-simulator-native.jsonl"
+          python -m pondllm dataset-v41 --base "$OUT/sft-v4-simulator-native.jsonl" --rich-scenes 1000 --reachability-scenes 1000 --seed 61000 --output "$OUT/sft-v4.1-rich-reachability.jsonl"
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22546_V41_P3'
+          out=root/'out'
+          target='84f5bae00fcd2a1a98737e9a98371dd534961dd01e0f704e6a4356dfea585815'
+          def sha(p):
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+              return h.hexdigest()
+          rows=[]
+          for name in ['sft.jsonl','sft-v2-balanced.jsonl','sft-v4-simulator-native.jsonl','sft-v4.1-rich-reachability.jsonl']:
+              p=out/name
+              digest=sha(p)
+              count=sum(1 for _ in p.open('rb'))
+              rows.append({'path':name,'sha256':digest,'size_bytes':p.stat().st_size,'records':count})
+          final=rows[-1]
+          rec={
+            'schema':'LUCIA_AA_R22546_PONDLLM_V41_DATASET_REPRO_V1',
+            'source_git_commit':'340131a4f130218fff3d90a87bd1b9577a9e17d0',
+            'source_git_dirty':False,
+            'commands':'README-documented V1 -> V2 -> V4 -> V4.1 deterministic chain',
+            'artifacts':rows,
+            'published_v41_dataset_sha256':target,
+            'reproduced_v41_dataset_sha256':final['sha256'],
+            'reproduced_v41_records':final['records'],
+            'published_v41_records':43322,
+            'sha_match':final['sha256']==target,
+            'record_count_match':final['records']==43322,
+            'model_weight_bytes_downloaded':0,
+            'model_outputs_observed':0,
+            'dataset_bytes_retained_in_artifact':0,
+          }
+          (root/'REPRO_RECEIPT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+          print(json.dumps(rec,indent=2,sort_keys=True))
+          PY
+          rm -rf "$OUT" "$SRC"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22546_V41_P3_REPRO_RECEIPT_ONLY
+          path: ${{ runner.temp }}/LAA_R22546_V41_P3/REPRO_RECEIPT.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
