@@ -1,0 +1,102 @@
+name: LAA R22542 C39 final bounded causal validation
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22542/C39_FINAL_CAUSAL_ONCE.txt']
+permissions: {contents: read, actions: write}
+env:
+  SOURCE_RUN: '31484392389'
+  RUNTIME_RUN: '31491939184'
+jobs:
+  semantic:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22542-c39-base-*', path: recovered/base_parts, merge-multiple: true, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-runtime-wheelhouse, path: runtime_escrow, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.RUNTIME_RUN }}'}
+      - name: Reassemble exact source
+        run: |
+          set -euo pipefail; mkdir -p source/base source/adapter public
+          cp recovered/adapter/adapter_model.safetensors source/adapter/; cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors|awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors|awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+      - name: Install audited runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+      - name: Fresh process semantic replay
+        run: python -B laa/r22542/c39_final_causal.py --mode semantic --base source/base --adapter source/adapter --out public/SEMANTIC_REPLAY.json
+      - name: Delete raw source/runtime before publication
+        if: always()
+        run: rm -rf source recovered runtime_escrow "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with: {name: r22542-c39-final-semantic, path: public/, retention-days: 1}
+  generation:
+    if: github.run_number == 1
+    strategy:
+      fail-fast: false
+      matrix:
+        condition: [TARGET_ONLY, TARGET_ABLATION]
+    runs-on: ubuntu-24.04
+    env:
+      CONDITION: '${{ matrix.condition }}'
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-adapter, path: recovered/adapter, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-escrow-meta, path: recovered/meta, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {pattern: 'r22542-c39-base-*', path: recovered/base_parts, merge-multiple: true, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.SOURCE_RUN }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22542-c39-runtime-wheelhouse, path: runtime_escrow, github-token: '${{ github.token }}', repository: ojh850636-alt/-, run-id: '${{ env.RUNTIME_RUN }}'}
+      - name: Reassemble exact source
+        run: |
+          set -euo pipefail; mkdir -p source/base source/adapter public private
+          cp recovered/adapter/adapter_model.safetensors source/adapter/; cp recovered/meta/adapter_config.json source/adapter/
+          cp recovered/meta/config.json recovered/meta/model.safetensors.index.json recovered/meta/tokenizer_config.json recovered/meta/tokenizer.json source/base/
+          cat $(find recovered/base_parts -type f -name 'base.part.*' | sort) > source/base/model.safetensors-00001-of-00001.safetensors
+          test "$(sha256sum source/base/model.safetensors-00001-of-00001.safetensors|awk '{print $1}')" = aa33250c4fc64891ddfaba3a314fd9542ea371843c387178b425fbcc5ed680b1
+          test "$(sha256sum source/adapter/adapter_model.safetensors|awk '{print $1}')" = 4c4126ec284b9bcd64f2e38a26f242b02dace75b31547a65a9863e7bc10e4312
+      - name: Install audited model runtime
+        run: |
+          python -m pip install --quiet --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet runtime_escrow/wheelhouse/*.whl
+      - name: Generate bounded causal tactics privately
+        run: python -B laa/r22542/c39_final_causal.py --mode generation --condition "$CONDITION" --base source/base --adapter source/adapter --out public/GEN_RECEIPT.json --private private/TACTICS.jsonl
+      - name: Delete model source before Lean verifier
+        run: rm -rf source recovered runtime_escrow "$HOME/.cache/huggingface" "$HOME/.cache/pip"
+      - name: Install exact Lean verifier environment
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/mxthematic/openproof.git openproof; git -C openproof checkout -q d49b7e3223962f806aeabf330f6717b3ecdc914b
+          curl -fsSL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -o elan-init.sh
+          sh elan-init.sh -y --default-toolchain leanprover/lean4:v4.28.0
+          export PATH="$HOME/.elan/bin:$PATH"; cd openproof/lean && lake update && lake exe cache get
+      - name: True Lean verification then raw tactic deletion
+        run: |
+          export PATH="$HOME/.elan/bin:$PATH"
+          python -B laa/r22542/c39_verify_shard.py --private private/TACTICS.jsonl --lean-root openproof/lean --out public/LEAN_RESULT.json
+          test ! -e private/TACTICS.jsonl
+      - name: Remove verifier remnants
+        if: always()
+        run: rm -rf source recovered runtime_escrow private openproof "$HOME/.elan" "$HOME/.cache" || true
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with: {name: 'r22542-c39-final-${{ matrix.condition }}', path: public/, retention-days: 1}
