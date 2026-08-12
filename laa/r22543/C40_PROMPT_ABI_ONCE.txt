@@ -1,0 +1,7 @@
+C40_STORAGE_PROMPT_ABI_SOURCEZERO_AUTHORIZED
+abstract_suite_sha256=ff47f83a79c1afa9830fc1e943790054626c99d8cff668e60a39ff3d07c41198
+abstract_suite_semantics_frozen=true
+training_row_read_after_suite_seal=true
+raw_model_weight_bytes=0
+model_outputs=0
+binary_authorization=false
