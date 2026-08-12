@@ -1,0 +1,101 @@
+name: LAA R22543 C40 exact training-row manifest source-zero audit
+on:
+  pull_request:
+    branches: [ main ]
+    paths: ['laa/r22543/C40_TRAINING_LINEAGE_ONCE.txt']
+permissions: {contents: read}
+jobs:
+  audit:
+    if: github.run_number == 1
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {ref: '${{ github.event.pull_request.head.sha }}'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Inspect only training JSONL/manifests; no model weights
+        run: |
+          set -euo pipefail
+          mkdir -p public private
+          python - <<'PY'
+          from __future__ import annotations
+          import hashlib,json,urllib.request
+          from pathlib import Path
+          DATA='chkrishna2001/psm-memory-training-data'
+          MODEL='chkrishna2001/psm-memory-qwen0.5b'
+          BASE='Qwen/Qwen2.5-0.5B-Instruct'
+          STORAGE_SHA='791a1933e48a67245d2427eeda0d3f10743814b338d45c4fbd00656ebac04389'
+          UA={'User-Agent':'LAA-R22543-C40-lineage'}
+          def get(url):
+            req=urllib.request.Request(url,headers=UA)
+            with urllib.request.urlopen(req,timeout=90) as r:return r.read()
+          def jget(url):return json.loads(get(url))
+          di=jget(f'https://huggingface.co/api/datasets/{DATA}?blobs=true'); dh=di['sha']
+          mi=jget(f'https://huggingface.co/api/models/{MODEL}?blobs=true'); mh=mi['sha']
+          bi=jget(f'https://huggingface.co/api/models/{BASE}?blobs=true'); bh=bi['sha']
+          files={x['rfilename'] for x in di.get('siblings',[])}
+          rounds=['v17','v16b','v16']
+          out_rounds={}
+          private={}
+          def shape(o,depth=0):
+            if depth>7:return type(o).__name__
+            if isinstance(o,dict):return {k:shape(o[k],depth+1) for k in sorted(o)}
+            if isinstance(o,list):return {'list_len':len(o),'item':shape(o[0],depth+1) if o else None}
+            return type(o).__name__
+          def flatten(o,prefix=''):
+            z={}
+            if isinstance(o,dict):
+              for k,v in o.items():z.update(flatten(v,f'{prefix}.{k}' if prefix else k))
+            elif isinstance(o,list):
+              for i,v in enumerate(o[:20]):z.update(flatten(v,f'{prefix}[{i}]'))
+            else:z[prefix]=o
+            return z
+          for r in rounds:
+            jp=f'training-data/hf-prod-storage-{r}.jsonl'; mp=f'training-data/hf-prod-storage-{r}.manifest.json'
+            rec={'jsonl_exists':jp in files,'manifest_exists':mp in files}
+            if jp in files:
+              raw=get(f'https://huggingface.co/datasets/{DATA}/resolve/{dh}/{jp}?download=false'); rec['jsonl_sha256']=hashlib.sha256(raw).hexdigest()
+              lines=[x for x in raw.decode('utf-8','replace').splitlines() if x.strip()]; rec['row_count']=len(lines)
+              first=json.loads(lines[0]); rec['first_row_shape']=shape(first); private[f'{r}_first_row']=first
+              # public structural summaries only
+              roles=[]; top_keys=set(); completion_values=set()
+              for line in lines[:250]:
+                x=json.loads(line); top_keys.update(x.keys())
+                if isinstance(x.get('messages'),list):
+                  roles += [m.get('role') for m in x['messages'] if isinstance(m,dict) and isinstance(m.get('role'),str)]
+                  for m in x['messages']:
+                    if isinstance(m,dict) and m.get('role')=='assistant' and isinstance(m.get('content'),str) and len(m['content'])<500: completion_values.add(m['content'])
+                for key in ('completion','output','answer','label','action','response'):
+                  if isinstance(x.get(key),str) and len(x[key])<500: completion_values.add(x[key])
+              rec['top_keys']=sorted(top_keys); rec['roles']=sorted(set(roles)); rec['short_completion_examples_sha256']=sorted(hashlib.sha256(x.encode()).hexdigest() for x in completion_values)[:30]
+            if mp in files:
+              mr=get(f'https://huggingface.co/datasets/{DATA}/resolve/{dh}/{mp}?download=false'); rec['manifest_sha256']=hashlib.sha256(mr).hexdigest()
+              m=json.loads(mr); f=flatten(m)
+              interesting={k:v for k,v in f.items() if any(t in k.lower() for t in ('base','revision','commit','adapter','sha','model','script','train','checkpoint','source')) and isinstance(v,(str,int,float,bool,type(None)))}
+              rec['manifest_interesting']=interesting
+              rec['manifest_mentions_storage_adapter_sha']=any(STORAGE_SHA.lower() in str(v).lower() for v in f.values())
+              rec['manifest_mentions_base_repo']=any(BASE.lower() in str(v).lower() for v in f.values())
+            out_rounds[r]=rec
+          # model storage config metadata no weight download
+          ac=json.loads(get(f'https://huggingface.co/{MODEL}/resolve/{mh}/lora/storage/adapter_config.json?download=false'))
+          pub={'schema':'LUCIA_AA_R22543_C40_TRAINING_LINEAGE_SOURCEZERO_V1','dataset_repo':DATA,'dataset_head':dh,'model_repo':MODEL,'model_head':mh,'current_base_repo':BASE,'current_base_head':bh,'current_storage_adapter_sha256':STORAGE_SHA,'rounds':out_rounds,'storage_adapter_config':{k:ac.get(k) for k in ('base_model_name_or_path','r','lora_alpha','target_modules','modules_to_save','task_type','peft_type')},'raw_model_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          # conservative provenance verdict
+          manifest_match=[r for r,v in out_rounds.items() if v.get('manifest_mentions_storage_adapter_sha')]
+          exact_base_rev=[]
+          for r,v in out_rounds.items():
+            for k,val in (v.get('manifest_interesting') or {}).items():
+              if 'base' in k.lower() and 'rev' in k.lower() and isinstance(val,str) and len(val)>=12: exact_base_rev.append((r,k,val))
+          pub['storage_adapter_manifest_matching_rounds']=manifest_match
+          pub['exact_training_base_revision_fields']=exact_base_rev
+          pub['exact_training_code_revision_proven']=False
+          pub['exact_training_base_revision_proven']=bool(manifest_match and exact_base_rev)
+          pub['e5_ceiling_preoutput']='ALLOW_PROVENANCE_CONTINUE' if pub['exact_training_base_revision_proven'] else 'BLOCKED_TRAINING_PROVENANCE_UNPROVEN'
+          Path('public/C40_TRAINING_LINEAGE_SOURCEZERO.json').write_text(json.dumps(pub,indent=2,sort_keys=True,ensure_ascii=False)+'\n')
+          Path('private/C40_TRAINING_FIRST_ROWS_PRIVATE.json').write_text(json.dumps(private,indent=2,ensure_ascii=False)+'\n')
+          print(json.dumps(pub,indent=2,ensure_ascii=False))
+          assert pub['raw_model_weight_bytes_downloaded']==0 and pub['model_outputs_observed']==0
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-training-lineage-sourcezero, path: public/, retention-days: 3}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22543-c40-private-training-first-rows, path: private/, retention-days: 1}
