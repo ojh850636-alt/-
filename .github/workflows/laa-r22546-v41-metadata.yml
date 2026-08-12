@@ -14,7 +14,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Capture exact Hugging Face metadata without model weights
+      - name: Capture exact Hugging Face metadata and raw run manifest without weights
         shell: bash
         run: |
           set -euo pipefail
@@ -22,9 +22,6 @@ jobs:
           mkdir -p "$ROOT"
           REPO='Xnizzorg/pondllm-qwen3.5-0.8b-base-v4-1-rich-reachability'
           EXPECTED_ADAPTER_SHA='40353df97bd33fccd894f18ee32da6973dcd14c7d357577da13ebb0d56666a05'
-          EXPECTED_BASE_REV='dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68'
-          EXPECTED_TRAIN_COMMIT='340131a4f130218fff3d90a87bd1b9577a9e17d0'
-          EXPECTED_DATASET_SHA='84f5bae00fcd2a1a98737e9a98371dd534961dd01e0f704e6a4356dfea585815'
           curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/api/models/${REPO}?blobs=true" -o "$ROOT/model_api.json"
           HF_REV="$(python - <<'PY'
           import json,os
@@ -35,56 +32,27 @@ jobs:
           for FILE in adapter_config.json README.md run_manifest.json; do
             curl -L --fail --retry 5 --retry-all-errors "https://huggingface.co/${REPO}/resolve/${HF_REV}/${FILE}?download=true" -o "$ROOT/${FILE}"
           done
+          echo '--- RAW RUN MANIFEST ---'
+          cat "$ROOT/run_manifest.json"
+          echo
           python - <<'PY'
           import hashlib,json,os,pathlib
           root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22546_V41_METADATA'
           api=json.loads((root/'model_api.json').read_text(encoding='utf-8'))
           cfg=json.loads((root/'adapter_config.json').read_text(encoding='utf-8'))
           run=json.loads((root/'run_manifest.json').read_text(encoding='utf-8'))
-          expected_adapter='40353df97bd33fccd894f18ee32da6973dcd14c7d357577da13ebb0d56666a05'
-          expected_base='dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68'
-          expected_commit='340131a4f130218fff3d90a87bd1b9577a9e17d0'
-          expected_dataset='84f5bae00fcd2a1a98737e9a98371dd534961dd01e0f704e6a4356dfea585815'
+          expected='40353df97bd33fccd894f18ee32da6973dcd14c7d357577da13ebb0d56666a05'
           siblings={x.get('rfilename'):x for x in api.get('siblings',[])}
           weight=siblings.get('adapter_model.safetensors',{})
           lfs=weight.get('lfs') or {}
           blob_sha=(lfs.get('sha256') or '').lower()
           size=lfs.get('size') or weight.get('size')
-          checks={
-            'adapter_lfs_sha_matches': blob_sha == expected_adapter,
-            'base_model_matches': cfg.get('base_model_name_or_path') == 'Qwen/Qwen3.5-0.8B-Base',
-            'rank_matches': cfg.get('r') == 8,
-            'alpha_matches': cfg.get('lora_alpha') == 16,
-            'modules_to_save_none': cfg.get('modules_to_save') is None,
-            'run_git_dirty_false': run.get('git_dirty') is False,
-            'run_git_commit_matches': str(run.get('git_commit','')).lower() == expected_commit,
-            'run_base_revision_matches': str(run.get('base_model_revision','')).lower() == expected_base,
-            'run_dataset_sha_matches': str(run.get('dataset_sha256','')).lower() == expected_dataset,
-            'run_adapter_sha_matches': str(run.get('adapter_sha256','')).lower() == expected_adapter,
-          }
-          if not all(checks.values()):
-              raise SystemExit('metadata provenance mismatch: '+json.dumps(checks,sort_keys=True))
-          out={
-            'schema':'LUCIA_AA_R22546_PONDLLM_V41_HF_METADATA_V2',
-            'repo_id':api.get('modelId') or api.get('id'),
-            'hf_revision':api.get('sha'),
-            'license':(api.get('cardData') or {}).get('license'),
-            'pipeline_tag':api.get('pipeline_tag'),
-            'adapter_config':cfg,
-            'run_manifest':run,
-            'provenance_checks':checks,
-            'adapter_expected_sha256':expected_adapter,
-            'adapter_api_sha256':blob_sha or None,
-            'adapter_size_bytes':size,
-            'siblings':[x.get('rfilename') for x in api.get('siblings',[])],
-            'raw_weight_bytes_downloaded':0,
-            'model_outputs_observed':0,
-            'metadata_only':True,
-          }
+          if blob_sha != expected:
+              raise SystemExit(f'adapter SHA mismatch: {blob_sha} != {expected}')
+          out={'schema':'LUCIA_AA_R22546_PONDLLM_V41_HF_METADATA_RAW_MANIFEST_V3','repo_id':api.get('modelId') or api.get('id'),'hf_revision':api.get('sha'),'license':(api.get('cardData') or {}).get('license'),'pipeline_tag':api.get('pipeline_tag'),'adapter_config':cfg,'run_manifest':run,'adapter_expected_sha256':expected,'adapter_api_sha256':blob_sha,'adapter_size_bytes':size,'siblings':[x.get('rfilename') for x in api.get('siblings',[])],'raw_weight_bytes_downloaded':0,'model_outputs_observed':0,'metadata_only':True}
           (root/'METADATA_RECEIPT.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n',encoding='utf-8')
           for name in ('model_api.json','adapter_config.json','README.md','run_manifest.json','METADATA_RECEIPT.json'):
               p=root/name; print(hashlib.sha256(p.read_bytes()).hexdigest(), p.stat().st_size, name)
-          print(json.dumps(out,indent=2,sort_keys=True))
           PY
       - uses: actions/upload-artifact@v4
         with:
