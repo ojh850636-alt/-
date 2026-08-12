@@ -6,7 +6,7 @@ on:
 permissions: {contents: read, actions: write}
 jobs:
   shard:
-    if: github.run_number == 1
+    if: github.run_number == 12
     strategy:
       fail-fast: false
       max-parallel: 12
