@@ -1,0 +1,65 @@
+        enc=tok(prompts,return_tensors='pt',padding=True,add_special_tokens=False)
+        plen=enc['input_ids'].shape[1]
+        gen=model.generate(**enc,max_new_tokens=max_new,do_sample=False,use_cache=True,pad_token_id=tok.pad_token_id,eos_token_id=tok.eos_token_id)
+        for i,row in enumerate(chunk):
+            txt=clean_generation_text(tok.decode(gen[i,plen:],skip_special_tokens=True))
+            out.append({'case_id':row['case_id'],'split':row['split'],'family':row['family'],'prediction_sha256':hashlib.sha256(txt.encode()).hexdigest(),'prediction_length':len(txt),'exact_or_token_equiv':exact_or_token_equiv(txt,row['target']) if not row['negative'] else False,'semantic_equiv':semantic_equiv(txt,row['target']) if not row['negative'] else False,'syntax_ok':syntax_ok(txt) if txt else False,'nonempty':bool(txt)})
+    return out
+
+def summarize_generation(items):
+    pos=[x for x in items if x['split']!='NEGATIVE_AMBIGUOUS']; neg=[x for x in items if x['split']=='NEGATIVE_AMBIGUOUS']
+    return {'n':len(items),'positive_n':len(pos),'exact_or_token_equiv':mean([x['exact_or_token_equiv'] for x in pos]),'semantic_equiv':mean([x['semantic_equiv'] for x in pos]),'syntax_ok':mean([x['syntax_ok'] for x in pos]),'negative_nonempty_rate':mean([x['nonempty'] for x in neg]) if neg else None}
+
+def self_test():
+    import torch
+    from transformers import Qwen2Config,Qwen2ForCausalLM
+    from peft import LoraConfig,get_peft_model
+    cfg=Qwen2Config(vocab_size=128,hidden_size=64,intermediate_size=128,num_hidden_layers=2,num_attention_heads=4,num_key_value_heads=2,max_position_embeddings=64)
+    base=Qwen2ForCausalLM(cfg)
+    pc=LoraConfig(r=4,lora_alpha=8,target_modules=['q_proj','v_proj'],modules_to_save=['lm_head','embed_tokens'],task_type='CAUSAL_LM')
+    m=get_peft_model(base,pc); c=Controller(m)
+    assert c.loras and c.aux
+    c.set_condition('BASE'); assert all(abs(x.scaling[adapter_key(x)])<1e-12 for _,x in c.loras) and all(x.disable_adapters for _,x in c.aux)
+    c.set_condition('AUX_ONLY'); assert all(abs(x.scaling[adapter_key(x)])<1e-12 for _,x in c.loras) and all(not x.disable_adapters for _,x in c.aux)
+    c.set_condition('LORA_ONLY'); assert all(x.disable_adapters for _,x in c.aux)
+    c.set_condition('FULL'); assert all(not x.disable_adapters for _,x in c.aux)
+    c.random_sign(); c.restore();
+    print(json.dumps({'self_test':'PASS','lora_layers':len(c.loras),'aux_wrappers':len(c.aux)}))
+
+def run(args):
+    import torch
+    root=Path(args.work); base=root/'base'; adapter=root/'adapter'; out=Path(args.out); out.mkdir(parents=True,exist_ok=True)
+    assert sha256_file(base/'model.safetensors')==BASE_SHA
+    assert sha256_file(adapter/'adapter_model.safetensors')==ADAPTER_SHA
+    rows=load_rows(Path(args.suite)); pos=[x for x in rows if not x['negative']]
+    static=static_forensics(adapter/'adapter_model.safetensors'); (out/'C43_STATIC.json').write_text(json.dumps(static,indent=2,sort_keys=True))
+    model,tok=prepare_model(base,adapter); ctl=Controller(model); total_layers=int(model.base_model.model.config.num_hidden_layers)
+    conditions=['BASE','AUX_ONLY','LORA_ONLY','FULL']
+    scores={}; case_scores={}
+    for c in conditions:
+        ctl.set_condition(c); v=score_rows(model,tok,pos,batch=args.batch); scores[c]=mean(v); case_scores[c]=dict(zip([x['case_id'] for x in pos],v))
+    locked=[x for x in pos if x['split'] in ['CONFIRMATION','TOOL_OOD','QUOTING_OOD']][:256]
+    controls=['RANDOM_SIGN_LORA_SAME_AUX','LAYER_SHUFFLED_LORA_SAME_AUX']
+    control_scores={}; control_case={}
+    for c in controls:
+        ctl.set_condition(c); v=score_rows(model,tok,locked,batch=args.batch); control_scores[c]=mean(v); control_case[c]=dict(zip([x['case_id'] for x in locked],v))
+    dose_rows=[x for x in pos if x['split'] in ['CONFIRMATION','TOOL_OOD']][:128]
+    dose_scores={}
+    for d in ['DOSE_0.25','DOSE_0.5','DOSE_1.5']:
+        ctl.set_condition(d); dose_scores[d]=mean(score_rows(model,tok,dose_rows,batch=args.batch))
+    gate_rows=[x for x in pos if x['split'] in ['CONFIRMATION','TOOL_OOD']]
+    full_aux=[case_scores['FULL'][x['case_id']]-case_scores['AUX_ONLY'][x['case_id']] for x in gate_rows]
+    conditional=mean(full_aux); ci=bootstrap_ci(full_aux)
+    total=[case_scores['FULL'][x['case_id']]-case_scores['BASE'][x['case_id']] for x in gate_rows]
+    # control separation on locked overlap
+    overlap=[x for x in locked if x['case_id'] in case_scores['FULL']]
+    full_random=mean([case_scores['FULL'][x['case_id']]-control_case['RANDOM_SIGN_LORA_SAME_AUX'][x['case_id']] for x in overlap])
+    full_shuffle=mean([case_scores['FULL'][x['case_id']]-control_case['LAYER_SHUFFLED_LORA_SAME_AUX'][x['case_id']] for x in overlap])
+    sign=1 if conditional>=0 else -1
+    ci_excludes=(ci[0]>0 or ci[1]<0)
+    control_sep=(sign*full_random>=0.05 and sign*full_shuffle>=0.05)
+    effect=(abs(conditional)>=0.10 and ci_excludes and control_sep)
+    # generation locked set including negatives
+    gen_rows=[x for x in rows if x['split'] in ['CONFIRMATION','TOOL_OOD','QUOTING_OOD','NEGATIVE_AMBIGUOUS']][:128]
+    generation={}; gen_items={}
+    for c in ['BASE','AUX_ONLY','LORA_ONLY','FULL','RANDOM_SIGN_LORA_SAME_AUX','LAYER_SHUFFLED_LORA_SAME_AUX']:
