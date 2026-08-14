@@ -1,0 +1,126 @@
+name: LAA R22564 C44 one-use Agent Guard archaeology v3
+on:
+  push:
+    branches: [laa-r22564-c44-agentguard]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Frozen source-zero contract after fixture amendment
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object r22564/c44/c44_forge.py)" = c3db61e24ab6f8b7b2fdee738dc27b2f130e1cb3
+          test "$(git hash-object r22564/c44/c44_science.py)" = f8483e73234b51ceb72db3e623d74d5fcc61005c
+          mkdir -p research/r22564_c44 datasets/r22564_c44 configs
+          cp r22564/c44/c44_forge.py research/r22564_c44/c44_forge.py
+          cp r22564/c44/c44_science.py research/r22564_c44/c44_science.py
+          python research/r22564_c44/c44_forge.py
+          test "$(sha256sum datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl | awk '{print $1}')" = a127d9e9f888b18bf69300b17aaba521ee2565afdaa16012eb20ee72ae21dd40
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/dannyliv/agent-guard-modernbert-base cand
+          git clone -q --depth 1 https://huggingface.co/answerdotai/ModernBERT-base baseptr
+          test "$(git -C cand rev-parse HEAD)" = 950afbb0ab7eacd00ebccb6af519da667cc92381
+          test "$(git -C baseptr rev-parse HEAD)" = 8949b909ec900327062f0ebf497f51aef5e6f0c8
+          grep -q 'oid sha256:87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f' cand/adapter/adapter_model.safetensors
+          grep -q 'oid sha256:340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9' baseptr/model.safetensors
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          PYTHONDONTWRITEBYTECODE=1 python research/r22564_c44/c44_science.py --self-test
+  capture_adapter:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          mkdir escrow_adapter
+          A=https://huggingface.co/dannyliv/agent-guard-modernbert-base/resolve/950afbb0ab7eacd00ebccb6af519da667cc92381/adapter
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_config.json "$A/adapter_config.json"
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_model.safetensors "$A/adapter_model.safetensors"
+          test "$(stat -c%s escrow_adapter/adapter_model.safetensors)" = 18451732
+          test "$(sha256sum escrow_adapter/adapter_model.safetensors | awk '{print $1}')" = 87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-v3-raw-adapter, path: escrow_adapter, retention-days: 1, compression-level: 0}
+  capture_base:
+    needs: capture_adapter
+    runs-on: ubuntu-latest
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          mkdir escrow_base
+          B=https://huggingface.co/answerdotai/ModernBERT-base/resolve/8949b909ec900327062f0ebf497f51aef5e6f0c8
+          for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json; do curl -L --fail --retry 3 -o escrow_base/$f "$B/$f"; done
+          curl -L --fail --retry 3 -o escrow_base/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s escrow_base/model.safetensors)" = 598635032
+          test "$(sha256sum escrow_base/model.safetensors | awk '{print $1}')" = 340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-v3-raw-base, path: escrow_base, retention-days: 1, compression-level: 0}
+  science:
+    needs: capture_base
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-v3-raw-adapter, path: raw_adapter}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-v3-raw-base, path: raw_base}
+      - shell: bash
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false', PYTHONDONTWRITEBYTECODE: '1'}
+        run: |
+          set -euo pipefail
+          mkdir -p research/r22564_c44 datasets/r22564_c44 work/adapter work/base evidence
+          cp r22564/c44/c44_forge.py research/r22564_c44/c44_forge.py
+          cp r22564/c44/c44_science.py research/r22564_c44/c44_science.py
+          python research/r22564_c44/c44_forge.py
+          cp -a raw_adapter/escrow_adapter/. work/adapter/
+          cp -a raw_base/escrow_base/. work/base/
+          test "$(sha256sum work/adapter/adapter_model.safetensors | awk '{print $1}')" = 87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f
+          test "$(sha256sum work/base/model.safetensors | awk '{print $1}')" = 340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          python research/r22564_c44/c44_science.py --self-test > evidence/C44_RUNTIME_SELFTEST.json
+          python research/r22564_c44/c44_science.py --run --work work --suite datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl --out evidence --batch 16 | tee evidence/C44_STDOUT_SUMMARY.txt
+          rm -rf work raw_adapter raw_base
+          python - <<'PY'
+          import hashlib,json,pathlib
+          r=pathlib.Path('evidence'); assert not list(r.glob('*.safetensors')); fs=[]
+          for p in sorted(r.iterdir()):
+            if p.is_file(): fs.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (r/'C44_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22564_C44_RAW_FREE_V1','files':fs,'raw_source_present':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-v3-rawfree-evidence, path: evidence, retention-days: 1}
+  cleanup:
+    if: ${{ always() && needs.science.result == 'success' }}
+    needs: science
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > a.json
+          python - <<'PY' > cleanup/t.tsv
+          import json
+          for a in json.load(open('a.json'))['artifacts']:
+            if a['name'] in {'r22564-c44-v3-raw-adapter','r22564-c44-v3-raw-base'}: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/t.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/t.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          l=pathlib.Path('cleanup/deleted.txt').read_text().splitlines(); pathlib.Path('cleanup/C44_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22564_C44_RAW_DELETION_V1','deleted':l,'count':len(l),'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-v3-cleanup, path: cleanup/C44_RAW_DELETION.json, retention-days: 1}
