@@ -1,0 +1,35 @@
+name: LAA R22564 C46 Nepali NER metadata-only audit
+on:
+  push:
+    branches: [laa-r22564-c46-nepali-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/a-proton/nepali-ner-lora cand
+          git clone -q --depth 1 https://huggingface.co/google-bert/bert-base-multilingual-cased base
+          python - <<'PY'
+          import pathlib,json,subprocess,re
+          def ptr(p):
+           d={}
+           for l in p.read_text(errors='replace').splitlines():
+            if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+            if l.startswith('size '): d['size']=int(l.split()[1])
+           return d
+          c=pathlib.Path('cand'); b=pathlib.Path('base')
+          cfg=json.loads((c/'adapter_config.json').read_text()) if (c/'adapter_config.json').exists() else None
+          readme=(c/'README.md').read_text(errors='replace') if (c/'README.md').exists() else ''
+          weight=c/'adapter_model.safetensors'
+          bases=[p for p in [b/'model.safetensors',b/'pytorch_model.bin'] if p.exists()]
+          obj={'schema':'LAA_R22564_C46_META_V1','candidate_revision':subprocess.check_output(['git','-C','cand','rev-parse','HEAD'],text=True).strip(),'base_revision':subprocess.check_output(['git','-C','base','rev-parse','HEAD'],text=True).strip(),'adapter_config':cfg,'adapter_pointer':ptr(weight) if weight.exists() else None,'candidate_files':sorted(p.name for p in c.iterdir() if p.name!='.git'),'base_weight_pointers':{p.name:ptr(p) for p in bases},'license_frontmatter_present':bool(re.search(r'(?m)^license\s*:',readme)),'apache_text_present':('apache' in readme.lower())}
+          print(json.dumps(obj,indent=2,sort_keys=True)); pathlib.Path('C46_META.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c46-meta, path: C46_META.json, retention-days: 1}
