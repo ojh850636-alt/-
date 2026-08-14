@@ -1,0 +1,163 @@
+name: LAA R22563 C43 one-use Zsh archaeology v4
+on:
+  push:
+    branches: [laa-r22563-c43-onepass]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Frozen source-zero contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d r22563/c43_bundle.b64 > bundle.tgz
+          test "$(stat -c%s bundle.tgz)" = 11492
+          test "$(sha256sum bundle.tgz | awk '{print $1}')" = 24d49f1b0e5f586b45a139e5b0e68905b41ea7783d811bdc8026d75b6a8ded07
+          mkdir payload
+          tar -tzf bundle.tgz | tee bundle_members.txt
+          tar -xzf bundle.tgz -C payload
+          python payload/research/r22563_c43/c43_forge.py
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('payload')
+          c=json.loads((root/'configs/R22563_C43_PREOUTPUT_CONTRACT.json').read_text())
+          assert c['model_outputs_observed_before_seal']==0 and c['raw_weight_bytes_local_before_seal']==0
+          assert c['suite']['sha256']=='9504316bc8510898ecf6df944ef9713af64bfa714e352dc75e5f13312611818e'
+          for rel,m in c['preoutput_bindings'].items():
+              p=root/rel; assert p.exists(),rel; assert p.stat().st_size==m['size'],rel; assert hashlib.sha256(p.read_bytes()).hexdigest()==m['sha256'],rel
+          assert len((root/'datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl').read_text().splitlines())==576
+          print('FROZEN_CONTRACT_PASS')
+          PY
+      - name: Exact tree and object contract without weight smudge
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/duoyuncloud/zsh-cli-lora a
+          git clone -q --depth 1 https://huggingface.co/Qwen/Qwen2-0.5B b
+          test "$(git -C a rev-parse HEAD)" = 884613f1800062085dbdf8fa5790fab0b70388dd
+          test "$(git -C b rev-parse HEAD)" = 91d2aff3f957f99e4c74c962f2f408dcc88a18d8
+          python - <<'PY'
+          import pathlib
+          af={p.name for p in pathlib.Path('a').iterdir() if p.name!='.git'}; bf={p.name for p in pathlib.Path('b').iterdir() if p.name!='.git'}
+          reqa={'README.md','adapter_config.json','adapter_model.safetensors','added_tokens.json','chat_template.jinja','config.json','merges.txt','special_tokens_map.json','tokenizer.json','tokenizer_config.json','vocab.json'}
+          reqb={'LICENSE','config.json','generation_config.json','merges.txt','model.safetensors','tokenizer.json','tokenizer_config.json','vocab.json'}
+          assert not(reqa-af),reqa-af; assert not(reqb-bf),reqb-bf; assert not({'pytorch_model.bin','training_args.bin'}&af); assert 'pytorch_model.bin' not in bf
+          def ptr(p):
+              d={}
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha']=l.split(':',1)[1]
+                  elif l.startswith('size '): d['size']=int(l.split()[1])
+              return d
+          assert ptr(pathlib.Path('a/adapter_model.safetensors'))=={'sha':'2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a','size':1106719360}
+          assert ptr(pathlib.Path('b/model.safetensors'))=={'sha':'9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad','size':988097824}
+          print('EXACT_TREE_PASS')
+          PY
+      - name: Runtime dependency closure and controller self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          PYTHONDONTWRITEBYTECODE=1 python payload/research/r22563_c43/c43_science.py --self-test | tee selftest.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-preflight-v4, path: selftest.json, retention-days: 1}
+  capture:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Adapter metadata then raw object
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p escrow_adapter
+          A=https://huggingface.co/duoyuncloud/zsh-cli-lora/resolve/884613f1800062085dbdf8fa5790fab0b70388dd
+          for f in README.md adapter_config.json added_tokens.json chat_template.jinja config.json merges.txt special_tokens_map.json tokenizer.json tokenizer_config.json vocab.json; do curl -L --fail --retry 3 -o "escrow_adapter/$f" "$A/$f"; done
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_model.safetensors "$A/adapter_model.safetensors"
+          test "$(stat -c%s escrow_adapter/adapter_model.safetensors)" = 1106719360
+          test "$(sha256sum escrow_adapter/adapter_model.safetensors | awk '{print $1}')" = 2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-raw-adapter, path: escrow_adapter, retention-days: 1, compression-level: 0}
+      - name: Base metadata then raw object
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p escrow_base
+          B=https://huggingface.co/Qwen/Qwen2-0.5B/resolve/91d2aff3f957f99e4c74c962f2f408dcc88a18d8
+          for f in LICENSE config.json generation_config.json merges.txt tokenizer.json tokenizer_config.json vocab.json; do curl -L --fail --retry 3 -o "escrow_base/$f" "$B/$f"; done
+          curl -L --fail --retry 3 -o escrow_base/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s escrow_base/model.safetensors)" = 988097824
+          test "$(sha256sum escrow_base/model.safetensors | awk '{print $1}')" = 9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-raw-base, path: escrow_base, retention-days: 1, compression-level: 0}
+  science:
+    needs: capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22563-c43-raw-adapter, path: work/adapter}
+      - uses: actions/download-artifact@v4
+        with: {name: r22563-c43-raw-base, path: work/base}
+      - name: Same-run escrow verification and maximum raw-free extraction
+        shell: bash
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false'}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum work/adapter/adapter_model.safetensors | awk '{print $1}')" = 2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a
+          test "$(sha256sum work/base/model.safetensors | awk '{print $1}')" = 9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          base64 -d r22563/c43_bundle.b64 > bundle.tgz
+          test "$(stat -c%s bundle.tgz)" = 11492
+          test "$(sha256sum bundle.tgz | awk '{print $1}')" = 24d49f1b0e5f586b45a139e5b0e68905b41ea7783d811bdc8026d75b6a8ded07
+          mkdir payload evidence
+          tar -xzf bundle.tgz -C payload
+          python payload/research/r22563_c43/c43_forge.py
+          PYTHONDONTWRITEBYTECODE=1 python payload/research/r22563_c43/c43_science.py --run --work work --suite payload/datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl --out evidence --batch 4 | tee evidence/C43_STDOUT_SUMMARY.txt
+          if find evidence -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' \) | grep -q .; then exit 91; fi
+          rm -rf work payload bundle.tgz
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('evidence'); files=[]
+          for p in sorted(root.iterdir()):
+              if p.is_file(): files.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (root/'C43_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22563_C43_RAW_FREE_MANIFEST_V1','files':files,'raw_source_present':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-rawfree-evidence, path: evidence, retention-days: 1}
+  cleanup:
+    if: ${{ always() && needs.science.result == 'success' }}
+    needs: science
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete both remote raw escrows after raw-free evidence exists
+        env: {GH_TOKEN: ${{ github.token }}}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifacts.json
+          python - <<'PY' > cleanup/targets.tsv
+          import json
+          for a in json.load(open('artifacts.json'))['artifacts']:
+              if a['name'] in {'r22563-c43-raw-adapter','r22563-c43-raw-base'}: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/targets.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/targets.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          lines=pathlib.Path('cleanup/deleted.txt').read_text().splitlines()
+          pathlib.Path('cleanup/R22563_C43_REMOTE_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22563_C43_REMOTE_RAW_DELETION_V1','deleted':lines,'count':len(lines),'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-cleanup-receipt, path: cleanup/R22563_C43_REMOTE_RAW_DELETION.json, retention-days: 1}
