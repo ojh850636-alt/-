@@ -1,0 +1,79 @@
+            'prompt':make_prompt(fen),'target':make_target(b,top),'target_uci':top.uci(),
+            'target_piece':piece_name(b.piece_at(top.from_square)), 'negative':False
+        }
+        rows.append(row); seen.add(fen)
+        if fam=='TACTICAL': tactical+=1
+        else: quiet+=1
+    if len(rows)<n: raise RuntimeError(f'only generated {len(rows)} valid rows')
+    return rows
+
+def add_splits(rows):
+    # deterministic strata after generation: 64 discovery, 64 confirmation, 48 tactical/quiet OOD each when possible
+    tactical=[r for r in rows if r['family']=='TACTICAL']
+    quiet=[r for r in rows if r['family']=='QUIET']
+    # first 128 mixed by deterministic original order
+    for i,r in enumerate(rows): r['split']='DISCOVERY' if i<64 else 'CONFIRMATION'
+    # force later rows into explicit family OOD strata
+    for r in tactical[-32:]: r['split']='TACTICAL_OOD'
+    for r in quiet[-32:]: r['split']='QUIET_OOD'
+
+def invalid_from(valid, rng, n):
+    import chess
+    out=[]
+    for i in range(n):
+        src=valid[(i*7)%len(valid)]
+        b=chess.Board(src['fen'])
+        k=b.king(b.turn)
+        if k is not None: b.remove_piece_at(k)
+        fen=b.fen()
+        assert not b.is_valid()
+        out.append({
+            'fen':fen,'turn':'white' if b.turn else 'black','family':'INVALID_FEN',
+            'legal_move_count':None,'top_moves':[],'top_gap_cp':None,
+            'prompt':make_prompt(fen),'target':None,'target_uci':None,'target_piece':None,
+            'negative':True,'split':'NEGATIVE_INVALID_FEN'
+        })
+    return out
+
+def self_check(rows):
+    import chess
+    ids=set(); fens=set(); pos=neg=0
+    for r in rows:
+        assert r['case_id'] not in ids; ids.add(r['case_id'])
+        assert r['fen'] not in fens or r['negative']; fens.add(r['fen'])
+        b=chess.Board(r['fen'])
+        if r['negative']:
+            assert not b.is_valid(); neg+=1
+        else:
+            assert b.is_valid(); pos+=1
+            legal={m.uci() for m in b.legal_moves}
+            assert r['target_uci'] in legal
+            assert all(x['uci'] in legal for x in r['top_moves'])
+            mv=chess.Move.from_uci(r['target_uci'])
+            assert piece_name(b.piece_at(mv.from_square))==r['target_piece']
+            tgt=json.loads(r['target'])
+            assert tgt['from']==r['target_uci'][:2] and tgt['to']==r['target_uci'][2:4]
+    return {'positive':pos,'negative':neg,'unique_case_ids':len(ids),'oracle_pass':True}
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument('--out',required=True); ap.add_argument('--engine',default='/usr/games/stockfish')
+    a=ap.parse_args(); out=Path(a.out); out.parent.mkdir(parents=True,exist_ok=True)
+    import chess.engine
+    rng=random.Random(SEED)
+    engine=chess.engine.SimpleEngine.popen_uci(a.engine)
+    try:
+        valid=generate_valid(engine,rng,224)
+        add_splits(valid)
+        rows=valid+invalid_from(valid,rng,32)
+    finally: engine.quit()
+    # deterministic IDs bound to semantic content excluding ID itself
+    for i,r in enumerate(rows):
+        digest=sha256_bytes(canonical(r).encode())[:16]
+        r['case_id']=f'C44-{i:03d}-{digest}'
+    check=self_check(rows)
+    text=''.join(canonical(r)+'\n' for r in rows)
+    out.write_text(text)
+    meta={'schema':'LAA_R22564_C44_SUITE_META_V1','seed':SEED,'cases':len(rows),'sha256':sha256_bytes(text.encode()),'splits':{},'families':{},'oracle':check}
+    for r in rows:
+        meta['splits'][r['split']]=meta['splits'].get(r['split'],0)+1
+        meta['families'][r['family']]=meta['families'].get(r['family'],0)+1
