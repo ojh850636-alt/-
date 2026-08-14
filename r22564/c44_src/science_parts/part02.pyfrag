@@ -1,12 +1,28 @@
+            self.model.get_output_embeddings().weight.copy_(src['head'].to(self.model.get_output_embeddings().weight.device,dtype=self.model.get_output_embeddings().weight.dtype))
+    def set_condition(self,c):
+        self.restore_B(); self.restore_scale()
+        if c=='BASE': self.set_aux(False); self.set_all(0.0)
+        elif c=='AUX_ONLY': self.set_aux(True); self.set_all(0.0)
+        elif c=='LORA_ONLY': self.set_aux(False); self.set_all(1.0)
+        elif c=='FULL': self.set_aux(True)
+        elif c=='RANDOM_SIGN': self.set_aux(True); self.random_sign()
+        elif c=='LAYER_SHUFFLE': self.set_aux(True); self.shuffle_B()
+        elif c.startswith('DOSE_'): self.set_aux(True); self.set_all(float(c.split('_',1)[1]))
+        else: raise ValueError(c)
+    def group_match(self,n,group,total_layers):
+        band,kind=group.split(':'); L=self._layer(n)
+        if L<0:return False
+        if band=='early': ok=L < total_layers//3
+        elif band=='mid': ok=total_layers//3 <= L < (2*total_layers)//3
         else: ok=L >= (2*total_layers)//3
         p=self._proj(n)
         return ok and ((kind=='attn' and p in {'q_proj','k_proj','v_proj','o_proj'}) or (kind=='mlp' and p=='gate_proj'))
     def ablate_group(self,group,total_layers):
-        self.restore_B(); self.restore_scale()
+        self.restore_B(); self.restore_scale(); self.set_aux(True)
         for n,m in self.loras:
             if self.group_match(n,group,total_layers): m.scaling[adapter_key(m)]=0.0
     def group_only(self,group,total_layers):
-        self.restore_B(); self.set_all(0.0)
+        self.restore_B(); self.set_aux(True); self.set_all(0.0)
         for n,m in self.loras:
             if self.group_match(n,group,total_layers):
                 k=adapter_key(m); m.scaling[k]=self.orig_scale[(n,k)]
@@ -18,12 +34,16 @@ def prepare(base_dir,adapter_dir):
     tok=AutoTokenizer.from_pretrained(str(base_dir),local_files_only=True,use_fast=True)
     added=tok.add_special_tokens({'additional_special_tokens':SPECIALS})
     tok.pad_token=tok.eos_token; tok.padding_side='right'
+    torch.manual_seed(SEED)
     base=AutoModelForCausalLM.from_pretrained(str(base_dir),local_files_only=True,torch_dtype=torch.bfloat16,low_cpu_mem_usage=True)
     before=base.get_input_embeddings().num_embeddings
     if before < len(tok): base.resize_token_embeddings(len(tok))
+    base_aux={'embed':base.get_input_embeddings().weight.detach().cpu().clone(),'head':base.get_output_embeddings().weight.detach().cpu().clone()}
     model=PeftModel.from_pretrained(base,str(adapter_dir),local_files_only=True,is_trainable=False)
     model.eval(); model.config.use_cache=True
-    return model,tok,{'tokenizer_added_special_tokens':added,'tokenizer_length':len(tok),'base_vocab_before_resize':before,'model_vocab_after_load':model.get_input_embeddings().num_embeddings,'special_token_ids':{x:tok.convert_tokens_to_ids(x) for x in SPECIALS}}
+    adapt_aux={'embed':model.get_input_embeddings().weight.detach().cpu().clone(),'head':model.get_output_embeddings().weight.detach().cpu().clone()}
+    abi={'tokenizer_added_special_tokens':added,'tokenizer_length':len(tok),'base_vocab_before_resize':before,'model_vocab_after_load':model.get_input_embeddings().num_embeddings,'special_token_ids':{x:tok.convert_tokens_to_ids(x) for x in SPECIALS},'auxiliary_snapshot_decomposition_enabled':True}
+    return model,tok,abi,base_aux,adapt_aux
 
 def score_rows(model,tok,rows,batch=2):
     import torch
@@ -32,37 +52,3 @@ def score_rows(model,tok,rows,batch=2):
         chunk=rows[s:s+batch]; prompts=[r['prompt'] for r in chunk]; targets=[r['target']+tok.eos_token for r in chunk]; texts=[p+t for p,t in zip(prompts,targets)]
         enc=tok(texts,return_tensors='pt',padding=True,add_special_tokens=False)
         penc=tok(prompts,return_tensors='pt',padding=True,add_special_tokens=False)
-        with torch.inference_mode(): logits=model(**enc).logits.float(); lp=torch.log_softmax(logits,dim=-1)
-        for i in range(len(chunk)):
-            plen=int(penc['attention_mask'][i].sum()); flen=int(enc['attention_mask'][i].sum())
-            # target tokens are positions plen..flen-1, predicted by logits plen-1..flen-2
-            toks=enc['input_ids'][i,plen:flen]; pred=lp[i,plen-1:flen-1]
-            vals.append(float(pred.gather(1,toks.unsqueeze(1)).mean().item()))
-    return vals
-
-def extract_json(text):
-    i=text.find('{')
-    if i<0:return None
-    depth=0; ins=False; esc=False
-    for j in range(i,len(text)):
-        ch=text[j]
-        if ins:
-            if esc: esc=False
-            elif ch=='\\': esc=True
-            elif ch=='"': ins=False
-        else:
-            if ch=='"': ins=True
-            elif ch=='{': depth+=1
-            elif ch=='}':
-                depth-=1
-                if depth==0:
-                    try:return json.loads(text[i:j+1])
-                    except:return None
-    return None
-
-def generate_rows(model,tok,rows,batch=1,max_new=80):
-    out=[]
-    for s in range(0,len(rows),batch):
-        chunk=rows[s:s+batch]; enc=tok([r['prompt'] for r in chunk],return_tensors='pt',padding=True,add_special_tokens=False)
-        plen=enc['input_ids'].shape[1]
-        import torch
