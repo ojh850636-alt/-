@@ -1,0 +1,40 @@
+name: LAA R22563 C43 Zsh metadata
+on:
+  push:
+    branches: [laa-r22563-c43-zsh-meta]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Metadata only before any weight ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          mkdir -p work out
+          git clone -q --depth 1 https://huggingface.co/duoyuncloud/zsh-cli-lora work/adapter
+          git clone -q --depth 1 https://huggingface.co/Qwen/Qwen2-0.5B work/base
+          python - <<'PY'
+          import json,pathlib,hashlib,os
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def ptr(p):
+            p=pathlib.Path(p); t=p.read_text(errors='replace'); o={'pointer_size':p.stat().st_size,'pointer_sha256':sha(p)}
+            for l in t.splitlines():
+              if l.startswith('oid sha256:'): o['remote_sha256']=l.split(':',1)[1]
+              elif l.startswith('size '): o['remote_size']=int(l.split()[1])
+            return o
+          a=pathlib.Path('work/adapter'); b=pathlib.Path('work/base')
+          af=sorted(x.name for x in a.iterdir() if x.name!='.git'); bf=sorted(x.name for x in b.iterdir() if x.name!='.git')
+          cfg=json.loads((a/'adapter_config.json').read_text())
+          reqa=['adapter_config.json','adapter_model.safetensors']; reqb=['config.json','model.safetensors','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt']
+          contract={'adapter_missing':[x for x in reqa if x not in af],'base_missing':[x for x in reqb if x not in bf],'forbidden_adapter_present':[x for x in ['pytorch_model.bin','training_args.bin','.pt','.pkl'] if x in af],'forbidden_base_present':[x for x in ['pytorch_model.bin'] if x in bf]}
+          obj={'schema':'LAA_R22563_C43_ZSH_METADATA_V1','adapter':{'repo':'duoyuncloud/zsh-cli-lora','revision':os.popen('git -C work/adapter rev-parse HEAD').read().strip(),'files':af,'config':cfg,'config_sha256':sha(a/'adapter_config.json'),'weight':ptr(a/'adapter_model.safetensors'),'readme':(a/'README.md').read_text(errors='replace') if (a/'README.md').exists() else None},'base':{'repo':'Qwen/Qwen2-0.5B','revision':os.popen('git -C work/base rev-parse HEAD').read().strip(),'files':bf,'config_sha256':sha(b/'config.json'),'weight':ptr(b/'model.safetensors'),'tokenizer_json':ptr(b/'tokenizer.json') if b.joinpath('tokenizer.json').read_text(errors='ignore').startswith('version https://git-lfs') else {'size':b.joinpath('tokenizer.json').stat().st_size,'sha256':sha(b/'tokenizer.json')}},'file_contract':contract,'metadata_gate':'PASS' if not contract['adapter_missing'] and not contract['base_missing'] and not contract['forbidden_adapter_present'] else 'HOLD','raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          pathlib.Path('out/R22563_C43_ZSH_METADATA.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps({k:obj[k] for k in ['schema','adapter','base','file_contract','metadata_gate']},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22563-c43-zsh-meta
+          path: out/R22563_C43_ZSH_METADATA.json
+          retention-days: 1
