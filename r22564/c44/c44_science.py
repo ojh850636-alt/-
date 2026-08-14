@@ -84,7 +84,7 @@ def prob_rows(model,tok,rows,batch=16):
 def self_test():
  from transformers import ModernBertConfig,ModernBertForSequenceClassification
  from peft import LoraConfig,get_peft_model
- c=ModernBertConfig(vocab_size=1000,hidden_size=64,intermediate_size=128,num_hidden_layers=2,num_attention_heads=4,num_labels=17)
+ c=ModernBertConfig(vocab_size=1000,pad_token_id=0,hidden_size=64,intermediate_size=128,num_hidden_layers=2,num_attention_heads=4,num_labels=17)
  b=ModernBertForSequenceClassification(c); pc=LoraConfig(r=4,lora_alpha=8,target_modules=['Wqkv','Wo'],modules_to_save=['classifier'],task_type='SEQ_CLS'); m=get_peft_model(b,pc); ctl=Controller(m)
  assert ctl.l and ctl.a; ctl.set('BASE'); ctl.set('HEAD_ONLY'); ctl.set('LORA_ONLY'); ctl.set('FULL'); print(json.dumps({'self_test':'PASS','lora_modules':len(ctl.l),'aux_wrappers':len(ctl.a)}))
 def run(a):
