@@ -1,0 +1,93 @@
+{
+  "behavior_gate": {
+    "conditional_lora_effect_abs_min_nats": 0.1,
+    "control_separation_margin_nats": 0.05,
+    "negative_ambiguous_is_safety_diagnostic_not_primary_accuracy": true,
+    "paired_bootstrap_ci_must_exclude_zero": true,
+    "positive_generation_semantic_gain_min": 0.05
+  },
+  "candidate_id": "R22563-C43-ZSH-QWEN2-05B-COMPLETION",
+  "causal_groups": [
+    "ATTENTION_ALL",
+    "MLP_ALL",
+    "EARLY_BAND",
+    "MIDDLE_BAND",
+    "LATE_BAND",
+    "Q_PROJ",
+    "K_PROJ",
+    "V_PROJ",
+    "O_PROJ",
+    "GATE_PROJ",
+    "UP_PROJ",
+    "DOWN_PROJ"
+  ],
+  "causal_lanes_precommitted": [
+    "POSITIVE_CAPABILITY",
+    "NEGATIVE_FAILURE"
+  ],
+  "claim_boundary": {
+    "external_algorithm_student_promotion": "FORBIDDEN_WITHOUT_REPLICATED_POSITIVE_E4_PLUS",
+    "same_environment_max": "E3_OR_SCOPED_E4_ONLY",
+    "training_base_unproven_suffix": "SCOPED_BASE_REVISION_HOLD"
+  },
+  "conditions": [
+    "BASE",
+    "AUX_ONLY",
+    "LORA_ONLY",
+    "FULL",
+    "RANDOM_SIGN_LORA_SAME_AUX",
+    "LAYER_SHUFFLED_LORA_SAME_AUX",
+    "DOSE_0.25",
+    "DOSE_0.5",
+    "DOSE_1.5"
+  ],
+  "model_outputs_observed_before_seal": 0,
+  "preoutput_binding_policy": "ALL_SCIENCE_CODE_AND_SUITE_BYTES_FROZEN_BEFORE_SOURCE_INGRESS",
+  "preoutput_bindings": {
+    "datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl": {
+      "sha256": "9504316bc8510898ecf6df944ef9713af64bfa714e352dc75e5f13312611818e",
+      "size": 220101
+    },
+    "research/r22563_c43/c43_forge.py": {
+      "sha256": "2271dbaeb3b3e4ee85c13adc213d48dde700650af6d75844019298c5a2ecf91a",
+      "size": 7856
+    },
+    "research/r22563_c43/c43_science.py": {
+      "sha256": "282c6956194cc37c1162da82977db6f43ae0c3d8bd347ac8672fac43d60fb4e9",
+      "size": 22216
+    },
+    "research/r22563_c43/c43_verifier.py": {
+      "sha256": "ff853a4abc3ecb58a51963bd9d6de24a57b007cb977bed80b2aa06996356efce",
+      "size": 1153
+    }
+  },
+  "prompt_contract": {
+    "diagnostic_only": "raw prefix",
+    "primary": "Input: <prefix>\\nOutput:",
+    "primary_basis": "same-author next-generation zsh-assistant lineage; treated as inference not exact training proof"
+  },
+  "raw_policy": "NO_BASE_ADAPTER_TOKENIZER_RAW_OUTPUT_OR_RECONSTRUCTABLE_DELTA_IN_FINAL_RELEASE",
+  "raw_weight_bytes_local_before_seal": 0,
+  "schema": "LAA_R22563_C43_PREOUTPUT_CONTRACT_V1",
+  "scientific_question": "How do low-rank backbone changes and fully-saved vocabulary embedding/lm_head modules divide responsibility for interactive shell command completion, and which paths create robust completion versus unsafe/incorrect overcompletion?",
+  "source": {
+    "adapter_repo": "duoyuncloud/zsh-cli-lora",
+    "adapter_revision": "884613f1800062085dbdf8fa5790fab0b70388dd",
+    "adapter_sha256": "2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a",
+    "adapter_size": 1106719360,
+    "base_repo": "Qwen/Qwen2-0.5B",
+    "base_revision": "91d2aff3f957f99e4c74c962f2f408dcc88a18d8",
+    "base_sha256": "9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad",
+    "base_size": 988097824,
+    "license_adapter": "MIT",
+    "license_base": "Apache-2.0",
+    "training_time_base_revision_proven": false
+  },
+  "suite": {
+    "cases": 576,
+    "negative_ambiguous": 64,
+    "path": "datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl",
+    "positive": 512,
+    "sha256": "9504316bc8510898ecf6df944ef9713af64bfa714e352dc75e5f13312611818e"
+  }
+}
