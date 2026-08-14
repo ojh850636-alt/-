@@ -7,7 +7,7 @@ ADAPTER_SHA='87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f'
 BASE_SHA='340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9'
 
 def file_sha(p):
- h=hashlib.sha256()
+ h=hashlib.sha256();
  with open(p,'rb') as f:
   for b in iter(lambda:f.read(1<<20),b''): h.update(b)
  return h.hexdigest()
@@ -17,7 +17,8 @@ def auc(labels,scores):
  while i<len(pairs):
   j=i+1
   while j<len(pairs) and pairs[j][0]==pairs[i][0]: j+=1
-  av=(rank+(rank+j-i-1))/2; sr+=av*sum(y for _,y in pairs[i:j]); rank+=j-i; i=j
+  av=(rank+(rank+j-i-1))/2
+  sr+=av*sum(y for _,y in pairs[i:j]); rank+=j-i; i=j
  n1=sum(labels); n0=len(labels)-n1
  return (sr-n1*(n1+1)/2)/(n1*n0) if n1 and n0 else .5
 def bootstrap_auc_delta(labels,a,b,n=1000):
@@ -38,24 +39,28 @@ def static_forensics(path):
     lora+=n; proj['Wqkv' if 'Wqkv' in k else ('Wo' if 'Wo' in k else 'other')]+=n
     m=re.search(r'layers\.(\d+)',k); layers[m.group(1) if m else 'na']+=n
    else: aux+=n
- out.update(total_params=total,lora_params=lora,auxiliary_params=aux,lora_fraction=lora/total,auxiliary_fraction=aux/total,key_count=len(keys),lora_params_by_projection=dict(proj),lora_params_by_layer=dict(layers),sample_keys=keys[:12]); return out
+ out.update(total_params=total,lora_params=lora,auxiliary_params=aux,lora_fraction=lora/total,auxiliary_fraction=aux/total,key_count=len(keys),lora_params_by_projection=dict(proj),lora_params_by_layer=dict(layers),sample_keys=keys[:12])
+ return out
 
 def iter_lora(model):
  for n,m in model.named_modules():
   if hasattr(m,'lora_A') and hasattr(m,'lora_B') and hasattr(m,'scaling'): yield n,m
+
 def iter_aux(model):
  for n,m in model.named_modules():
   if m.__class__.__name__=='ModulesToSaveWrapper': yield n,m
+
 def key(m): return next(iter(m.scaling))
 class Controller:
  def __init__(self,m):
+  import torch
   self.m=m; self.l=list(iter_lora(m)); self.a=list(iter_aux(m)); self.scal={(n,key(x)):float(x.scaling[key(x)]) for n,x in self.l}; self.bs={(n,key(x)):x.lora_B[key(x)].weight.detach().clone() for n,x in self.l}
  def restore(self):
   for n,x in self.l:
    k=key(x); x.scaling[k]=self.scal[(n,k)]; x.lora_B[k].weight.data.copy_(self.bs[(n,k)])
-  for _,x in self.a: x.disable_adapters=False
+  for _,x in self.a: x.enable_adapters(enabled=True)
  def aux(self,on):
-  for _,x in self.a: x.disable_adapters=not on
+  for _,x in self.a: x.enable_adapters(enabled=on)
  def lora(self,s):
   for n,x in self.l: x.scaling[key(x)]=self.scal[(n,key(x))]*s
  def set(self,c):
