@@ -19,7 +19,7 @@ def prepare_model(base_dir,adapter_dir):
     if tok.pad_token_id is None: tok.pad_token=tok.eos_token
     tok.padding_side='left'
     base=AutoModelForCausalLM.from_pretrained(str(base_dir),local_files_only=True,trust_remote_code=False,torch_dtype=torch.float32,low_cpu_mem_usage=True)
-    if base.get_input_embeddings().weight.shape[0] != len(tok):
+    if len(tok) > base.get_input_embeddings().weight.shape[0]:
         base.resize_token_embeddings(len(tok))
     model=PeftModel.from_pretrained(base,str(adapter_dir),local_files_only=True,is_trainable=False)
     model.eval()
