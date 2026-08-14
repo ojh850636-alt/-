@@ -1,0 +1,65 @@
+        ctl.set_condition(c); items=generate_rows(model,tok,gen_rows,batch=max(1,args.batch//2)); gen_items[c]=items; generation[c]=summarize_generation(items)
+    gen_gain=generation['FULL']['semantic_equiv']-generation['AUX_ONLY']['semantic_equiv']
+    positive_gate=effect and conditional>0 and gen_gain>=0.05
+    failure_gate=effect and conditional<0
+    behavior={'schema':'LAA_R22563_C43_BEHAVIOR_V1','scores_mean_target_logprob':scores,'controls_locked_mean_target_logprob':control_scores,'dose_mean_target_logprob':dose_scores,'conditional_lora_full_minus_aux_nats':conditional,'conditional_ci95':ci,'total_full_minus_base_nats':mean(total),'full_minus_random_same_aux_nats':full_random,'full_minus_shuffle_same_aux_nats':full_shuffle,'generation':generation,'generation_conditional_semantic_gain':gen_gain,'effect_gate':effect,'positive_capability_gate':positive_gate,'negative_failure_gate':failure_gate,'raw_predictions_exported':False,'case_prediction_hashes_only':True}
+    (out/'C43_BEHAVIOR.json').write_text(json.dumps(behavior,indent=2,sort_keys=True))
+    # Case-level raw-free evidence hashes only
+    with (out/'C43_GENERATION_CASE_EVIDENCE.jsonl').open('w') as f:
+        for cond,items in gen_items.items():
+            for x in items: f.write(json.dumps({'condition':cond,**x},sort_keys=True)+'\n')
+    causal={'schema':'LAA_R22563_C43_CAUSAL_V1','entry':bool(effect),'lane':'POSITIVE_CAPABILITY' if positive_gate else ('NEGATIVE_FAILURE' if failure_gate else 'NONE'),'survivors':[]}
+    if effect:
+        cr=[x for x in gate_rows][:96]; aux_base={x['case_id']:case_scores['AUX_ONLY'][x['case_id']] for x in cr}; full_base={x['case_id']:case_scores['FULL'][x['case_id']] for x in cr}
+        E=mean([full_base[x['case_id']]-aux_base[x['case_id']] for x in cr]); sgn=1 if E>=0 else -1
+        groups=['ATTENTION_ALL','MLP_ALL','EARLY_BAND','MIDDLE_BAND','LATE_BAND','Q_PROJ','K_PROJ','V_PROJ','O_PROJ','GATE_PROJ','UP_PROJ','DOWN_PROJ']
+        stage=[]
+        for g in groups:
+            ctl.set_group_ablation(g,total_layers); av=score_rows(model,tok,cr,batch=args.batch); amap=dict(zip([x['case_id'] for x in cr],av))
+            directional=[sgn*(full_base[x['case_id']]-amap[x['case_id']]) for x in cr]
+            stage.append({'group':g,'necessity_nats':mean(directional),'necessity_fraction_of_abs_effect':mean(directional)/max(abs(E),1e-9),'sign_p_raw':one_sided_sign_p(directional),'ablation_scores_mean':mean(av)})
+        adj=holm([(x['group'],x['sign_p_raw']) for x in stage])
+        for x in stage: x['sign_p_holm']=adj[x['group']]
+        candidates=[x for x in stage if x['sign_p_holm']<0.05 and x['necessity_fraction_of_abs_effect']>=0.25]
+        candidates=sorted(candidates,key=lambda x:x['necessity_nats'],reverse=True)[:3]
+        suff=[]
+        for x in candidates:
+            g=x['group']; ctl.set_group_only(g,total_layers); ov=score_rows(model,tok,cr,batch=args.batch)
+            directional=[sgn*(v-aux_base[row['case_id']]) for row,v in zip(cr,ov)]
+            rec={'group':g,'sufficiency_nats':mean(directional),'sufficiency_fraction_of_abs_effect':mean(directional)/max(abs(E),1e-9),'candidate_only_scores_mean':mean(ov)}; suff.append(rec)
+        suffmap={x['group']:x for x in suff}
+        survivors=[]
+        for x in candidates:
+            y=suffmap[x['group']]
+            if y['sufficiency_fraction_of_abs_effect']>=0.40: survivors.append({**x,**y})
+        causal.update({'full_conditional_effect_on_causal_set':E,'stage1':stage,'candidate_only':suff,'survivors':survivors,'claim_ceiling':'E3_SAME_ENVIRONMENT_SCOPED_BASE_REVISION_HOLD','fresh_process_replay':False})
+    else:
+        causal['not_run_reason']='BEHAVIOR_EFFECT_NOT_CONTROL_SEPARATED'
+    (out/'C43_CAUSAL.json').write_text(json.dumps(causal,indent=2,sort_keys=True))
+    # Counterexamples: hashes/IDs only, no generated text.
+    bad=[]
+    full_items={x['case_id']:x for x in gen_items['FULL']}
+    aux_items={x['case_id']:x for x in gen_items['AUX_ONLY']}
+    for row in gen_rows:
+        a=aux_items[row['case_id']]; f=full_items[row['case_id']]
+        if not row['negative'] and (a['semantic_equiv'] and not f['semantic_equiv']): kind='LORA_HARM'
+        elif not row['negative'] and (not a['semantic_equiv'] and f['semantic_equiv']): kind='LORA_RESCUE'
+        elif row['negative'] and f['nonempty']: kind='AMBIGUOUS_OVERCOMPLETION'
+        else: continue
+        bad.append({'case_id':row['case_id'],'split':row['split'],'family':row['family'],'kind':kind,'target_sha256':hashlib.sha256(row['target'].encode()).hexdigest() if row['target'] else None})
+    with (out/'C43_COUNTEREXAMPLES.jsonl').open('w') as f:
+        for x in bad: f.write(json.dumps(x,sort_keys=True)+'\n')
+    # Brain materials
+    bm={'schema':'LAA_R22563_C43_BRAIN_MATERIAL_V1','candidate':'R22563-C43-ZSH-QWEN2-05B-COMPLETION','behavior_verdict':'POSITIVE_CONTROL_SEPARATED' if positive_gate else ('NEGATIVE_CONTROL_SEPARATED' if failure_gate else 'NO_CONTROL_SEPARATED_EFFECT'),'operator_structure':{'lora_pair_estimate':static['lora_pair_estimate'],'auxiliary_fraction':static['auxiliary_fraction_of_adapter_elements'],'zero_lora_B_tensors':static['zero_lora_B_tensors']},'conditional_lora_effect_nats':conditional,'causal_survivors':[x['group'] for x in causal.get('survivors',[])],'method_laws':['AUXILIARY_MODULE_SEPARATION_REQUIRED','ADAPTER_SIZE_NOT_EQUAL_LORA_CAPACITY','PROMPT_FORMAT_PROVENANCE_SCOPE'],'promotion_allowed':False,'external_algorithm_created':False,'student_created':False,'raw_source_in_asset':False}
+    (out/'C43_BRAIN_MATERIAL.json').write_text(json.dumps(bm,indent=2,sort_keys=True))
+    ctl.restore(); del ctl,model; import gc; gc.collect()
+    result={'schema':'LAA_R22563_C43_TERMINAL_SCIENCE_V1','static_path':'C43_STATIC.json','behavior_path':'C43_BEHAVIOR.json','causal_path':'C43_CAUSAL.json','brain_material_path':'C43_BRAIN_MATERIAL.json','counterexample_count':len(bad),'source_hashes_verified':True,'raw_source_deleted_by_orchestrator_required':True}
+    (out/'C43_TERMINAL.json').write_text(json.dumps(result,indent=2,sort_keys=True))
+    print(json.dumps({'behavior':behavior,'causal_survivors':[x['group'] for x in causal.get('survivors',[])],'counterexamples':len(bad)},indent=2))
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument('--self-test',action='store_true'); ap.add_argument('--run',action='store_true'); ap.add_argument('--work'); ap.add_argument('--suite'); ap.add_argument('--out'); ap.add_argument('--batch',type=int,default=8); a=ap.parse_args()
+    if a.self_test: self_test(); return
+    if a.run: run(a); return
+    ap.error('choose --self-test or --run')
+if __name__=='__main__': main()
