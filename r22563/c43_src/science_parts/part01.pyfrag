@@ -1,0 +1,65 @@
+    denom=sum(energy_by_proj.values()) or 1.0
+    out.update({'tensor_count':len(shapes),'total_parameter_elements':total,'lora_A_tensors':len(lora_a),'lora_B_tensors':len(lora_b),'lora_pair_estimate':min(len(lora_a),len(lora_b)),'lora_parameter_elements':lora_params,'auxiliary_tensor_count':len(aux),'auxiliary_parameter_elements':aux_params,'auxiliary_fraction_of_adapter_elements':aux_params/max(total,1),'zero_lora_B_tensors':zero_b,'nonfinite_lora_tensors':nonfinite,'factor_energy_proxy_by_projection':{k:v/denom for k,v in sorted(energy_by_proj.items())},'factor_energy_proxy_by_layer':{k:v/denom for k,v in sorted(energy_by_layer.items(),key=lambda kv:(kv[0]=='na',int(kv[0]) if kv[0].isdigit() else 999))},'raw_tensor_values_exported':False})
+    return out
+
+def get_lora_layers(model):
+    arr=[]
+    for name,m in model.named_modules():
+        if hasattr(m,'lora_A') and hasattr(m,'lora_B') and hasattr(m,'scaling') and getattr(m,'lora_A',None): arr.append((name,m))
+    return arr
+
+def get_aux_wrappers(model):
+    return [(n,m) for n,m in model.named_modules() if m.__class__.__name__=='ModulesToSaveWrapper' and hasattr(m,'enable_adapters')]
+
+def adapter_key(m):
+    keys=list(m.scaling.keys())
+    return keys[0] if keys else 'default'
+
+class Controller:
+    def __init__(self,model):
+        self.model=model; self.loras=get_lora_layers(model); self.aux=get_aux_wrappers(model)
+        self.base_scaling={(n,adapter_key(m)):float(m.scaling[adapter_key(m)]) for n,m in self.loras}
+        self.b_backup={}
+        for n,m in self.loras:
+            k=adapter_key(m); self.b_backup[n]=m.lora_B[k].weight.detach().cpu().clone()
+    def restore(self):
+        import torch
+        for n,m in self.loras:
+            k=adapter_key(m); m.scaling[k]=self.base_scaling[(n,k)]
+            m.lora_B[k].weight.data.copy_(self.b_backup[n].to(m.lora_B[k].weight.device,dtype=m.lora_B[k].weight.dtype))
+        for _,m in self.aux: m.enable_adapters(True)
+    def aux_enabled(self,enabled):
+        for _,m in self.aux: m.enable_adapters(enabled)
+    def lora_scale(self,factor):
+        for n,m in self.loras:
+            k=adapter_key(m); m.scaling[k]=self.base_scaling[(n,k)]*factor
+    def random_sign(self):
+        for n,m in self.loras:
+            k=adapter_key(m); sign=-1.0 if int(hashlib.sha256(n.encode()).hexdigest()[:8],16)%2 else 1.0
+            m.scaling[k]=self.base_scaling[(n,k)]*sign
+    def layer_shuffle_b(self):
+        groups=defaultdict(list)
+        for n,m in self.loras:
+            k=adapter_key(m); groups[tuple(m.lora_B[k].weight.shape)].append((n,m,k))
+        for items in groups.values():
+            if len(items)<2: continue
+            src=[self.b_backup[n] for n,_,_ in items]
+            src=src[1:]+src[:1]
+            for (n,m,k),t in zip(items,src): m.lora_B[k].weight.data.copy_(t.to(m.lora_B[k].weight.device,dtype=m.lora_B[k].weight.dtype))
+    def group_match(self,name,group,total_layers):
+        low=name.lower(); mm=re.search(r'layers\.(\d+)',low); idx=int(mm.group(1)) if mm else -1
+        if group=='ATTENTION_ALL': return any(x in low for x in ['q_proj','k_proj','v_proj','o_proj'])
+        if group=='MLP_ALL': return any(x in low for x in ['gate_proj','up_proj','down_proj'])
+        if group.endswith('_PROJ'): return group.lower() in low
+        if group in ['EARLY_BAND','MIDDLE_BAND','LATE_BAND'] and idx>=0:
+            a=total_layers//3; b=2*total_layers//3
+            return (group=='EARLY_BAND' and idx<a) or (group=='MIDDLE_BAND' and a<=idx<b) or (group=='LATE_BAND' and idx>=b)
+        return False
+    def set_group_ablation(self,group,total_layers):
+        self.restore()
+        for n,m in self.loras:
+            if self.group_match(n,group,total_layers):
+                k=adapter_key(m); m.scaling[k]=0.0
+    def set_group_only(self,group,total_layers):
+        self.restore(); self.lora_scale(0.0)
+        for n,m in self.loras:
