@@ -1,0 +1,72 @@
+name: LAA R22565 C47 ESM2 RNA-binding metadata-only audit
+on:
+  push:
+    branches: [laa-r22565-c47-esm2-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact metadata only — no model raw
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/AmelieSchreiber/esm2_t6_8M_UR50D_LoRA_RNA-binding cand
+          git clone -q --depth 1 https://huggingface.co/facebook/esm2_t6_8M_UR50D base
+          git clone -q --depth 1 https://github.com/Amelie-Schreiber/esm2_LoRA_binding_sites trainrepo
+          mkdir out
+          python - <<'PY'
+          import json,pathlib,subprocess,re,hashlib,xml.etree.ElementTree as ET
+          def rev(d): return subprocess.check_output(['git','-C',d,'rev-parse','HEAD'],text=True).strip()
+          def ptr(p):
+              d={}
+              if not p.exists(): return None
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+                  if l.startswith('size '): d['size']=int(l.split()[1])
+              return d
+          def sha(p):
+              h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          c=pathlib.Path('cand'); b=pathlib.Path('base'); t=pathlib.Path('trainrepo')
+          cfg=json.loads((c/'adapter_config.json').read_text())
+          readme=(c/'README.md').read_text(errors='replace')
+          bread=(b/'README.md').read_text(errors='replace')
+          script=t/'lora_binding_sites_newest_v3.py'
+          s=script.read_text(errors='replace')
+          xml=t/'binding_sites.xml'
+          row_count=None; total_residues=None; positive_residues=None
+          if xml.exists():
+              root=ET.parse(xml).getroot(); partners=root.findall('.//BindPartner'); row_count=len(partners)
+              total_residues=0; positive_residues=0
+              for p in partners:
+                  seq=p.find('.//proSeq').text or ''; lab=p.find('.//proBnd').text or ''
+                  total_residues += min(len(seq),len(lab)); positive_residues += lab[:len(seq)].count('+')
+          obj={
+            'schema':'LAA_R22565_C47_META_V1',
+            'candidate_revision':rev('cand'),'base_revision':rev('base'),'training_repo_revision':rev('trainrepo'),
+            'adapter_pointer':ptr(c/'adapter_model.safetensors'),'adapter_config':cfg,
+            'base_pointer':ptr(b/'model.safetensors'),
+            'candidate_files':sorted(p.name for p in c.iterdir() if p.name!='.git'),
+            'base_files':sorted(p.name for p in b.iterdir() if p.name!='.git'),
+            'candidate_license_frontmatter':re.findall(r'(?mi)^license\s*:\s*([^\r\n]+)',readme),
+            'base_license_frontmatter':re.findall(r'(?mi)^license\s*:\s*([^\r\n]+)',bread),
+            'training_license_present':(t/'LICENSE').exists(),
+            'training_license_sha256':sha(t/'LICENSE') if (t/'LICENSE').exists() else None,
+            'training_script_sha256':sha(script),'training_script_size':script.stat().st_size,
+            'split_test_size_025':('test_size=0.25' in s or 'test_size = 0.25' in s),
+            'split_shuffle_true':('shuffle=True' in s or 'shuffle = True' in s),
+            'split_random_state_present':bool(re.search(r'train_test_split\([^\)]*random_state',s,re.S)),
+            'dataset_xml_present':xml.exists(),'dataset_xml_sha256':sha(xml) if xml.exists() else None,
+            'dataset_xml_size':xml.stat().st_size if xml.exists() else None,
+            'dataset_record_count':row_count,'dataset_total_aligned_residues':total_residues,'dataset_positive_residues':positive_residues,
+          }
+          pathlib.Path('out/C47_META.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c47-meta
+          path: out/C47_META.json
+          retention-days: 1
