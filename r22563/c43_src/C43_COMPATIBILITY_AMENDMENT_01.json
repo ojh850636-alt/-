@@ -1,0 +1,18 @@
+{
+  "amended_science_sha256": "e163f3ab4784aca74186efe32f2493818ca6fb84979755a6151bb2ba7dd0568d",
+  "amendment_id": "C43-AMEND-01-NO-VOCAB-SHRINK",
+  "boundary": "OUTPUT_INDEPENDENT_RUNTIME_COMPATIBILITY_ONLY",
+  "change": "resize token embeddings only when tokenizer length is greater than current base embedding rows; never shrink base vocabulary",
+  "claim_credit": 0,
+  "failure_stage": "ADAPTER_LOAD_BEFORE_MODEL_FORWARD",
+  "model_outputs_observed_before_amendment": 0,
+  "preseal_science_sha256": "282c6956194cc37c1162da82977db6f43ae0c3d8bd347ac8672fac43d60fb4e9",
+  "raw_source_reacquired": false,
+  "same_escrow_required": true,
+  "schema": "LAA_R22563_C43_COMPATIBILITY_AMENDMENT_V1",
+  "scientific_question_changed": false,
+  "source_identity_changed": false,
+  "suite_changed": false,
+  "thresholds_changed": false,
+  "trigger": "PEFT modules_to_save rows 151936 vs runtime base shrunk to adapter tokenizer len 151646"
+}
