@@ -1,0 +1,200 @@
+name: LAA R22564 C44 same-adapter-escrow recovery1
+on:
+  push:
+    branches: [laa-r22564-c44-recovery1]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  static_header:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-raw-adapter
+          path: raw_adapter_artifact
+          run-id: 31837005712
+          github-token: ${{ github.token }}
+      - name: Parse authoritative Adapter header with robust artifact path
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir out
+          AWEIGHT="$(find raw_adapter_artifact -type f -name adapter_model.safetensors -print -quit)"
+          test -n "$AWEIGHT"
+          test "$(stat -c%s "$AWEIGHT")" = 291025752
+          test "$(sha256sum "$AWEIGHT"|awk '{print $1}')" = ca0710c04480627b50bb1350bd32fdf5545a95c17ecab38eab3cd6f92c24c0d7
+          AWEIGHT="$AWEIGHT" python - <<'PY'
+          import json,struct,pathlib,math,hashlib,os
+          p=pathlib.Path(os.environ['AWEIGHT'])
+          with p.open('rb') as f:
+              n=struct.unpack('<Q',f.read(8))[0]; assert 2<=n<=64*1024*1024; h=json.loads(f.read(n))
+          h.pop('__metadata__',None)
+          cats={'lora_A':0,'lora_B':0,'embed_tokens':0,'lm_head':0,'other':0}; elems={k:0 for k in cats}; dtypes={}; shapes={}
+          for k,v in h.items():
+              shape=v['shape']; num=math.prod(shape); shapes[k]=shape; dtypes[v['dtype']]=dtypes.get(v['dtype'],0)+num
+              if '.lora_A.' in k or k.endswith('.lora_A.weight'): c='lora_A'
+              elif '.lora_B.' in k or k.endswith('.lora_B.weight'): c='lora_B'
+              elif 'embed_tokens' in k: c='embed_tokens'
+              elif 'lm_head' in k: c='lm_head'
+              else: c='other'
+              cats[c]+=1; elems[c]+=num
+          lora=elems['lora_A']+elems['lora_B']; aux=elems['embed_tokens']+elems['lm_head']+elems['other']; total=lora+aux
+          assert lora==7208960,(lora,cats,elems)
+          embhead=elems['embed_tokens']+elems['lm_head']
+          out={'schema':'LAA_R22564_C44_FRAMEWORK_INDEPENDENT_HEADER_V2','header_bytes':n,'tensor_counts':cats,'parameter_elements':elems,'total_parameter_elements':total,'lora_parameter_elements':lora,'auxiliary_parameter_elements':aux,'lora_fraction':lora/total,'auxiliary_fraction':aux/total,'hypothesis_auxiliary_detected':embhead>0,'expected_embedding_plus_lm_head_elements':131080192,'embedding_plus_lm_head_elements':embhead,'hypothesis_exact_element_match':embhead==131080192,'dtypes_by_element_count':dtypes,'shape_digest_sha256':hashlib.sha256(json.dumps(shapes,sort_keys=True).encode()).hexdigest(),'raw_tensor_values_read':False,'adapter_redownloaded':False}
+          pathlib.Path('out/C44_STATIC_HEADER_PREBASE.json').write_text(json.dumps(out,indent=2,sort_keys=True)); print(json.dumps(out,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-static-header-recovery, path: out/C44_STATIC_HEADER_PREBASE.json, retention-days: 1}
+
+  capture_base:
+    needs: static_header
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - name: First and only Base ingress after Adapter header PASS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p escrow_base
+          B=https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0/resolve/fe8a4ea1ffedaf415f4da2f062534de366a451e6
+          for f in README.md config.json eval_results.json generation_config.json special_tokens_map.json tokenizer.json tokenizer.model tokenizer_config.json; do curl -L --fail --retry 3 -o escrow_base/$f "$B/$f"; done
+          python - <<'PY'
+          import json
+          c=json.load(open('escrow_base/config.json')); assert c['model_type']=='llama' and c['num_hidden_layers']==22 and c['hidden_size']==2048 and c['vocab_size']==32000
+          PY
+          curl -L --fail --retry 3 -o escrow_base/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s escrow_base/model.safetensors)" = 2200119864
+          test "$(sha256sum escrow_base/model.safetensors|awk '{print $1}')" = 6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-raw-base, path: escrow_base, retention-days: 1, compression-level: 0}
+
+  science:
+    needs: [capture_base, static_header]
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-raw-adapter
+          path: raw_adapter_artifact
+          run-id: 31837005712
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-base, path: raw_base_artifact}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-static-header-recovery, path: static_header_artifact}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-preseal-v2
+          path: preseal
+          run-id: 31836713287
+          github-token: ${{ github.token }}
+      - name: Bind authoritative source-zero code and existing escrows
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work_src work/adapter work/base evidence
+          cat r22564/c44_src/forge_parts/part*.pyfrag > work_src/c44_forge.py
+          cat r22564/c44_src/science_parts/part*.pyfrag > work_src/c44_science.py
+          cp r22564/c44_src/c44_replay.py work_src/c44_replay.py
+          test "$(sha256sum work_src/c44_science.py|awk '{print $1}')" = 25363f0f96bb76f6c2b283cb68ae50df287d15fd4646ee83afbd73e23eb6f0b3
+          test "$(sha256sum work_src/c44_replay.py|awk '{print $1}')" = abeac947fdf28582d3e48b193dfae1b9c8169a631cd4fd4ed0bd150f6c9bebfd
+          AWEIGHT="$(find raw_adapter_artifact -type f -name adapter_model.safetensors -print -quit)"; ADIR="$(dirname "$AWEIGHT")"; cp -a "$ADIR"/. work/adapter/
+          BWEIGHT="$(find raw_base_artifact -type f -name model.safetensors -print -quit)"; BDIR="$(dirname "$BWEIGHT")"; cp -a "$BDIR"/. work/base/
+          test "$(sha256sum work/adapter/adapter_model.safetensors|awk '{print $1}')" = ca0710c04480627b50bb1350bd32fdf5545a95c17ecab38eab3cd6f92c24c0d7
+          test "$(sha256sum work/base/model.safetensors|awk '{print $1}')" = 6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933
+          cp static_header_artifact/C44_STATIC_HEADER_PREBASE.json evidence/
+          cp preseal/C44_CHESS_SUITE.jsonl evidence/; cp preseal/C44_CHESS_SUITE.meta.json evidence/; cp preseal/R22564_C44_PREOUTPUT_CONTRACT_SEALED.json evidence/
+          python - <<'PY'
+          import json,hashlib,pathlib
+          c=json.load(open('evidence/R22564_C44_PREOUTPUT_CONTRACT_SEALED.json')); m=json.load(open('evidence/C44_CHESS_SUITE.meta.json')); p=pathlib.Path('evidence/C44_CHESS_SUITE.jsonl')
+          assert c['suite']['actual_sha256']==m['sha256']==hashlib.sha256(p.read_bytes()).hexdigest(); assert c['preoutput_static_hypothesis']['four_condition_decomposition_required'] is True
+          PY
+      - name: Run maximum raw-free chess archaeology
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false', PYTHONDONTWRITEBYTECODE: '1'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+          python -m pip install -q python-chess==1.999 torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          python work_src/c44_science.py --self-test | tee evidence/C44_RUNTIME_SELFTEST.json
+          python work_src/c44_science.py --run --work work --suite evidence/C44_CHESS_SUITE.jsonl --out evidence --batch 4 --engine /usr/games/stockfish | tee evidence/C44_STDOUT_SUMMARY.txt
+          if find evidence -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' \) | grep -q .; then exit 91; fi
+          rm -rf work raw_adapter_artifact raw_base_artifact work_src
+          python - <<'PY'
+          import json,hashlib,pathlib
+          root=pathlib.Path('evidence'); files=[]
+          for p in sorted(root.iterdir()):
+              if p.is_file(): files.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (root/'C44_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22564_C44_RAW_FREE_MANIFEST_V1','files':files,'raw_source_present':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-rawfree-evidence-recovery1, path: evidence, retention-days: 1}
+
+  replay:
+    needs: science
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-raw-adapter
+          path: raw_adapter_artifact
+          run-id: 31837005712
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-base, path: raw_base_artifact}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-rawfree-evidence-recovery1, path: evidence}
+      - name: Independent replay from same authoritative raw objects
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false', PYTHONDONTWRITEBYTECODE: '1'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/adapter work/base
+          AWEIGHT="$(find raw_adapter_artifact -type f -name adapter_model.safetensors -print -quit)"; ADIR="$(dirname "$AWEIGHT")"; cp -a "$ADIR"/. work/adapter/
+          BWEIGHT="$(find raw_base_artifact -type f -name model.safetensors -print -quit)"; BDIR="$(dirname "$BWEIGHT")"; cp -a "$BDIR"/. work/base/
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          python r22564/c44_src/c44_replay.py --work work --suite evidence/C44_CHESS_SUITE.jsonl --primary-behavior evidence/C44_BEHAVIOR.json --out C44_INDEPENDENT_REPLAY.json
+          rm -rf work raw_adapter_artifact raw_base_artifact
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-independent-replay-recovery1, path: C44_INDEPENDENT_REPLAY.json, retention-days: 1}
+
+  cleanup:
+    if: ${{ always() && needs.replay.result == 'success' }}
+    needs: replay
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete original Adapter escrow and recovery Base escrow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup; : > cleanup/targets.tsv
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/31837005712/artifacts?per_page=100" > orig.json
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > cur.json
+          python - <<'PY' > cleanup/targets.tsv
+          import json
+          for runfile,allowed in [('orig.json',{'r22564-c44-raw-adapter'}),('cur.json',{'r22564-c44-raw-base'})]:
+              for a in json.load(open(runfile))['artifacts']:
+                  if a['name'] in allowed: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/targets.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/targets.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          lines=pathlib.Path('cleanup/deleted.txt').read_text().splitlines()
+          pathlib.Path('cleanup/R22564_C44_REMOTE_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22564_C44_REMOTE_RAW_DELETION_V1','deleted':lines,'count':len(lines),'source_reacquisition_allowed':False,'adapter_authority_run':31837005712},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-cleanup-receipt-recovery1, path: cleanup/R22564_C44_REMOTE_RAW_DELETION.json, retention-days: 1}
