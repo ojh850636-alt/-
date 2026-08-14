@@ -1,0 +1,1 @@
+R22565 C49 recovery trigger v2. Reuse source run 31851360447 artifacts only. No Hugging Face reacquisition. Scientific suite, thresholds, source identity and code semantics unchanged.
