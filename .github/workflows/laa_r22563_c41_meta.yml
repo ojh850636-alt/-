@@ -1,0 +1,63 @@
+name: LAA R22563 C41 metadata only
+on:
+  push:
+    branches: [laa-r22563-c41-mathml-meta]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Exact metadata-only audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out work
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/kj821/t5-small-mathml-python-v1 work/adapter
+          git clone -q --depth 1 https://huggingface.co/google-t5/t5-small work/base
+          ADAPTER_SHA=$(git -C work/adapter rev-parse HEAD)
+          BASE_SHA=$(git -C work/base rev-parse HEAD)
+          python - <<'PY'
+          import json, pathlib, hashlib, os, subprocess
+          root=pathlib.Path('work')
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def pointer_info(p):
+              b=pathlib.Path(p).read_text(errors='replace')
+              out={'pointer_text_sha256':hashlib.sha256(b.encode()).hexdigest(),'pointer_bytes':len(b.encode())}
+              for line in b.splitlines():
+                  if line.startswith('oid sha256:'): out['remote_sha256']=line.split(':',1)[1]
+                  elif line.startswith('size '): out['remote_size']=int(line.split()[1])
+              return out
+          adapter=root/'adapter'; base=root/'base'
+          cfg=json.loads((adapter/'adapter_config.json').read_text())
+          api={
+            'schema':'LAA_R22563_C41_METADATA_AUDIT_V1',
+            'adapter':{
+              'repo':'kj821/t5-small-mathml-python-v1',
+              'revision':os.popen('git -C work/adapter rev-parse HEAD').read().strip(),
+              'files':sorted(str(p.relative_to(adapter)) for p in adapter.rglob('*') if p.is_file() and '/.git/' not in str(p)),
+              'adapter_config':cfg,
+              'adapter_config_sha256':sha(adapter/'adapter_config.json'),
+              'adapter_weight':pointer_info(adapter/'adapter_model.safetensors'),
+              'readme_sha256':sha(adapter/'README.md') if (adapter/'README.md').exists() else None,
+            },
+            'base':{
+              'repo':'google-t5/t5-small',
+              'revision':os.popen('git -C work/base rev-parse HEAD').read().strip(),
+              'config_sha256':sha(base/'config.json'),
+              'model_weight':pointer_info(base/'model.safetensors'),
+              'spiece':pointer_info(base/'spiece.model') if (base/'spiece.model').read_text(errors='ignore').startswith('version https://git-lfs') else {'sha256':sha(base/'spiece.model'),'size':(base/'spiece.model').stat().st_size},
+              'tokenizer_json':pointer_info(base/'tokenizer.json') if (base/'tokenizer.json').read_text(errors='ignore').startswith('version https://git-lfs') else {'sha256':sha(base/'tokenizer.json'),'size':(base/'tokenizer.json').stat().st_size},
+              'tokenizer_config_sha256':sha(base/'tokenizer_config.json'),
+            },
+            'raw_weight_bytes_downloaded':0,
+            'model_outputs_observed':0,
+          }
+          pathlib.Path('out/R22563_C41_METADATA_AUDIT.json').write_text(json.dumps(api,indent=2,sort_keys=True))
+          PY
+          cat out/R22563_C41_METADATA_AUDIT.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22563-c41-meta
+          path: out/R22563_C41_METADATA_AUDIT.json
+          retention-days: 1
