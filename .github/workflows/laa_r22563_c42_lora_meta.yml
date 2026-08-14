@@ -1,0 +1,52 @@
+name: LAA R22563 C42 exact LoRA metadata
+on:
+  push:
+    branches: [laa-r22563-c42-lora-meta]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Metadata before weight
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          mkdir -p work out
+          git clone -q --depth 1 https://huggingface.co/savinugunarathna/Small100-Singlish-Sinhala-LoRA work/adapter
+          git clone -q --depth 1 https://huggingface.co/alirezamsh/small100 work/base
+          python - <<'PY'
+          import json,pathlib,hashlib,os
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def ptr(p):
+            p=pathlib.Path(p); text=p.read_text(errors='replace'); o={'pointer_size':p.stat().st_size,'pointer_sha256':sha(p)}
+            for line in text.splitlines():
+              if line.startswith('oid sha256:'): o['remote_sha256']=line.split(':',1)[1]
+              elif line.startswith('size '): o['remote_size']=int(line.split()[1])
+            return o
+          a=pathlib.Path('work/adapter'); b=pathlib.Path('work/base')
+          afiles=sorted(x.name for x in a.iterdir() if x.name!='.git'); bfiles=sorted(x.name for x in b.iterdir() if x.name!='.git')
+          required_adapter=['adapter_config.json','adapter_model.safetensors']
+          optional_adapter=['README.md','added_tokens.json','sentencepiece.bpe.model','special_tokens_map.json','tokenizer_config.json','vocab.json']
+          forbidden_adapter=['training_args.bin','pytorch_model.bin','model.safetensors']
+          required_base=['config.json','model.safetensors','sentencepiece.bpe.model','special_tokens_map.json','tokenization_small100.py','tokenizer_config.json','vocab.json']
+          forbidden_base=['pytorch_model.bin','model.onnx']
+          contract={'required_adapter_missing':[x for x in required_adapter if x not in afiles], 'required_base_missing':[x for x in required_base if x not in bfiles], 'forbidden_adapter_present':[x for x in forbidden_adapter if x in afiles], 'forbidden_base_present':[x for x in forbidden_base if x in bfiles], 'optional_adapter_present':[x for x in optional_adapter if x in afiles]}
+          cfg=json.loads((a/'adapter_config.json').read_text())
+          tok_names=['sentencepiece.bpe.model','special_tokens_map.json','tokenizer_config.json','vocab.json']
+          tokcmp={}
+          for n in tok_names:
+            ap=a/n; bp=b/n
+            if ap.exists() and bp.exists():
+              ai=ptr(ap) if ap.read_text(errors='ignore').startswith('version https://git-lfs') else {'sha256':sha(ap),'size':ap.stat().st_size}
+              bi=ptr(bp) if bp.read_text(errors='ignore').startswith('version https://git-lfs') else {'sha256':sha(bp),'size':bp.stat().st_size}
+              tokcmp[n]={'adapter':ai,'base':bi,'same_remote_sha':ai.get('remote_sha256',ai.get('sha256'))==bi.get('remote_sha256',bi.get('sha256')),'same_size':ai.get('remote_size',ai.get('size'))==bi.get('remote_size',bi.get('size'))}
+          obj={'schema':'LAA_R22563_C42_LORA_METADATA_V1','adapter':{'repo':'savinugunarathna/Small100-Singlish-Sinhala-LoRA','revision':os.popen('git -C work/adapter rev-parse HEAD').read().strip(),'files':afiles,'config':cfg,'config_sha256':sha(a/'adapter_config.json'),'weight':ptr(a/'adapter_model.safetensors')},'base':{'repo':'alirezamsh/small100','revision':os.popen('git -C work/base rev-parse HEAD').read().strip(),'files':bfiles,'config_sha256':sha(b/'config.json'),'weight':ptr(b/'model.safetensors'),'tokenizer_code_sha256':sha(b/'tokenization_small100.py')},'tokenizer_pointer_comparison':tokcmp,'file_contract':contract,'metadata_gate':'PASS' if not contract['required_adapter_missing'] and not contract['required_base_missing'] else 'HOLD','raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          pathlib.Path('out/R22563_C42_LORA_METADATA.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22563-c42-lora-meta
+          path: out/R22563_C42_LORA_METADATA.json
+          retention-days: 1
