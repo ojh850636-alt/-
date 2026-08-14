@@ -1,0 +1,17 @@
+{
+  "adapter_sha256": "87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f",
+  "base_revision": "8949b909ec900327062f0ebf497f51aef5e6f0c8",
+  "base_sha256": "340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9",
+  "candidate_revision": "950afbb0ab7eacd00ebccb6af519da667cc92381",
+  "gate": {
+    "bootstrap_ci_lower_gt": 0.0,
+    "conditional_full_minus_head_auc_min": 0.03,
+    "full_auc_min": 0.75
+  },
+  "model_outputs_before_seal": 0,
+  "raw_weight_bytes_before_seal": 0,
+  "research/r22564_c44/c44_forge.py": {"sha256": "7f8cb9e1844a611973b9b063ec07c6bda82e5ef6ab32713d7e32d1aa1d510962", "size": 3755},
+  "research/r22564_c44/c44_science.py": {"sha256": "838152b913ad0507a3b55da346d05c866d3e2b28ee671922d1aeec6786c96fba", "size": 7544},
+  "datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl": {"sha256": "a127d9e9f888b18bf69300b17aaba521ee2565afdaa16012eb20ee72ae21dd40", "size": 100952},
+  "schema": "LAA_R22564_C44_PREOUTPUT_V1"
+}
