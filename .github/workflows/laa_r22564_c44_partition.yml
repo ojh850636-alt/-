@@ -1,0 +1,153 @@
+name: LAA R22564 C44 exact same-escrow condition partition
+on:
+  push:
+    branches: [laa-r22564-c44-partition]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  teacher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-adapter, path: raw_adapter_artifact, run-id: 31837005712, github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-base, path: raw_base_artifact, run-id: 31837206648, github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-preseal-v2, path: preseal, run-id: 31836713287, github-token: '${{ github.token }}'}
+      - name: Exact teacher/control/dose partition
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false', PYTHONDONTWRITEBYTECODE: '1'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work_src work/adapter work/base out
+          cat r22564/c44_src/science_parts/part*.pyfrag > work_src/c44_science.py
+          test "$(sha256sum work_src/c44_science.py|awk '{print $1}')" = 25363f0f96bb76f6c2b283cb68ae50df287d15fd4646ee83afbd73e23eb6f0b3
+          AWEIGHT="$(find raw_adapter_artifact -type f -name adapter_model.safetensors -print -quit)"; cp -a "$(dirname "$AWEIGHT")"/. work/adapter/
+          BWEIGHT="$(find raw_base_artifact -type f -name model.safetensors -print -quit)"; cp -a "$(dirname "$BWEIGHT")"/. work/base/
+          test "$(sha256sum work/adapter/adapter_model.safetensors|awk '{print $1}')" = ca0710c04480627b50bb1350bd32fdf5545a95c17ecab38eab3cd6f92c24c0d7
+          test "$(sha256sum work/base/model.safetensors|awk '{print $1}')" = 6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933
+          sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+          python -m pip install -q python-chess==1.999 torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          cp preseal/C44_CHESS_SUITE.jsonl suite.jsonl
+          PYTHONPATH=work_src python - <<'PY'
+          import json,pathlib
+          import c44_science as s
+          rows=s.load_rows('suite.jsonl'); pos=[r for r in rows if not r['negative']]
+          model,tok,abi,base_aux,adapt_aux=s.prepare(pathlib.Path('work/base'),pathlib.Path('work/adapter')); ctl=s.Controller(model,base_aux,adapt_aux)
+          score_rows_set=[r for r in pos if r['split'] in {'DISCOVERY','CONFIRMATION','TACTICAL_OOD','QUIET_OOD'}][:160]
+          scores={}; per={}
+          for c in ['BASE','AUX_ONLY','LORA_ONLY','FULL']:
+              ctl.set_condition(c); v=s.score_rows(model,tok,score_rows_set,4); scores[c]=s.mean(v); per[c]=dict(zip([r['case_id'] for r in score_rows_set],v))
+          locked=[r for r in pos if r['split'] in {'CONFIRMATION','TACTICAL_OOD','QUIET_OOD'}][:80]
+          ctrls={}; ctrlper={}
+          for c in ['RANDOM_SIGN','LAYER_SHUFFLE']:
+              ctl.set_condition(c); v=s.score_rows(model,tok,locked,4); ctrls[c]=s.mean(v); ctrlper[c]=dict(zip([r['case_id'] for r in locked],v))
+          doses={}; dose_rows=locked[:40]
+          for d in ['DOSE_0.25','DOSE_0.5','DOSE_1.5']:
+              ctl.set_condition(d); doses[d]=s.mean(s.score_rows(model,tok,dose_rows,4))
+          gate=locked
+          total=[per['FULL'][r['case_id']]-per['BASE'][r['case_id']] for r in gate]; cond=[per['FULL'][r['case_id']]-per['AUX_ONLY'][r['case_id']] for r in gate]; aux=[per['AUX_ONLY'][r['case_id']]-per['BASE'][r['case_id']] for r in gate]
+          total_delta=s.mean(total);total_ci=s.bootstrap_ci(total);cond_delta=s.mean(cond);cond_ci=s.bootstrap_ci(cond);aux_delta=s.mean(aux);aux_ci=s.bootstrap_ci(aux);lora_only=s.mean([per['LORA_ONLY'][r['case_id']]-per['BASE'][r['case_id']] for r in gate])
+          fr=s.mean([per['FULL'][r['case_id']]-ctrlper['RANDOM_SIGN'][r['case_id']] for r in gate]);fs=s.mean([per['FULL'][r['case_id']]-ctrlper['LAYER_SHUFFLE'][r['case_id']] for r in gate]);sign=1 if cond_delta>=0 else -1
+          out={'schema':'LAA_R22564_C44_PARTITION_TEACHER_V1','scores_mean_target_logprob':scores,'controls_locked_mean_target_logprob':ctrls,'dose_mean_target_logprob':doses,'full_minus_base_nats':total_delta,'full_minus_base_ci95':total_ci,'aux_only_minus_base_nats':aux_delta,'aux_only_minus_base_ci95':aux_ci,'conditional_lora_full_minus_aux_nats':cond_delta,'conditional_lora_ci95':cond_ci,'lora_only_minus_base_nats':lora_only,'full_minus_random_same_aux_nats':fr,'full_minus_shuffle_same_aux_nats':fs,'total_adaptation_gate':abs(total_delta)>=.10 and (total_ci[0]>0 or total_ci[1]<0),'conditional_lora_gate':abs(cond_delta)>=.10 and (cond_ci[0]>0 or cond_ci[1]<0) and sign*fr>=.05 and sign*fs>=.05,'effect_sign_conditional_lora':sign,'abi':abi,'source_reacquisition':False}
+          pathlib.Path('out/C44_PARTITION_TEACHER.json').write_text(json.dumps(out,indent=2,sort_keys=True));print(json.dumps(out,sort_keys=True))
+          PY
+          rm -rf work raw_adapter_artifact raw_base_artifact work_src
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-partition-teacher, path: out/C44_PARTITION_TEACHER.json, retention-days: 1}
+
+  generation:
+    strategy:
+      fail-fast: false
+      matrix:
+        condition: [BASE, AUX_ONLY, LORA_ONLY, FULL]
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-adapter, path: raw_adapter_artifact, run-id: 31837005712, github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-raw-base, path: raw_base_artifact, run-id: 31837206648, github-token: '${{ github.token }}'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-preseal-v2, path: preseal, run-id: 31836713287, github-token: '${{ github.token }}'}
+      - name: Exact generation condition
+        env:
+          CONDITION: ${{ matrix.condition }}
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+          TOKENIZERS_PARALLELISM: 'false'
+          PYTHONDONTWRITEBYTECODE: '1'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work_src work/adapter work/base out
+          cat r22564/c44_src/science_parts/part*.pyfrag > work_src/c44_science.py
+          test "$(sha256sum work_src/c44_science.py|awk '{print $1}')" = 25363f0f96bb76f6c2b283cb68ae50df287d15fd4646ee83afbd73e23eb6f0b3
+          AWEIGHT="$(find raw_adapter_artifact -type f -name adapter_model.safetensors -print -quit)"; cp -a "$(dirname "$AWEIGHT")"/. work/adapter/
+          BWEIGHT="$(find raw_base_artifact -type f -name model.safetensors -print -quit)"; cp -a "$(dirname "$BWEIGHT")"/. work/base/
+          sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+          python -m pip install -q python-chess==1.999 torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          cp preseal/C44_CHESS_SUITE.jsonl suite.jsonl
+          PYTHONPATH=work_src CONDITION="$CONDITION" python - <<'PY'
+          import json,pathlib,os
+          import c44_science as s
+          rows=s.load_rows('suite.jsonl');pos=[r for r in rows if not r['negative']];locked=[r for r in pos if r['split'] in {'CONFIRMATION','TACTICAL_OOD','QUIET_OOD'}][:80]; gen_rows=locked[:32]+[r for r in rows if r['negative']][:8]; rb={r['case_id']:r for r in gen_rows}
+          model,tok,abi,base_aux,adapt_aux=s.prepare(pathlib.Path('work/base'),pathlib.Path('work/adapter'));ctl=s.Controller(model,base_aux,adapt_aux);c=os.environ['CONDITION'];ctl.set_condition(c);items=s.generate_rows(model,tok,gen_rows,batch=1,max_new=80);met=s.evaluate_generation(items,rb,'/usr/games/stockfish');valid=[x for x in met if not rb[x['case_id']]['negative']];neg=[x for x in met if rb[x['case_id']]['negative']];summary=s.summarize_gen(valid);summary['invalid_fen_action_like_rate']=s.mean([x['action_like'] for x in neg]);red=[]
+          for x in met:red.append({'condition':c,'case_id':x['case_id'],'prediction_sha256':x['prediction_sha256'],'prediction_length':x['prediction_length'],'json_ok':x['json_ok'],'legal':x['legal'],'top1':x['top1'],'top3':x['top3'],'cp_loss':x['cp_loss'],'has_explanation':x['has_explanation'],'has_taunt':x['has_taunt'],'action_like':x['action_like']})
+          pathlib.Path(f'out/C44_GEN_{c}.json').write_text(json.dumps({'schema':'LAA_R22564_C44_PARTITION_GENERATION_V1','condition':c,'summary':summary,'case_digests':red,'source_reacquisition':False},indent=2,sort_keys=True));print(json.dumps({'condition':c,'summary':summary},sort_keys=True))
+          PY
+          rm -rf work raw_adapter_artifact raw_base_artifact work_src
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22564-c44-partition-gen-${{ matrix.condition }}
+          path: out/C44_GEN_${{ matrix.condition }}.json
+          retention-days: 1
+
+  aggregate:
+    needs: [teacher, generation]
+    runs-on: ubuntu-latest
+    outputs:
+      primary: ${{ steps.a.outputs.primary }}
+      conditional: ${{ steps.a.outputs.conditional }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-partition-teacher, path: in/teacher}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-partition-gen-BASE, path: in/base}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-partition-gen-AUX_ONLY, path: in/aux}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-partition-gen-LORA_ONLY, path: in/lora}
+      - uses: actions/download-artifact@v4
+        with: {name: r22564-c44-partition-gen-FULL, path: in/full}
+      - id: a
+        name: Apply unchanged presealed aggregation formulas
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir out
+          python - <<'PY'
+          import json,pathlib
+          t=json.load(open('in/teacher/C44_PARTITION_TEACHER.json'));g={}
+          for c,d in [('BASE','base'),('AUX_ONLY','aux'),('LORA_ONLY','lora'),('FULL','full')]:g[c]=json.load(open(f'in/{d}/C44_GEN_{c}.json'))['summary']
+          legal_gain=g['FULL']['legal_rate']-g['BASE']['legal_rate'];top3_gain=g['FULL']['top3_rate']-g['BASE']['top3_rate'];invalid_delta=g['FULL']['invalid_fen_action_like_rate']-g['BASE']['invalid_fen_action_like_rate'];base_cpl=g['BASE']['mean_cp_loss_legal'];full_cpl=g['FULL']['mean_cp_loss_legal'];cpl_worse=(base_cpl is not None and full_cpl is not None and full_cpl-base_cpl>=80);total=t['full_minus_base_nats'];positive=t['total_adaptation_gate'] and total>0 and (legal_gain>=.10 or top3_gain>=.05);failure=t['total_adaptation_gate'] and total<0 and (legal_gain<=-.10 or cpl_worse)
+          b={**{k:v for k,v in t.items() if k not in {'schema','abi','source_reacquisition'}},'schema':'LAA_R22564_C44_BEHAVIOR_V2_PARTITION_EXACT','positive_capability_gate':positive,'failure_gate':failure,'generation':g,'legal_rate_gain':legal_gain,'top3_rate_gain':top3_gain,'invalid_fen_action_like_delta':invalid_delta,'raw_predictions_exported':False,'case_prediction_hashes_only':True,'execution_partition_only':True}
+          pathlib.Path('out/C44_BEHAVIOR.json').write_text(json.dumps(b,indent=2,sort_keys=True))
+          causal={'schema':'LAA_R22564_C44_CAUSAL_V1','entered':False,'reason':'PARTITION_AWAITS_CAUSAL_IF_CONDITIONAL_GATE','broad':[],'survivors':[]};pathlib.Path('out/C44_CAUSAL_PENDING.json').write_text(json.dumps(causal,indent=2,sort_keys=True))
+          dig=[]
+          for c,d in [('BASE','base'),('AUX_ONLY','aux'),('LORA_ONLY','lora'),('FULL','full')]:dig+=json.load(open(f'in/{d}/C44_GEN_{c}.json'))['case_digests']
+          pathlib.Path('out/C44_GENERATION_CASE_DIGESTS.jsonl').write_text(''.join(json.dumps(x,sort_keys=True)+'\n' for x in dig))
+          pathlib.Path('out/flags.txt').write_text(f"primary={'true' if positive or failure else 'false'}\nconditional={'true' if t['conditional_lora_gate'] else 'false'}\n")
+          print(json.dumps({'positive':positive,'failure':failure,'conditional':t['conditional_lora_gate'],'total':total,'legal_gain':legal_gain,'top3_gain':top3_gain},sort_keys=True))
+          PY
+          cat out/flags.txt >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c44-partition-aggregate, path: out, retention-days: 1}
