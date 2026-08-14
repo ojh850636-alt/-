@@ -1,0 +1,81 @@
+from __future__ import annotations
+import argparse, hashlib, json, random, subprocess
+from pathlib import Path
+
+SEED=22564
+SYSTEM = (
+    '<|system|> You are **ChezzBot-β**, a dry-humoured, mildly anxious chess coach '
+    'who is utterly convinced every move you pick is textbook-perfect. You always play '
+    'as the side to move; your opponent is the other colour whom you tease with sarcastic digs. '
+    'Explain your move in ≤25 words using real chess ideas, then taunt the user in ≤15 words. '
+    'Respond *only* with JSON: {\n'
+    '  "from": "<square>",        # e.g. "e2"\n'
+    '  "to":   "<square>",        # e.g. "e4"\n'
+    '  "piece": "<piece>",        # "pawn","knight",…\n'
+    '  "explanation": "<text>",   # short rationale\n'
+    '  "taunt": "<text>"          # optional cheeky comment\n'
+    '} '
+)
+
+def sha256_bytes(b:bytes)->str: return hashlib.sha256(b).hexdigest()
+def canonical(obj): return json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False)
+
+def score_cp(info, turn):
+    s=info['score'].pov(turn).score(mate_score=100000)
+    return int(s if s is not None else 0)
+
+def piece_name(piece):
+    return {1:'pawn',2:'knight',3:'bishop',4:'rook',5:'queen',6:'king'}[piece.piece_type]
+
+def make_prompt(fen): return SYSTEM + '<|user|>FEN: ' + fen + '\n\n<|assistant|><|json|>'
+
+def make_target(board, move):
+    p=board.piece_at(move.from_square)
+    obj={'from':str(move)[:2],'to':str(move)[2:4],'piece':piece_name(p),'explanation':'','taunt':''}
+    return json.dumps(obj,separators=(',',':'))
+
+def classify(board, infos):
+    top=infos[0]['pv'][0]
+    gap=0
+    if len(infos)>1:
+        gap=score_cp(infos[0],board.turn)-score_cp(infos[1],board.turn)
+    tactical=board.is_capture(top) or top.promotion is not None
+    b2=board.copy(); b2.push(top); tactical=tactical or b2.is_check() or gap>=120
+    return 'TACTICAL' if tactical else 'QUIET', gap
+
+def generate_valid(engine, rng, n, max_attempts=5000):
+    import chess, chess.engine
+    rows=[]; seen=set(); attempts=0
+    tactical=quiet=0
+    while len(rows)<n and attempts<max_attempts:
+        attempts+=1
+        b=chess.Board()
+        plies=rng.randint(6,42)
+        for _ in range(plies):
+            if b.is_game_over(): break
+            moves=list(b.legal_moves)
+            # light bias toward captures/checks to diversify tactical positions
+            forcing=[m for m in moves if b.is_capture(m) or b.gives_check(m)]
+            if forcing and rng.random()<0.28: m=rng.choice(forcing)
+            else: m=rng.choice(moves)
+            b.push(m)
+        if b.is_game_over() or not b.is_valid() or len(list(b.legal_moves))<2: continue
+        fen=b.fen()
+        if fen in seen: continue
+        infos=engine.analyse(b,chess.engine.Limit(nodes=12000),multipv=3)
+        if not isinstance(infos,list): infos=[infos]
+        if not infos or not infos[0].get('pv'): continue
+        fam,gap=classify(b,infos)
+        # maintain useful coverage rather than all quiet positions
+        if fam=='TACTICAL' and tactical>=72 and quiet<96: continue
+        if fam=='QUIET' and quiet>=128 and tactical<48: continue
+        topmoves=[]
+        for info in infos[:3]:
+            if not info.get('pv'): continue
+            mv=info['pv'][0]
+            topmoves.append({'uci':mv.uci(),'score_cp':score_cp(info,b.turn)})
+        if not topmoves: continue
+        top=chess.Move.from_uci(topmoves[0]['uci'])
+        row={
+            'fen':fen,'turn':'white' if b.turn else 'black','family':fam,
+            'legal_move_count':b.legal_moves.count(),'top_moves':topmoves,'top_gap_cp':gap,
