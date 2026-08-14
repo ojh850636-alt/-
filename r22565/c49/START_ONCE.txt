@@ -1,0 +1,1 @@
+R22565 C49 one-use source ingress authorized after metadata and pre-output contract seal. Do not modify this file again. Future recovery must reuse the authoritative run escrows.
