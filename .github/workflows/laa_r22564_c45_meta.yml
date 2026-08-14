@@ -1,0 +1,35 @@
+name: LAA R22564 C45 FinBERT metadata-only audit
+on:
+  push:
+    branches: [laa-r22564-c45-finbert-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/misraanay/finbert-tone-gold-lora-final cand
+          git clone -q --depth 1 https://huggingface.co/yiyanghkust/finbert-tone base
+          python - <<'PY'
+          import json,pathlib,subprocess
+          def ptr(p):
+           d={}
+           for l in p.read_text(errors='replace').splitlines():
+            if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+            if l.startswith('size '): d['size']=int(l.split()[1])
+           return d
+          c=pathlib.Path('cand'); b=pathlib.Path('base')
+          cfg=json.loads((c/'adapter_config.json').read_text())
+          weights=c/'adapter_model.safetensors'; assert weights.exists()
+          candidates=[p for p in [b/'model.safetensors',b/'pytorch_model.bin'] if p.exists()]
+          obj={'schema':'LAA_R22564_C45_META_V1','candidate_revision':subprocess.check_output(['git','-C','cand','rev-parse','HEAD'],text=True).strip(),'base_revision':subprocess.check_output(['git','-C','base','rev-parse','HEAD'],text=True).strip(),'adapter_pointer':ptr(weights),'adapter_config':cfg,'candidate_files':sorted(p.name for p in c.iterdir() if p.name!='.git'),'base_files':sorted(p.name for p in b.iterdir() if p.name!='.git'),'base_weight_pointers':{p.name:ptr(p) for p in candidates}}
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          pathlib.Path('C45_META.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c45-meta, path: C45_META.json, retention-days: 1}
