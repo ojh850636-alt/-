@@ -16,16 +16,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(sha256sum r22564/c44/c44_forge.py | awk '{print $1}')" = 7f8cb9e1844a611973b9b063ec07c6bda82e5ef6ab32713d7e32d1aa1d510962
-          test "$(stat -c%s r22564/c44/c44_forge.py)" = 3755
-          test "$(sha256sum r22564/c44/c44_science.py | awk '{print $1}')" = 838152b913ad0507a3b55da346d05c866d3e2b28ee671922d1aeec6786c96fba
-          test "$(stat -c%s r22564/c44/c44_science.py)" = 7544
+          test "$(git hash-object r22564/c44/c44_forge.py)" = c3db61e24ab6f8b7b2fdee738dc27b2f130e1cb3
+          test "$(git hash-object r22564/c44/c44_science.py)" = 30949817db4109cbd1073809834de564b0684cc8
           mkdir -p research/r22564_c44 datasets/r22564_c44 configs
           cp r22564/c44/c44_forge.py research/r22564_c44/c44_forge.py
           cp r22564/c44/c44_science.py research/r22564_c44/c44_science.py
           python research/r22564_c44/c44_forge.py
           test "$(sha256sum datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl | awk '{print $1}')" = a127d9e9f888b18bf69300b17aaba521ee2565afdaa16012eb20ee72ae21dd40
-          test "$(stat -c%s datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl)" = 100952
           export GIT_LFS_SKIP_SMUDGE=1
           git clone -q --depth 1 https://huggingface.co/dannyliv/agent-guard-modernbert-base cand
           git clone -q --depth 1 https://huggingface.co/answerdotai/ModernBERT-base baseptr
