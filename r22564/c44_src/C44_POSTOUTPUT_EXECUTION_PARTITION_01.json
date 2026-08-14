@@ -1,0 +1,40 @@
+{
+  "schema": "LUCIA_AA_R22564_C44_POSTOUTPUT_EXECUTION_PARTITION_01",
+  "candidate_id": "R22564-C44-CHEZZ-TINYLLAMA-CHESS",
+  "authority_type": "EXECUTION_ONLY_NO_SCIENCE_CHANGE",
+  "reason": "The authoritative monolithic CPU run is long. Partition identical presealed computations by condition while reusing the same authoritative raw escrows; do not alter any prompt, suite row, threshold, seed, model/source SHA, batch size within a condition, generation limit, or verifier.",
+  "source_reacquisition": false,
+  "authoritative_adapter_artifact_id": 9232852750,
+  "authoritative_base_artifact_id": 9232970575,
+  "preseal_run_id": 31836713287,
+  "monolithic_recovery_run_id": 31837206648,
+  "science_code_sha256": "25363f0f96bb76f6c2b283cb68ae50df287d15fd4646ee83afbd73e23eb6f0b3",
+  "suite_sha256": "cdbf4f973c94d228d0bb1c126d74dffcf08d82b751cd713ae7c48a302f4fd34c",
+  "unchanged_contract": {
+    "teacher_conditions": ["BASE", "AUX_ONLY", "LORA_ONLY", "FULL"],
+    "teacher_case_selection": "first 160 positive rows in DISCOVERY/CONFIRMATION/TACTICAL_OOD/QUIET_OOD",
+    "locked_case_selection": "first 80 positive rows in CONFIRMATION/TACTICAL_OOD/QUIET_OOD",
+    "dose_case_selection": "first 40 locked rows",
+    "controls": ["RANDOM_SIGN", "LAYER_SHUFFLE"],
+    "doses": ["DOSE_0.25", "DOSE_0.5", "DOSE_1.5"],
+    "teacher_batch": 4,
+    "generation_conditions": ["BASE", "AUX_ONLY", "LORA_ONLY", "FULL"],
+    "generation_case_selection": "first 32 locked valid rows + first 8 invalid FEN rows",
+    "generation_batch": 1,
+    "generation_max_new_tokens": 80,
+    "stockfish_generation_verifier_nodes": 6000,
+    "total_adaptation_gate": "abs(FULL-BASE)>=0.10 and bootstrap95 excludes zero",
+    "conditional_lora_gate": "abs(FULL-AUX_ONLY)>=0.10 and bootstrap95 excludes zero and same-sign FULL-vs-random/shuffle each >=0.05",
+    "positive_move_gate": "legal_gain>=0.10 or top3_gain>=0.05",
+    "failure_move_gate": "legal_gain<=-0.10 or legal mean cp-loss worsens>=80"
+  },
+  "partition": {
+    "teacher_and_controls": 1,
+    "generation_by_condition": 4,
+    "aggregation": 1,
+    "causal_only_if_original_conditional_gate": true,
+    "independent_replay_only_if_original_primary_positive_or_failure_gate": true
+  },
+  "raw_predictions_exported": false,
+  "scientific_claim_credit": 0
+}
