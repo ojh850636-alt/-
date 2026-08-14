@@ -1,0 +1,65 @@
+from __future__ import annotations
+import argparse, contextlib, hashlib, json, math, os, random, re, shutil, statistics, sys, time
+from collections import defaultdict
+from pathlib import Path
+
+SEED=22563
+ADAPTER_SHA='2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a'
+BASE_SHA='9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad'
+
+def sha256_file(p:Path):
+    h=hashlib.sha256()
+    with p.open('rb') as f:
+        for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+    return h.hexdigest()
+
+def mean(xs): return sum(xs)/len(xs) if xs else 0.0
+
+def bootstrap_ci(vals, n=2000, seed=SEED):
+    if not vals: return [0.0,0.0]
+    r=random.Random(seed); N=len(vals); arr=[]
+    for _ in range(n): arr.append(mean([vals[r.randrange(N)] for _ in range(N)]))
+    arr.sort(); return [arr[int(.025*(n-1))],arr[int(.975*(n-1))]]
+
+def one_sided_sign_p(vals):
+    pos=sum(v>0 for v in vals); neg=sum(v<0 for v in vals); n=pos+neg
+    if n==0: return 1.0
+    k=pos
+    return sum(math.comb(n,i) for i in range(k,n+1))/(2**n)
+
+def holm(pairs):
+    # list (name,p)
+    ordered=sorted(pairs,key=lambda x:x[1]); m=len(ordered); out={}
+    running=0.0
+    for i,(name,p) in enumerate(ordered):
+        adj=min(1.0,(m-i)*p); running=max(running,adj); out[name]=running
+    return out
+
+def load_rows(suite:Path): return [json.loads(x) for x in suite.read_text().splitlines() if x.strip()]
+
+def static_forensics(adapter_path:Path):
+    from safetensors import safe_open
+    out={'schema':'LAA_R22563_C43_STATIC_V1','adapter_sha256':sha256_file(adapter_path)}
+    assert out['adapter_sha256']==ADAPTER_SHA
+    lora_a=[]; lora_b=[]; aux=[]; total=0; shapes={}
+    zero_b=0; nonfinite=0; energy_by_proj=defaultdict(float); energy_by_layer=defaultdict(float)
+    with safe_open(str(adapter_path),framework='pt',device='cpu') as f:
+        keys=list(f.keys())
+        for k in keys:
+            shape=list(f.get_slice(k).get_shape()); n=math.prod(shape); total+=n; shapes[k]=shape
+            if '.lora_A.' in k or k.endswith('.lora_A.weight'):
+                lora_a.append(k)
+                t=f.get_tensor(k); nonfinite+=int((~t.isfinite()).any().item())
+                e=float((t.float()*t.float()).sum().item());
+                proj=next((p for p in ['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj'] if p in k),'other'); energy_by_proj[proj]+=e
+                mm=re.search(r'layers\.(\d+)',k); energy_by_layer[mm.group(1) if mm else 'na']+=e
+            elif '.lora_B.' in k or k.endswith('.lora_B.weight'):
+                lora_b.append(k)
+                t=f.get_tensor(k); nonfinite+=int((~t.isfinite()).any().item()); zero_b+=int(float(t.abs().max().item())==0.0)
+                e=float((t.float()*t.float()).sum().item());
+                proj=next((p for p in ['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj'] if p in k),'other'); energy_by_proj[proj]+=e
+                mm=re.search(r'layers\.(\d+)',k); energy_by_layer[mm.group(1) if mm else 'na']+=e
+            elif 'modules_to_save' in k:
+                aux.append(k)
+    lora_params=sum(math.prod(shapes[k]) for k in lora_a+lora_b)
+    aux_params=sum(math.prod(shapes[k]) for k in aux)
