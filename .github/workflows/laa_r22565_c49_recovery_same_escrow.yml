@@ -2,7 +2,7 @@ name: LAA R22565 C49 same-escrow recovery
 on:
   push:
     branches: [laa-r22565-c49-minilm-agnews]
-    paths: [r22565/c49/RECOVER_SAME_ESCROW_01.txt]
+    paths: [r22565/c49/RECOVER_SAME_ESCROW_02.txt]
 permissions:
   contents: read
   actions: write
@@ -49,12 +49,9 @@ jobs:
           a=json.loads(pathlib.Path('r22565/c49/C49_TRANSPORT_AMENDMENT_01.json').read_text())
           assert a['v1_credit']==0 and a['raw_model_bytes_consumed_before_amendment']==0
           pathlib.Path('C49_RECOVERY_BOUNDARY.json').write_text(json.dumps({
-            'schema':'LAA_R22565_C49_RECOVERY_BOUNDARY_V1',
-            'authoritative_source_run':31851360447,
-            'failed_science_stage':'ARTIFACT_ROOT_SHAPE_BEFORE_MODEL_FORWARD',
-            'model_outputs_before_recovery':0,
-            'hf_redownload_bytes_in_recovery':0,
-            'suite_changed':False,'thresholds_changed':False,'science_semantics_changed':False
+            'schema':'LAA_R22565_C49_RECOVERY_BOUNDARY_V1','authoritative_source_run':31851360447,
+            'failed_science_stage':'ARTIFACT_ROOT_SHAPE_BEFORE_MODEL_FORWARD','model_outputs_before_recovery':0,
+            'hf_redownload_bytes_in_recovery':0,'suite_changed':False,'thresholds_changed':False,'science_semantics_changed':False
           },indent=2,sort_keys=True))
           PY
       - name: Run frozen science from same v2 escrows
