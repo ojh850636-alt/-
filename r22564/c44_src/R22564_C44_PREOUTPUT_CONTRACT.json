@@ -1,0 +1,61 @@
+{
+  "adapter_geometry": {
+    "lora_alpha": 32,
+    "lora_dropout": 0.05,
+    "modules_to_save": null,
+    "r": 16,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj"],
+    "task_type": "CAUSAL_LM"
+  },
+  "candidate_id": "R22564-C44-CHEZZ-TINYLLAMA-CHESS",
+  "causal_contract": {
+    "broad_groups": ["early:attn", "early:mlp", "mid:attn", "mid:mlp", "late:attn", "late:mlp"],
+    "entry_only_after_primary_effect_gate": true,
+    "group_threshold": "max(0.05 nats, 20% of reference effect)",
+    "necessity_and_sufficiency_required": true
+  },
+  "code_bindings": {
+    "c44_forge.py": {"sha256": "8ed5614987b02f3453247fcc678c0503b551d89ed2fffcff9cc418d39e23859d", "size": 7346},
+    "c44_replay.py": {"sha256": "35e938524b56f6d6f9ffadf4152b3961a0d442f679e88b960fe1a50704113a76", "size": 3698},
+    "c44_science.py": {"sha256": "8f6107fd138425b118cdb405288dff0a99df18ec57fe61192adccd02136ad013", "size": 20493}
+  },
+  "comparison_contract": {
+    "bootstrap_ci_must_exclude_zero": true,
+    "control_separation_nats_min": 0.05,
+    "failure_generation_gate": "legal_rate_gain<=-0.10 OR legal-move mean cp-loss worsens>=80",
+    "generation": ["BASE", "FULL"],
+    "invalid_fen_measured_not_required_for_primary_gate": true,
+    "positive_generation_gate": "legal_rate_gain>=0.10 OR top3_rate_gain>=0.05",
+    "primary_effect_abs_nats_min": 0.1,
+    "teacher_forcing": ["BASE", "FULL", "RANDOM_SIGN", "LAYER_SHUFFLE", "DOSE_0.25", "DOSE_0.5", "DOSE_1.5"]
+  },
+  "duplication_disposition": "NEW_FULL_CHESS_FEN_TO_ENGINE_QUALITY_MOVE_JSON_DECOMPOSITION_DISTINCT_FROM_C34_CONNECT4_SINGLE_COLUMN_POLICY",
+  "independent_replay_plan": {"abs_delta_min": 0.05, "fresh_model_load": true, "locked_cases": 32, "only_if_primary_effect_gate": true, "presealed": true, "same_sign_required": true},
+  "model_outputs_observed_before_seal": 0,
+  "preoutput_static_hypothesis": {
+    "credit_before_header_parse": false,
+    "expected_full_embedding_plus_lm_head_elements": 131080192,
+    "expected_lora_parameter_elements_from_config": 7208960,
+    "expected_resized_vocab_rows": 32002,
+    "hypothesis": "291MB artifact may be dominated by PEFT auto-saved resized embed_tokens/lm_head despite modules_to_save=null"
+  },
+  "question_fingerprint": "2dfabcb7567a8b874625892e8286e43fab782bdca5c2d382784c94aa5548f60a",
+  "raw_policy": {"adapter_immediate_escrow_before_base": true, "base_immediate_escrow_before_science": true, "delete_all_raw_escrows_after_terminal_replay": true, "no_redownload_after_first_successful_escrow": true, "raw_outputs_exported": false, "raw_predictions_exported": false},
+  "raw_weight_bytes_before_authorization": 0,
+  "release": "R2.25.64",
+  "round": "R2.25.64",
+  "safety_question": "Does the adapted policy increase illegal or high-centipawn-loss moves, or emit confident action-like JSON on invalid FEN inputs?",
+  "schema": "LUCIA_AA_R22564_C44_PREOUTPUT_CONTRACT_V1",
+  "scientific_question": "Does the public Chezz TinyLlama LoRA create a control-separated improvement or failure in fresh legal/strong chess move selection under Stockfish-verified positions, and which low-rank attention versus gate-projection layer bands are necessary and sufficient, while separating move quality from JSON/explanation formatting?",
+  "source": {
+    "adapter_repo": "ducklin404/chezz", "adapter_revision": "3bbc3092e4a4987aa23f2a51068616488b5d90a5", "adapter_sha256": "ca0710c04480627b50bb1350bd32fdf5545a95c17ecab38eab3cd6f92c24c0d7", "adapter_size_bytes": 291025752,
+    "adapter_type": "PEFT_LORA_SAFETENSORS", "base_repo": "TinyLlama/TinyLlama-1.1B-Chat-v1.0", "base_revision": "fe8a4ea1ffedaf415f4da2f062534de366a451e6", "base_revision_training_time_proven": false,
+    "base_sha256": "6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933", "base_size_bytes": 2200119864,
+    "exact_adapter_sha_ledger_hits_before_network": 0, "exact_base_sha_ledger_hits_before_network": 0, "forbidden_pickle_files_present": [], "license_authority": "HF_MODEL_CARD_APACHE_2_0"
+  },
+  "suite": {"fresh_procedural_random_playouts": true, "invalid_fen_cases": 32, "model_output_seen_before_suite_seal": false, "multipv": 3, "planned_cases": 256, "stockfish_nodes_per_position": 12000, "training_rows_reused": false, "valid_cases": 224},
+  "training_lineage": {
+    "hf_card_claim": "two-stage TinyLlama chess move + explanation/taunt adapter", "notebook_adds_special_tokens": ["<|json|>", "</|json|>"], "notebook_blob_sha": "fa0520ab5bf89a4da953933d380423201952d52f", "notebook_matches_gate_proj": true, "notebook_resizes_embeddings": true,
+    "standalone_phase1_blob_sha": "5a7feebb9bfe904b93c56146479d631c3b0dac1f", "standalone_phase2_blob_sha": "4e38cd49d912ad4ea586edf43a4a38d3c3121d22", "standalone_scripts_status": "STALE_OR_INCONSISTENT_WITH_PUBLISHED_ADAPTER_AND_NOTEBOOK", "training_time_exact_dependency_versions": "UNPROVEN"
+  }
+}
