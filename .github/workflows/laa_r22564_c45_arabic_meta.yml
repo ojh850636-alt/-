@@ -1,0 +1,33 @@
+name: LAA R22564 C45 Arabic diacritization metadata only
+on:
+  push:
+    branches: [laa-r22564-c45-arabic-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Exact metadata only without raw weight ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/Bisher/train_run-SmolLM2-135M-Instruct-fadel-full-arabic-diacritization adapter
+          git clone -q --depth 1 https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct base
+          mkdir out
+          python - <<'PY'
+          import pathlib,json,subprocess
+          def ptr(p):
+              d={}
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+                  elif l.startswith('size '): d['size_bytes']=int(l.split()[1])
+              return d
+          a=pathlib.Path('adapter'); b=pathlib.Path('base'); ac=json.load(open(a/'adapter_config.json')); bc=json.load(open(b/'config.json'))
+          out={'schema':'LAA_R22564_C45_ARABIC_METADATA_V1','candidate_id':'R22565-C45-ARABIC-DIACRITIZATION-SMOLLM2-135M','adapter_repo':'Bisher/train_run-SmolLM2-135M-Instruct-fadel-full-arabic-diacritization','adapter_revision':subprocess.check_output(['git','-C','adapter','rev-parse','HEAD'],text=True).strip(),'adapter_weight':ptr(a/'adapter_model.safetensors'),'adapter_config':ac,'adapter_files':sorted(p.name for p in a.iterdir() if p.name!='.git'),'base_repo':'HuggingFaceTB/SmolLM2-135M-Instruct','base_revision':subprocess.check_output(['git','-C','base','rev-parse','HEAD'],text=True).strip(),'base_weight':ptr(b/'model.safetensors'),'base_config_summary':{k:bc.get(k) for k in ['model_type','hidden_size','intermediate_size','num_hidden_layers','num_attention_heads','num_key_value_heads','vocab_size']},'base_files':sorted(p.name for p in b.iterdir() if p.name!='.git'),'forbidden_adapter_files_present':sorted({'pytorch_model.bin','adapter_model.bin'} & {p.name for p in a.iterdir()}),'pickle_metadata_present':sorted({'training_args.bin'} & {p.name for p in a.iterdir()}),'license_claim':'apache-2.0','task_card_claim':'ARABIC_DIACRITIZATION_BUT_DATASET_UNNAMED_IN_MODEL_CARD','raw_weight_bytes_downloaded':0,'model_output_bytes':0}
+          pathlib.Path('out/R22564_C45_ARABIC_METADATA.json').write_text(json.dumps(out,indent=2,sort_keys=True)); print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22564-c45-arabic-meta, path: out/R22564_C45_ARABIC_METADATA.json, retention-days: 1}
