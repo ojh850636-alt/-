@@ -1,0 +1,65 @@
+            if self.group_match(n,group,total_layers):
+                k=adapter_key(m); m.scaling[k]=self.base_scaling[(n,k)]
+    def set_condition(self,c):
+        self.restore()
+        if c=='BASE': self.lora_scale(0.0); self.aux_enabled(False)
+        elif c=='AUX_ONLY': self.lora_scale(0.0); self.aux_enabled(True)
+        elif c=='LORA_ONLY': self.lora_scale(1.0); self.aux_enabled(False)
+        elif c=='FULL': pass
+        elif c=='RANDOM_SIGN_LORA_SAME_AUX': self.random_sign()
+        elif c=='LAYER_SHUFFLED_LORA_SAME_AUX': self.layer_shuffle_b()
+        elif c.startswith('DOSE_'): self.lora_scale(float(c.split('_',1)[1]))
+        else: raise ValueError(c)
+
+def prepare_model(base_dir,adapter_dir):
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from peft import PeftModel
+    tok=AutoTokenizer.from_pretrained(str(adapter_dir),local_files_only=True,trust_remote_code=False)
+    if tok.pad_token_id is None: tok.pad_token=tok.eos_token
+    tok.padding_side='left'
+    base=AutoModelForCausalLM.from_pretrained(str(base_dir),local_files_only=True,trust_remote_code=False,torch_dtype=torch.float32,low_cpu_mem_usage=True)
+    if base.get_input_embeddings().weight.shape[0] != len(tok):
+        base.resize_token_embeddings(len(tok))
+    model=PeftModel.from_pretrained(base,str(adapter_dir),local_files_only=True,is_trainable=False)
+    model.eval()
+    return model,tok
+
+def score_rows(model,tok,rows,batch=8):
+    import torch
+    vals=[]
+    with torch.inference_mode():
+      for s in range(0,len(rows),batch):
+        chunk=rows[s:s+batch]; seqs=[]; labels=[]
+        for row in chunk:
+            p=tok(row['prompt_primary'],add_special_tokens=False).input_ids
+            t=tok(' '+row['target'],add_special_tokens=False).input_ids
+            ids=p+t; lab=[-100]*len(p)+t
+            seqs.append(ids); labels.append(lab)
+        mx=max(map(len,seqs)); pad=tok.pad_token_id
+        xs=[]; am=[]; ys=[]
+        for ids,lab in zip(seqs,labels):
+            d=mx-len(ids); xs.append([pad]*d+ids); am.append([0]*d+[1]*len(ids)); ys.append([-100]*d+lab)
+        input_ids=torch.tensor(xs); attention_mask=torch.tensor(am); y=torch.tensor(ys)
+        logits=model(input_ids=input_ids,attention_mask=attention_mask,use_cache=False).logits
+        lp=torch.log_softmax(logits[:,:-1,:].float(),dim=-1); target=y[:,1:]; mask=target!=-100
+        safe=target.masked_fill(~mask,0)
+        picked=lp.gather(-1,safe.unsqueeze(-1)).squeeze(-1)
+        for i in range(len(chunk)):
+            m=mask[i]; vals.append(float(picked[i][m].mean().item()) if m.any() else 0.0)
+    return vals
+
+def clean_generation_text(s):
+    s=s.strip(); s=s.split('\n')[0].strip()
+    for stop in ['<|endoftext|>','<|im_end|>']:
+        if stop in s: s=s.split(stop,1)[0].strip()
+    return s[:256]
+
+def generate_rows(model,tok,rows,batch=8,max_new=24):
+    import torch
+    sys.path.insert(0,str(Path(__file__).resolve().parent))
+    from c43_verifier import exact_or_token_equiv,semantic_equiv,syntax_ok
+    out=[]
+    with torch.inference_mode():
+      for s in range(0,len(rows),batch):
+        chunk=rows[s:s+batch]; prompts=[x['prompt_primary'] for x in chunk]
