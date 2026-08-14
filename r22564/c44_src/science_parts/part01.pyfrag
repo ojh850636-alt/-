@@ -1,0 +1,54 @@
+    out.update({'tensor_counts':dict(stats),'parameter_elements':dict(elems),'total_parameter_elements':total_elems,'lora_parameter_elements':elems['lora_A']+elems['lora_B'],'auxiliary_parameter_elements':elems['embedding_like']+elems['lm_head_like']+elems['other'],'lora_fraction':(elems['lora_A']+elems['lora_B'])/total_elems if total_elems else 0,'auxiliary_fraction':(elems['embedding_like']+elems['lm_head_like']+elems['other'])/total_elems if total_elems else 0,'zero_lora_B_tensors':zero_b,'nonfinite_lora_tensors':nonfinite,'energy_by_projection':dict(sorted(energy_proj.items())),'energy_by_layer':dict(sorted(energy_layer.items(),key=lambda kv:int(kv[0]) if kv[0].isdigit() else 999)),'shape_digest_sha256':hashlib.sha256(json.dumps(shapes,sort_keys=True).encode()).hexdigest(),'lora_dtypes':sorted(set(dtypes.values()))})
+    return out
+
+def adapter_key(m): return next(iter(m.scaling.keys()))
+class Controller:
+    def __init__(self,model):
+        self.model=model; self.loras=[]
+        for n,m in model.named_modules():
+            if hasattr(m,'lora_A') and hasattr(m,'lora_B') and getattr(m,'scaling',None): self.loras.append((n,m))
+        if not self.loras: raise RuntimeError('no lora modules')
+        self.orig_scale={(n,adapter_key(m)):float(m.scaling[adapter_key(m)]) for n,m in self.loras}
+        self.orig_B={}
+    def restore_scale(self):
+        for n,m in self.loras:
+            k=adapter_key(m); m.scaling[k]=self.orig_scale[(n,k)]
+    def set_all(self,factor):
+        for n,m in self.loras:
+            k=adapter_key(m); m.scaling[k]=self.orig_scale[(n,k)]*factor
+    def random_sign(self):
+        self.restore_scale(); r=random.Random(SEED+3)
+        for n,m in self.loras:
+            k=adapter_key(m); m.scaling[k]=self.orig_scale[(n,k)]*(1 if r.random()<.5 else -1)
+    def _proj(self,n): return next((p for p in ['q_proj','k_proj','v_proj','o_proj','gate_proj'] if p in n),'other')
+    def _layer(self,n):
+        m=re.search(r'layers\.(\d+)',n); return int(m.group(1)) if m else -1
+    def shuffle_B(self):
+        import torch
+        self.restore_scale(); groups=defaultdict(list)
+        for n,m in self.loras: groups[self._proj(n)].append((n,m))
+        if not self.orig_B:
+            for n,m in self.loras:
+                k=adapter_key(m); self.orig_B[(n,k)]=m.lora_B[k].weight.detach().cpu().clone()
+        r=random.Random(SEED+7)
+        for proj,items in groups.items():
+            items=sorted(items,key=lambda x:self._layer(x[0])); src=[self.orig_B[(n,adapter_key(m))] for n,m in items]; perm=list(range(len(src))); r.shuffle(perm)
+            for (n,m),j in zip(items,perm):
+                k=adapter_key(m); m.lora_B[k].weight.data.copy_(src[j].to(m.lora_B[k].weight.device,dtype=m.lora_B[k].weight.dtype))
+    def restore_B(self):
+        if self.orig_B:
+            for n,m in self.loras:
+                k=adapter_key(m); m.lora_B[k].weight.data.copy_(self.orig_B[(n,k)].to(m.lora_B[k].weight.device,dtype=m.lora_B[k].weight.dtype))
+    def set_condition(self,c):
+        self.restore_B(); self.restore_scale()
+        if c=='BASE': self.set_all(0.0)
+        elif c=='FULL': pass
+        elif c=='RANDOM_SIGN': self.random_sign()
+        elif c=='LAYER_SHUFFLE': self.shuffle_B()
+        elif c.startswith('DOSE_'): self.set_all(float(c.split('_',1)[1]))
+        else: raise ValueError(c)
+    def group_match(self,n,group,total_layers):
+        band,kind=group.split(':'); L=self._layer(n)
+        if L<0:return False
+        if band=='early': ok=L < total_layers//3
+        elif band=='mid': ok=total_layers//3 <= L < (2*total_layers)//3
