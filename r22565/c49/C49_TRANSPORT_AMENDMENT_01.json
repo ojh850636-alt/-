@@ -1,0 +1,20 @@
+{
+  "schema": "LAA_R22565_C49_TRANSPORT_AMENDMENT_V1",
+  "scope": "OUTPUT_ZERO_TRANSPORT_IDENTITY_ONLY",
+  "reason": "GitHub Contents API UTF-8 normalization made locally computed pre-upload SHA-256 unsuitable as the repository text-byte authority. The failed v1 preflight stopped before forge execution and before all model raw ingress.",
+  "scientific_contract_changed": false,
+  "suite_changed": false,
+  "thresholds_changed": false,
+  "model_outputs_before_amendment": 0,
+  "raw_model_bytes_consumed_before_amendment": 0,
+  "authoritative_git_blobs": {
+    "c49_forge.py": "9ffe08ae68271459d879cb7717909625cfe6676b",
+    "c49_science.py": "4d9996770b3b566e0f84fbfa41fee4ab8d0e657b",
+    "C49_PREOUTPUT_CONTRACT.json": "4b941b36a7e7ddfc273bf4812e038e8c37ddd328"
+  },
+  "semantic_suite_sha256": "51b08687533ca87f53b65cf5313851c2405a58d096da811677c8caf6a11f02ba",
+  "v1_run": 31851209768,
+  "v1_credit": 0,
+  "v1_reuse_forbidden": true,
+  "next_marker": "START_ONCE_V2.txt"
+}
