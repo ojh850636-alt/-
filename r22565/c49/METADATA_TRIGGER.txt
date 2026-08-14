@@ -1,0 +1,1 @@
+R22565 C49 metadata-only audit trigger. No model raw. Scientific output count remains zero.
