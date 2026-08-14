@@ -1,0 +1,1 @@
+R22565 C49 v2 one-use source ingress. V1 consumed zero raw bytes and is permanently credit zero. Do not modify this marker again. Any recovery after raw capture must use v2 escrow artifacts only.
