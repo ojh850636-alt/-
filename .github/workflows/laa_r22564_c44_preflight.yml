@@ -1,0 +1,90 @@
+name: LAA R22564 C44 source-zero preflight
+on:
+  push:
+    branches: [laa-r22564-c44-onepass]
+permissions:
+  contents: read
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Reconstruct and bind frozen science code
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work_src out
+          cat r22564/c44_src/forge_parts/part*.pyfrag > work_src/c44_forge.py
+          cat r22564/c44_src/science_parts/part*.pyfrag > work_src/c44_science.py
+          cp r22564/c44_src/c44_replay.py work_src/c44_replay.py
+          cp r22564/c44_src/R22564_C44_PREOUTPUT_CONTRACT.json out/R22564_C44_PREOUTPUT_CONTRACT.json
+          test "$(stat -c%s work_src/c44_forge.py)" = 7346
+          test "$(sha256sum work_src/c44_forge.py | awk '{print $1}')" = 8ed5614987b02f3453247fcc678c0503b551d89ed2fffcff9cc418d39e23859d
+          test "$(stat -c%s work_src/c44_science.py)" = 20493
+          test "$(sha256sum work_src/c44_science.py | awk '{print $1}')" = 8f6107fd138425b118cdb405288dff0a99df18ec57fe61192adccd02136ad013
+          test "$(stat -c%s work_src/c44_replay.py)" = 3698
+          test "$(sha256sum work_src/c44_replay.py | awk '{print $1}')" = 35e938524b56f6d6f9ffadf4152b3961a0d442f679e88b960fe1a50704113a76
+          python -m py_compile work_src/*.py
+      - name: Exact remote tree and LFS pointer contract, no raw weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/ducklin404/chezz a
+          git clone -q --depth 1 https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0 b
+          test "$(git -C a rev-parse HEAD)" = 3bbc3092e4a4987aa23f2a51068616488b5d90a5
+          test "$(git -C b rev-parse HEAD)" = fe8a4ea1ffedaf415f4da2f062534de366a451e6
+          python - <<'PY'
+          import pathlib,json
+          def ptr(p):
+              d={}
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha']=l.split(':',1)[1]
+                  elif l.startswith('size '): d['size']=int(l.split()[1])
+              return d
+          assert ptr(pathlib.Path('a/adapter_model.safetensors'))=={'sha':'ca0710c04480627b50bb1350bd32fdf5545a95c17ecab38eab3cd6f92c24c0d7','size':291025752}
+          assert ptr(pathlib.Path('b/model.safetensors'))=={'sha':'6e6001da2106d4757498752a021df6c2bdc332c650aae4bae6b0c004dcf14933','size':2200119864}
+          cfg=json.load(open('a/adapter_config.json'))
+          assert cfg['r']==16 and cfg['lora_alpha']==32 and cfg['modules_to_save'] is None
+          assert set(cfg['target_modules'])=={'q_proj','k_proj','v_proj','o_proj','gate_proj'}
+          assert not ({'adapter_model.bin','training_args.bin','pytorch_model.bin'} & {p.name for p in pathlib.Path('a').iterdir()})
+          print('EXACT_SOURCE_TREE_PASS')
+          PY
+      - name: Install source-zero verifier runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq stockfish
+          python -m pip install -q python-chess==1.999 torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          /usr/games/stockfish bench 1 1 8 default depth >/dev/null
+      - name: Forge fresh Stockfish suite before any model output
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python work_src/c44_forge.py --out out/C44_CHESS_SUITE.jsonl --engine /usr/games/stockfish | tee out/C44_FORGE_STDOUT.txt
+          python - <<'PY'
+          import json,hashlib,pathlib
+          m=json.load(open('out/C44_CHESS_SUITE.meta.json'))
+          assert m['cases']==256 and m['oracle']['positive']==224 and m['oracle']['negative']==32 and m['oracle']['oracle_pass'] is True
+          p=pathlib.Path('out/C44_CHESS_SUITE.jsonl')
+          assert hashlib.sha256(p.read_bytes()).hexdigest()==m['sha256']
+          c=json.load(open('out/R22564_C44_PREOUTPUT_CONTRACT.json'))
+          assert c['model_outputs_observed_before_seal']==0 and c['raw_weight_bytes_before_authorization']==0
+          c['suite']['actual_sha256']=m['sha256']; c['suite']['actual_split_counts']=m['splits']; c['suite']['actual_family_counts']=m['families']; c['suite']['oracle_self_check']=m['oracle']
+          pathlib.Path('out/R22564_C44_PREOUTPUT_CONTRACT_SEALED.json').write_text(json.dumps(c,indent=2,sort_keys=True))
+          print('SUITE_PREOUTPUT_SEAL_PASS',m['sha256'])
+          PY
+      - name: Controller self-test before raw ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python work_src/c44_science.py --self-test | tee out/C44_RUNTIME_SELFTEST.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22564-c44-preseal
+          path: out
+          retention-days: 1
