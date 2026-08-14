@@ -1,0 +1,112 @@
+name: LAA R22565 C49 same-escrow recovery
+on:
+  push:
+    branches: [laa-r22565-c49-minilm-agnews]
+    paths: [r22565/c49/RECOVER_SAME_ESCROW_01.txt]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  science_recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22565-c49-v2-raw-adapter
+          path: raw_adapter
+          repository: ojh850636-alt/-
+          run-id: 31851360447
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22565-c49-v2-raw-base
+          path: raw_base
+          repository: ojh850636-alt/-
+          run-id: 31851360447
+          github-token: ${{ github.token }}
+      - name: Verify authoritative v2 escrows and output-zero recovery boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object r22565/c49/c49_forge.py)" = 9ffe08ae68271459d879cb7717909625cfe6676b
+          test "$(git hash-object r22565/c49/c49_science.py)" = 4d9996770b3b566e0f84fbfa41fee4ab8d0e657b
+          test "$(git hash-object r22565/c49/C49_PREOUTPUT_CONTRACT.json)" = 4b941b36a7e7ddfc273bf4812e038e8c37ddd328
+          test -f raw_adapter/adapter_model.safetensors
+          test -f raw_adapter/adapter_config.json
+          test -f raw_base/model.safetensors
+          test "$(find raw_adapter -maxdepth 1 -type f -name 'adapter_model.safetensors' | wc -l)" = 1
+          test "$(find raw_base -maxdepth 1 -type f -name 'model.safetensors' | wc -l)" = 1
+          test "$(stat -c%s raw_adapter/adapter_model.safetensors)" = 33128
+          test "$(sha256sum raw_adapter/adapter_model.safetensors | awk '{print $1}')" = e50ef9a7b3ab9ce41feb3b0003b777e087d04257c56311cce6c003fab225a7d1
+          test "$(stat -c%s raw_base/model.safetensors)" = 76671186
+          test "$(sha256sum raw_base/model.safetensors | awk '{print $1}')" = 3db1c98132b54901976d6da56fa711756c7780a6263d5db8f336232584f5fe58
+          python - <<'PY'
+          import json,pathlib
+          a=json.loads(pathlib.Path('r22565/c49/C49_TRANSPORT_AMENDMENT_01.json').read_text())
+          assert a['v1_credit']==0 and a['raw_model_bytes_consumed_before_amendment']==0
+          pathlib.Path('C49_RECOVERY_BOUNDARY.json').write_text(json.dumps({
+            'schema':'LAA_R22565_C49_RECOVERY_BOUNDARY_V1',
+            'authoritative_source_run':31851360447,
+            'failed_science_stage':'ARTIFACT_ROOT_SHAPE_BEFORE_MODEL_FORWARD',
+            'model_outputs_before_recovery':0,
+            'hf_redownload_bytes_in_recovery':0,
+            'suite_changed':False,'thresholds_changed':False,'science_semantics_changed':False
+          },indent=2,sort_keys=True))
+          PY
+      - name: Run frozen science from same v2 escrows
+        shell: bash
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false', PYTHONDONTWRITEBYTECODE: '1'}
+        run: |
+          set -euo pipefail
+          mkdir -p datasets/r22565_c49 work/adapter work/base evidence
+          cp -a raw_adapter/. work/adapter/
+          cp -a raw_base/. work/base/
+          python r22565/c49/c49_forge.py
+          test "$(sha256sum datasets/r22565_c49/C49_FRESH_NEWS_TOPIC_SUITE.jsonl | awk '{print $1}')" = 51b08687533ca87f53b65cf5313851c2405a58d096da811677c8caf6a11f02ba
+          python -m pip install -q numpy==1.26.4 torch==2.2.0 transformers==4.37.2 peft==0.8.2 accelerate==0.26.1 safetensors==0.4.2
+          python r22565/c49/c49_science.py --self-test > evidence/C49_RUNTIME_SELFTEST.json
+          python r22565/c49/c49_science.py --run --work work --suite datasets/r22565_c49/C49_FRESH_NEWS_TOPIC_SUITE.jsonl --out evidence --batch 32 | tee evidence/C49_STDOUT_SUMMARY.txt
+          cp r22565/c49/C49_PREOUTPUT_CONTRACT.json evidence/C49_PREOUTPUT_CONTRACT.json
+          cp r22565/c49/C49_TRANSPORT_AMENDMENT_01.json evidence/C49_TRANSPORT_AMENDMENT_01.json
+          cp C49_RECOVERY_BOUNDARY.json evidence/C49_RECOVERY_BOUNDARY.json
+          cp datasets/r22565_c49/C49_FRESH_NEWS_TOPIC_SUITE.jsonl evidence/C49_FRESH_NEWS_TOPIC_SUITE.jsonl
+          rm -rf work raw_adapter raw_base
+          if find evidence -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' \) | grep -q .; then exit 91; fi
+          python - <<'PY'
+          import hashlib,json,pathlib
+          r=pathlib.Path('evidence'); fs=[]
+          for p in sorted(r.iterdir()):
+            if p.is_file(): fs.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (r/'C49_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22565_C49_RAW_FREE_V1','authoritative_source_run':31851360447,'raw_source_present':False,'files':fs},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22565-c49-v2-rawfree-evidence-recovery, path: evidence, retention-days: 1}
+  cleanup:
+    if: ${{ always() && needs.science_recovery.result == 'success' }}
+    needs: science_recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete authoritative C49 v2 source escrows
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/31851360447/artifacts?per_page=100" > a.json
+          python - <<'PY' > cleanup/targets.tsv
+          import json
+          for a in json.load(open('a.json'))['artifacts']:
+            if a['name'] in {'r22565-c49-v2-raw-adapter','r22565-c49-v2-raw-base'}: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/targets.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/targets.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          l=pathlib.Path('cleanup/deleted.txt').read_text().splitlines(); pathlib.Path('cleanup/C49_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22565_C49_RAW_DELETION_V1','deleted':l,'count':len(l),'authoritative_source_run':31851360447,'hf_redownload_bytes_in_recovery':0,'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22565-c49-v2-cleanup-recovery, path: cleanup/C49_RAW_DELETION.json, retention-days: 1}
