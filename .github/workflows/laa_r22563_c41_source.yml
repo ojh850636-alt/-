@@ -1,0 +1,57 @@
+name: LAA R22563 C41 exact source
+on:
+  push:
+    branches: [laa-r22563-c41-source]
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Capture exact safe source and runtime wheels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out/adapter out/base_meta out/base_parts out/wheels out/manifests
+          A_REV=de20fb47abcc772ac4a9e11effb40b5084b42056
+          B_REV=a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1
+          A=https://huggingface.co/kj821/t5-base-mathml-python/resolve/$A_REV
+          B=https://huggingface.co/google-t5/t5-base/resolve/$B_REV
+          for f in adapter_config.json adapter_model.safetensors added_tokens.json special_tokens_map.json spiece.model tokenizer_config.json README.md; do curl -L --fail --retry 3 -o out/adapter/$f "$A/$f"; done
+          for f in config.json generation_config.json spiece.model tokenizer.json tokenizer_config.json; do curl -L --fail --retry 3 -o out/base_meta/$f "$B/$f"; done
+          curl -L --fail --retry 3 -o out/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s out/adapter/adapter_model.safetensors)" = 27520688
+          test "$(sha256sum out/adapter/adapter_model.safetensors | awk '{print $1}')" = 1ad53bca09642d6ea170960042a25a227b313c8907faa4c98bc5463c6e7d403f
+          test "$(stat -c%s out/model.safetensors)" = 891646390
+          test "$(sha256sum out/model.safetensors | awk '{print $1}')" = a90903540cc02cbeb7ff9f823f1a80eb778c7e22426a0e620b01c77a5ec8f5b4
+          split -b 180000000 -d -a 2 out/model.safetensors out/base_parts/base.part.
+          test "$(find out/base_parts -type f | wc -l)" = 5
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('out')
+          def rec(p):
+            b=p.read_bytes();return {'path':str(p.relative_to(root)),'size':len(b),'sha256':hashlib.sha256(b).hexdigest()}
+          files=[rec(p) for p in sorted((root/'adapter').iterdir()) if p.is_file()]+[rec(p) for p in sorted((root/'base_meta').iterdir()) if p.is_file()]+[rec(p) for p in sorted((root/'base_parts').iterdir())]
+          obj={'schema':'LAA_R22563_C41_SOURCE_COURIER_MANIFEST_V1','adapter_revision':'de20fb47abcc772ac4a9e11effb40b5084b42056','base_revision':'a9723ea7f1b39c1eae772870f3b547bf6ef7e6c1','adapter_weight_sha256':'1ad53bca09642d6ea170960042a25a227b313c8907faa4c98bc5463c6e7d403f','base_weight_sha256':'a90903540cc02cbeb7ff9f823f1a80eb778c7e22426a0e620b01c77a5ec8f5b4','files':files,'git_raw_weight_committed':False}
+          (root/'manifests'/'SOURCE_MANIFEST.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+          python -m pip download --no-deps -d out/wheels transformers==4.51.3 peft==0.15.2 accelerate==1.5.2 tokenizers==0.21.1 huggingface_hub==0.30.2
+          (cd out/wheels && sha256sum * > WHEEL_SHA256SUMS.txt)
+          rm out/model.safetensors
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-adapter, path: out/adapter, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-meta, path: out/base_meta, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-00, path: out/base_parts/base.part.00, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-01, path: out/base_parts/base.part.01, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-02, path: out/base_parts/base.part.02, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-03, path: out/base_parts/base.part.03, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-base-04, path: out/base_parts/base.part.04, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-wheels, path: out/wheels, retention-days: 1, compression-level: 0}
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c41-source-manifest, path: out/manifests/SOURCE_MANIFEST.json, retention-days: 1}
