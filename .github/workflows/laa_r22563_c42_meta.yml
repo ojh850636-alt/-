@@ -1,0 +1,47 @@
+name: LAA R22563 C42 metadata only
+on:
+  push:
+    branches: [laa-r22563-c42-singlish-meta]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit metadata before any weight ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          mkdir -p work out
+          git clone -q --depth 1 https://huggingface.co/Pudamya/small100-singlish-sinhala-transliteration-2phase work/adapter
+          git clone -q --depth 1 https://huggingface.co/alirezamsh/small100 work/base
+          python - <<'PY'
+          import json,pathlib,hashlib,os
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def ptr(p):
+            p=pathlib.Path(p); text=p.read_text(errors='replace')
+            o={'pointer_size':p.stat().st_size,'pointer_sha256':sha(p)}
+            for line in text.splitlines():
+              if line.startswith('oid sha256:'): o['remote_sha256']=line.split(':',1)[1]
+              elif line.startswith('size '): o['remote_size']=int(line.split()[1])
+            return o
+          a=pathlib.Path('work/adapter'); b=pathlib.Path('work/base')
+          afiles=sorted(x.name for x in a.iterdir() if x.name!='.git')
+          bfiles=sorted(x.name for x in b.iterdir() if x.name!='.git')
+          required_adapter=['adapter_config.json','adapter_model.safetensors','tokenization_small100.py','sentencepiece.bpe.model','special_tokens_map.json','tokenizer_config.json','vocab.json']
+          optional_adapter=['README.md','generation_config.json']
+          forbidden_adapter=['training_args.bin','pytorch_model.bin','model.safetensors']
+          required_base=['config.json','model.safetensors','sentencepiece.bpe.model','special_tokens_map.json','tokenization_small100.py','tokenizer_config.json','vocab.json']
+          optional_base=['generation_config.json','README.md']
+          forbidden_base=['pytorch_model.bin','model.onnx']
+          audit={'required_adapter_missing':[x for x in required_adapter if x not in afiles], 'required_base_missing':[x for x in required_base if x not in bfiles], 'forbidden_adapter_present':[x for x in forbidden_adapter if x in afiles], 'forbidden_base_present':[x for x in forbidden_base if x in bfiles], 'optional_adapter_absent':[x for x in optional_adapter if x not in afiles], 'optional_base_absent':[x for x in optional_base if x not in bfiles]}
+          cfg=json.loads((a/'adapter_config.json').read_text()) if (a/'adapter_config.json').exists() else None
+          obj={'schema':'LAA_R22563_C42_METADATA_AUDIT_V1','question':'Romanized Sinhala to Sinhala Unicode grapheme transliteration robustness and causal path archaeology','adapter':{'repo':'Pudamya/small100-singlish-sinhala-transliteration-2phase','revision':os.popen('git -C work/adapter rev-parse HEAD').read().strip(),'files':afiles,'config':cfg,'config_sha256':sha(a/'adapter_config.json') if (a/'adapter_config.json').exists() else None,'weight':ptr(a/'adapter_model.safetensors') if (a/'adapter_model.safetensors').exists() else None,'tokenizer_code_sha256':sha(a/'tokenization_small100.py') if (a/'tokenization_small100.py').exists() else None},'base':{'repo':'alirezamsh/small100','revision':os.popen('git -C work/base rev-parse HEAD').read().strip(),'files':bfiles,'config_sha256':sha(b/'config.json'),'weight':ptr(b/'model.safetensors'),'tokenizer_code_sha256':sha(b/'tokenization_small100.py'),'spm':ptr(b/'sentencepiece.bpe.model')},'file_contract':audit,'metadata_gate':'PASS' if not audit['required_adapter_missing'] and not audit['required_base_missing'] else 'HOLD','raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          pathlib.Path('out/R22563_C42_METADATA_AUDIT.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22563-c42-meta
+          path: out/R22563_C42_METADATA_AUDIT.json
+          retention-days: 1
