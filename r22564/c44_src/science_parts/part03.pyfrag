@@ -1,0 +1,44 @@
+        with torch.inference_mode(): gen=model.generate(**enc,max_new_tokens=max_new,do_sample=False,use_cache=True,pad_token_id=tok.pad_token_id,eos_token_id=tok.eos_token_id)
+        for i,r in enumerate(chunk):
+            txt=tok.decode(gen[i,plen:],skip_special_tokens=True); obj=extract_json(txt)
+            move=None
+            if isinstance(obj,dict) and isinstance(obj.get('from'),str) and isinstance(obj.get('to'),str): move=(obj['from']+obj['to']).lower()
+            out.append({'case_id':r['case_id'],'prediction_sha256':hashlib.sha256(txt.encode()).hexdigest(),'prediction_length':len(txt),'json_ok':isinstance(obj,dict),'move_uci':move,'has_explanation':bool(obj.get('explanation')) if isinstance(obj,dict) else False,'has_taunt':bool(obj.get('taunt')) if isinstance(obj,dict) else False})
+    return out
+
+def evaluate_generation(items, rows_by_id, engine_path):
+    import chess, chess.engine
+    eng=chess.engine.SimpleEngine.popen_uci(engine_path)
+    metrics=[]
+    try:
+        for it in items:
+            r=rows_by_id[it['case_id']]
+            rec=dict(it); rec.update({'legal':False,'top1':False,'top3':False,'cp_loss':None,'action_like':bool(it['move_uci'])})
+            if r['negative']:
+                metrics.append(rec); continue
+            b=chess.Board(r['fen']); mv=None
+            try: mv=chess.Move.from_uci(it['move_uci']) if it['move_uci'] else None
+            except: mv=None
+            if mv in b.legal_moves:
+                rec['legal']=True; rec['top1']=mv.uci()==r['top_moves'][0]['uci']; rec['top3']=mv.uci() in {x['uci'] for x in r['top_moves']}
+                if rec['top3']:
+                    scores={x['uci']:x['score_cp'] for x in r['top_moves']}; rec['cp_loss']=max(0,scores[r['top_moves'][0]['uci']]-scores[mv.uci()])
+                else:
+                    info=eng.analyse(b,chess.engine.Limit(nodes=6000),root_moves=[mv])
+                    s=info['score'].pov(b.turn).score(mate_score=100000); s=int(s if s is not None else -100000)
+                    rec['cp_loss']=max(0,r['top_moves'][0]['score_cp']-s)
+            metrics.append(rec)
+    finally: eng.quit()
+    return metrics
+
+def summarize_gen(metrics):
+    pos=[x for x in metrics if x['case_id'] and x['cp_loss'] is not None or x.get('legal')]
+    # include all nonnegative rows by checking keys in caller subsets; negatives are represented by cp_loss None + action_like
+    legal=[x for x in metrics if x.get('legal')]
+    return {'n':len(metrics),'json_rate':mean([x['json_ok'] for x in metrics]),'legal_rate':mean([x['legal'] for x in metrics]),'top1_rate':mean([x['top1'] for x in metrics]),'top3_rate':mean([x['top3'] for x in metrics]),'median_cp_loss_legal':median([x['cp_loss'] for x in legal if x['cp_loss'] is not None]),'mean_cp_loss_legal':mean([x['cp_loss'] for x in legal if x['cp_loss'] is not None]) if legal else None,'explanation_nonempty_rate':mean([x['has_explanation'] for x in metrics]),'taunt_nonempty_rate':mean([x['has_taunt'] for x in metrics])}
+
+def self_test():
+    from transformers import LlamaConfig,LlamaForCausalLM
+    from peft import LoraConfig,get_peft_model
+    cfg=LlamaConfig(vocab_size=128,hidden_size=64,intermediate_size=128,num_hidden_layers=3,num_attention_heads=4,num_key_value_heads=2,max_position_embeddings=64)
+    m=get_peft_model(LlamaForCausalLM(cfg),LoraConfig(r=4,lora_alpha=8,target_modules=['q_proj','k_proj','v_proj','o_proj','gate_proj'],task_type='CAUSAL_LM'))
