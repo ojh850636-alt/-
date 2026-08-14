@@ -1,27 +1,25 @@
-    behavior={'schema':'LAA_R22564_C44_BEHAVIOR_V1','scores_mean_target_logprob':scores,'controls_locked_mean_target_logprob':ctrls,'dose_mean_target_logprob':doses,'full_minus_base_nats':delta,'ci95':ci,'full_minus_random_nats':fr,'full_minus_shuffle_nats':fs,'teacher_effect_gate':teacher_gate,'positive_capability_gate':positive,'failure_gate':failure,'generation':generation,'legal_rate_gain':legal_gain,'top3_rate_gain':top3_gain,'invalid_fen_action_like_delta':invalid_delta,'raw_predictions_exported':False,'case_prediction_hashes_only':True}
+    total_diffs=[per['FULL'][r['case_id']]-per['BASE'][r['case_id']] for r in gate]; total_delta=mean(total_diffs); total_ci=bootstrap_ci(total_diffs)
+    cond_diffs=[per['FULL'][r['case_id']]-per['AUX_ONLY'][r['case_id']] for r in gate]; cond_delta=mean(cond_diffs); cond_ci=bootstrap_ci(cond_diffs)
+    aux_diffs=[per['AUX_ONLY'][r['case_id']]-per['BASE'][r['case_id']] for r in gate]; aux_delta=mean(aux_diffs); aux_ci=bootstrap_ci(aux_diffs)
+    lora_only_delta=mean([per['LORA_ONLY'][r['case_id']]-per['BASE'][r['case_id']] for r in gate])
+    fr=mean([per['FULL'][r['case_id']]-ctrlper['RANDOM_SIGN'][r['case_id']] for r in gate])
+    fs=mean([per['FULL'][r['case_id']]-ctrlper['LAYER_SHUFFLE'][r['case_id']] for r in gate])
+    sign=1 if cond_delta>=0 else -1; control_sep=sign*fr>=0.05 and sign*fs>=0.05; cond_ci_ex=(cond_ci[0]>0 or cond_ci[1]<0); conditional_lora_gate=abs(cond_delta)>=0.10 and cond_ci_ex and control_sep
+    total_ci_ex=(total_ci[0]>0 or total_ci[1]<0); total_adaptation_gate=abs(total_delta)>=0.10 and total_ci_ex
+    # free generation on fixed 32 valid + 8 invalid, all four decomposition conditions
+    gen_valid=locked[:32]; gen_neg=[r for r in rows if r['negative']][:8]; gen_rows=gen_valid+gen_neg; rb={r['case_id']:r for r in gen_rows}
+    generation={}; genhash={}
+    for c in ['BASE','AUX_ONLY','LORA_ONLY','FULL']:
+        ctl.set_condition(c); items=generate_rows(model,tok,gen_rows,batch=1); met=evaluate_generation(items,rb,a.engine); genhash[c]=met; validmet=[x for x in met if not rb[x['case_id']]['negative']]; negmet=[x for x in met if rb[x['case_id']]['negative']]
+        generation[c]=summarize_gen(validmet); generation[c]['invalid_fen_action_like_rate']=mean([x['action_like'] for x in negmet])
+    legal_gain=generation['FULL']['legal_rate']-generation['BASE']['legal_rate']; top3_gain=generation['FULL']['top3_rate']-generation['BASE']['top3_rate']; invalid_delta=generation['FULL']['invalid_fen_action_like_rate']-generation['BASE']['invalid_fen_action_like_rate']
+    base_cpl=generation['BASE']['mean_cp_loss_legal']; full_cpl=generation['FULL']['mean_cp_loss_legal']; cpl_worse=(base_cpl is not None and full_cpl is not None and full_cpl-base_cpl>=80)
+    positive=total_adaptation_gate and total_delta>0 and (legal_gain>=0.10 or top3_gain>=0.05)
+    failure=total_adaptation_gate and total_delta<0 and (legal_gain<=-0.10 or cpl_worse)
+    behavior_effect=positive or failure
+    behavior={'schema':'LAA_R22564_C44_BEHAVIOR_V2','scores_mean_target_logprob':scores,'controls_locked_mean_target_logprob':ctrls,'dose_mean_target_logprob':doses,'full_minus_base_nats':total_delta,'full_minus_base_ci95':total_ci,'aux_only_minus_base_nats':aux_delta,'aux_only_minus_base_ci95':aux_ci,'conditional_lora_full_minus_aux_nats':cond_delta,'conditional_lora_ci95':cond_ci,'lora_only_minus_base_nats':lora_only_delta,'full_minus_random_same_aux_nats':fr,'full_minus_shuffle_same_aux_nats':fs,'total_adaptation_gate':total_adaptation_gate,'conditional_lora_gate':conditional_lora_gate,'positive_capability_gate':positive,'failure_gate':failure,'generation':generation,'legal_rate_gain':legal_gain,'top3_rate_gain':top3_gain,'invalid_fen_action_like_delta':invalid_delta,'raw_predictions_exported':False,'case_prediction_hashes_only':True}
     (out/'C44_BEHAVIOR.json').write_text(json.dumps(behavior,indent=2,sort_keys=True))
     # case hashes only, no raw text/moves? UCI predicted is model output-derived; retain only digest + verifier booleans, strip move_uci
     red=[]
     for c,items in genhash.items():
         for x in items:
-            red.append({'condition':c,'case_id':x['case_id'],'prediction_sha256':x['prediction_sha256'],'prediction_length':x['prediction_length'],'json_ok':x['json_ok'],'legal':x['legal'],'top1':x['top1'],'top3':x['top3'],'cp_loss':x['cp_loss'],'has_explanation':x['has_explanation'],'has_taunt':x['has_taunt'],'action_like':x['action_like']})
-    (out/'C44_GENERATION_CASE_DIGESTS.jsonl').write_text(''.join(json.dumps(x,sort_keys=True)+'\n' for x in red))
-    causal={'schema':'LAA_R22564_C44_CAUSAL_V1','entered':False,'reason':'BEHAVIOR_EFFECT_NOT_CONTROL_SEPARATED','broad':[],'survivors':[]}
-    if effect:
-        crows=locked[:48]; fullv=[per['FULL'][r['case_id']] for r in crows]; basev=[per['BASE'][r['case_id']] for r in crows]; effect_ref=mean([x-y for x,y in zip(fullv,basev)]); threshold=max(0.05,0.20*abs(effect_ref)); broad=[]
-        for g in ['early:attn','early:mlp','mid:attn','mid:mlp','late:attn','late:mlp']:
-            ctl.ablate_group(g,layers); av=score_rows(model,tok,crows,a.batch); ctl.group_only(g,layers); sv=score_rows(model,tok,crows,a.batch)
-            necessity=mean([f-v for f,v in zip(fullv,av)]); suff=mean([v-b for v,b in zip(sv,basev)]); passed=(sign*necessity>=threshold and sign*suff>=threshold)
-            broad.append({'group':g,'necessity_nats':necessity,'sufficiency_nats':suff,'threshold':threshold,'pass':passed})
-        surv=[x['group'] for x in broad if x['pass']]; causal={'schema':'LAA_R22564_C44_CAUSAL_V1','entered':True,'effect_sign':sign,'reference_effect_nats':effect_ref,'broad':broad,'survivors':surv,'e3_candidate':bool(surv)}
-    (out/'C44_CAUSAL.json').write_text(json.dumps(causal,indent=2,sort_keys=True))
-    summary={'schema':'LAA_R22564_C44_SUMMARY_V1','behavior_effect':effect,'positive':positive,'failure':failure,'causal_entered':causal['entered'],'causal_survivors':causal['survivors'],'static_lora_fraction':static['lora_fraction'],'static_auxiliary_fraction':static['auxiliary_fraction'],'training_lineage':'NOTEBOOK_MATCHES_PUBLISHED_ADAPTER_GATE_PROJ;_STANDALONE_PHASE_SCRIPTS_STALE_OR_INCONSISTENT','raw_source_present':False}
-    (out/'C44_SUMMARY.json').write_text(json.dumps(summary,indent=2,sort_keys=True))
-    print(json.dumps(summary,sort_keys=True))
-
-def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('--self-test',action='store_true'); ap.add_argument('--run',action='store_true'); ap.add_argument('--work'); ap.add_argument('--suite'); ap.add_argument('--out'); ap.add_argument('--batch',type=int,default=2); ap.add_argument('--engine',default='/usr/games/stockfish'); a=ap.parse_args()
-    if a.self_test:self_test();return
-    if a.run:run(a);return
-    raise SystemExit('choose --self-test or --run')
-if __name__=='__main__': main()
