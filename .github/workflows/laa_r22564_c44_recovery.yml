@@ -1,0 +1,91 @@
+name: LAA R22564 C44 same-escrow recovery
+on:
+  push:
+    branches: [laa-r22564-c44-agentguard]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  science_recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-v4-raw-adapter
+          path: raw_adapter
+          run-id: 31843840540
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22564-c44-v4-raw-base
+          path: raw_base
+          run-id: 31843840540
+          github-token: ${{ github.token }}
+      - name: Run frozen science from same authoritative escrows
+        shell: bash
+        env:
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+          TOKENIZERS_PARALLELISM: 'false'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p research/r22564_c44 datasets/r22564_c44 work/adapter work/base evidence
+          cp r22564/c44/c44_forge.py research/r22564_c44/c44_forge.py
+          cp r22564/c44/c44_science.py research/r22564_c44/c44_science.py
+          python research/r22564_c44/c44_forge.py
+          test "$(sha256sum datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl | awk '{print $1}')" = a127d9e9f888b18bf69300b17aaba521ee2565afdaa16012eb20ee72ae21dd40
+          cp -a raw_adapter/. work/adapter/
+          cp -a raw_base/. work/base/
+          test "$(sha256sum work/adapter/adapter_model.safetensors | awk '{print $1}')" = 87991c65e5c48403a8e4d8057fe339b4c296df86257cd7a6c1a6c11245ab111f
+          test "$(sha256sum work/base/model.safetensors | awk '{print $1}')" = 340ac08b74eef0d7bdec2d7981a6a3d4249bf0e6aab60634b72ad02c2b8023a9
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          python research/r22564_c44/c44_science.py --self-test > evidence/C44_RUNTIME_SELFTEST.json
+          python research/r22564_c44/c44_science.py --run --work work --suite datasets/r22564_c44/C44_AGENT_INJECTION_SUITE.jsonl --out evidence --batch 16 | tee evidence/C44_STDOUT_SUMMARY.txt
+          rm -rf work raw_adapter raw_base
+          python - <<'PY'
+          import hashlib,json,pathlib
+          r=pathlib.Path('evidence')
+          forbidden=[p.name for p in r.iterdir() if p.suffix in {'.bin','.pt','.pkl','.safetensors'}]
+          assert not forbidden, forbidden
+          fs=[]
+          for p in sorted(r.iterdir()):
+              if p.is_file(): fs.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (r/'C44_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22564_C44_RAW_FREE_V1','files':fs,'raw_source_present':False,'authoritative_source_run_id':31843840540,'hf_redownloads_in_recovery':0},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22564-c44-recovery-rawfree-evidence
+          path: evidence
+          retention-days: 1
+  cleanup:
+    needs: science_recovery
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete authoritative v4 raw escrows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          for pair in '9235253272 r22564-c44-v4-raw-adapter' '9235260936 r22564-c44-v4-raw-base'; do
+            set -- $pair; id=$1; name=$2
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"
+            echo "$id $name DELETED"
+          done > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          lines=pathlib.Path('cleanup/deleted.txt').read_text().splitlines()
+          assert len(lines)==2
+          pathlib.Path('cleanup/C44_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22564_C44_RAW_DELETION_V1','authoritative_source_run_id':31843840540,'deleted':lines,'count':2,'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22564-c44-recovery-cleanup
+          path: cleanup/C44_RAW_DELETION.json
+          retention-days: 1
