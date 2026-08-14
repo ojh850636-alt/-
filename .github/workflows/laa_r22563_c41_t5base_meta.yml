@@ -1,0 +1,37 @@
+name: LAA R22563 C41 T5-base metadata
+on:
+  push:
+    branches: [laa-r22563-c41-t5base-meta]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          mkdir -p work out
+          git clone -q --depth 1 https://huggingface.co/kj821/t5-base-mathml-python work/adapter
+          git clone -q --depth 1 https://huggingface.co/google-t5/t5-base work/base
+          python - <<'PY'
+          import json,pathlib,hashlib,os
+          def sha(p): return hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          def ptr(p):
+            p=pathlib.Path(p); s=p.read_text(errors='replace'); o={'pointer_bytes':len(p.read_bytes()),'pointer_text_sha256':sha(p)}
+            for l in s.splitlines():
+              if l.startswith('oid sha256:'): o['remote_sha256']=l.split(':',1)[1]
+              if l.startswith('size '): o['remote_size']=int(l.split()[1])
+            return o
+          a=pathlib.Path('work/adapter'); b=pathlib.Path('work/base')
+          cfg=json.loads((a/'adapter_config.json').read_text())
+          obj={'schema':'LAA_R22563_C41_T5BASE_METADATA_V1','adapter':{'repo':'kj821/t5-base-mathml-python','revision':os.popen('git -C work/adapter rev-parse HEAD').read().strip(),'config':cfg,'config_sha256':sha(a/'adapter_config.json'),'weight':ptr(a/'adapter_model.safetensors'),'files':sorted(str(x.relative_to(a)) for x in a.iterdir() if x.name!='.git')},'base':{'repo':'google-t5/t5-base','revision':os.popen('git -C work/base rev-parse HEAD').read().strip(),'config_sha256':sha(b/'config.json'),'weight':ptr(b/'model.safetensors'),'spiece':ptr(b/'spiece.model') if b.joinpath('spiece.model').read_text(errors='ignore').startswith('version https://git-lfs') else {'size':b.joinpath('spiece.model').stat().st_size,'sha256':sha(b/'spiece.model')},'tokenizer_json':ptr(b/'tokenizer.json') if b.joinpath('tokenizer.json').read_text(errors='ignore').startswith('version https://git-lfs') else {'size':b.joinpath('tokenizer.json').stat().st_size,'sha256':sha(b/'tokenizer.json')}},'raw_weight_bytes_downloaded':0,'model_outputs_observed':0}
+          pathlib.Path('out/R22563_C41_T5BASE_METADATA.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22563-c41-t5base-meta
+          path: out/R22563_C41_T5BASE_METADATA.json
+          retention-days: 1
