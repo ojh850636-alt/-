@@ -3,8 +3,9 @@
 
 def adapter_key(m): return next(iter(m.scaling.keys()))
 class Controller:
-    def __init__(self,model):
+    def __init__(self,model,base_aux=None,adapt_aux=None):
         self.model=model; self.loras=[]
+        self.base_aux=base_aux; self.adapt_aux=adapt_aux
         for n,m in model.named_modules():
             if hasattr(m,'lora_A') and hasattr(m,'lora_B') and getattr(m,'scaling',None): self.loras.append((n,m))
         if not self.loras: raise RuntimeError('no lora modules')
@@ -39,16 +40,9 @@ class Controller:
         if self.orig_B:
             for n,m in self.loras:
                 k=adapter_key(m); m.lora_B[k].weight.data.copy_(self.orig_B[(n,k)].to(m.lora_B[k].weight.device,dtype=m.lora_B[k].weight.dtype))
-    def set_condition(self,c):
-        self.restore_B(); self.restore_scale()
-        if c=='BASE': self.set_all(0.0)
-        elif c=='FULL': pass
-        elif c=='RANDOM_SIGN': self.random_sign()
-        elif c=='LAYER_SHUFFLE': self.shuffle_B()
-        elif c.startswith('DOSE_'): self.set_all(float(c.split('_',1)[1]))
-        else: raise ValueError(c)
-    def group_match(self,n,group,total_layers):
-        band,kind=group.split(':'); L=self._layer(n)
-        if L<0:return False
-        if band=='early': ok=L < total_layers//3
-        elif band=='mid': ok=total_layers//3 <= L < (2*total_layers)//3
+    def set_aux(self,adapted):
+        if self.base_aux is None or self.adapt_aux is None: return
+        import torch
+        src=self.adapt_aux if adapted else self.base_aux
+        with torch.no_grad():
+            self.model.get_input_embeddings().weight.copy_(src['embed'].to(self.model.get_input_embeddings().weight.device,dtype=self.model.get_input_embeddings().weight.dtype))
