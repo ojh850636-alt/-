@@ -1,0 +1,21 @@
+            red.append({'condition':c,'case_id':x['case_id'],'prediction_sha256':x['prediction_sha256'],'prediction_length':x['prediction_length'],'json_ok':x['json_ok'],'legal':x['legal'],'top1':x['top1'],'top3':x['top3'],'cp_loss':x['cp_loss'],'has_explanation':x['has_explanation'],'has_taunt':x['has_taunt'],'action_like':x['action_like']})
+    (out/'C44_GENERATION_CASE_DIGESTS.jsonl').write_text(''.join(json.dumps(x,sort_keys=True)+'\n' for x in red))
+    causal={'schema':'LAA_R22564_C44_CAUSAL_V1','entered':False,'reason':'BEHAVIOR_EFFECT_NOT_CONTROL_SEPARATED','broad':[],'survivors':[]}
+    if conditional_lora_gate:
+        crows=locked[:40]; fullv=[per['FULL'][r['case_id']] for r in crows]; auxv=[per['AUX_ONLY'][r['case_id']] for r in crows]; effect_ref=mean([x-y for x,y in zip(fullv,auxv)]); threshold=max(0.05,0.20*abs(effect_ref)); broad=[]
+        for g in ['early:attn','early:mlp','mid:attn','mid:mlp','late:attn','late:mlp']:
+            ctl.ablate_group(g,layers); av=score_rows(model,tok,crows,a.batch); ctl.group_only(g,layers); sv=score_rows(model,tok,crows,a.batch)
+            necessity=mean([f-v for f,v in zip(fullv,av)]); suff=mean([v-b for v,b in zip(sv,auxv)]); passed=(sign*necessity>=threshold and sign*suff>=threshold)
+            broad.append({'group':g,'necessity_nats':necessity,'sufficiency_nats':suff,'threshold':threshold,'pass':passed})
+        surv=[x['group'] for x in broad if x['pass']]; causal={'schema':'LAA_R22564_C44_CAUSAL_V1','entered':True,'effect_sign':sign,'reference_effect_nats':effect_ref,'broad':broad,'survivors':surv,'e3_candidate':bool(surv)}
+    (out/'C44_CAUSAL.json').write_text(json.dumps(causal,indent=2,sort_keys=True))
+    summary={'schema':'LAA_R22564_C44_SUMMARY_V2','behavior_effect':behavior_effect,'positive':positive,'failure':failure,'total_adaptation_gate':total_adaptation_gate,'conditional_lora_gate':conditional_lora_gate,'causal_entered':causal['entered'],'causal_survivors':causal['survivors'],'static_lora_fraction':static['lora_fraction'],'static_auxiliary_fraction':static['auxiliary_fraction'],'training_lineage':'NOTEBOOK_MATCHES_PUBLISHED_ADAPTER_GATE_PROJ;_STANDALONE_PHASE_SCRIPTS_STALE_OR_INCONSISTENT','raw_source_present':False}
+    (out/'C44_SUMMARY.json').write_text(json.dumps(summary,indent=2,sort_keys=True))
+    print(json.dumps(summary,sort_keys=True))
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument('--self-test',action='store_true'); ap.add_argument('--run',action='store_true'); ap.add_argument('--work'); ap.add_argument('--suite'); ap.add_argument('--out'); ap.add_argument('--batch',type=int,default=2); ap.add_argument('--engine',default='/usr/games/stockfish'); a=ap.parse_args()
+    if a.self_test:self_test();return
+    if a.run:run(a);return
+    raise SystemExit('choose --self-test or --run')
+if __name__=='__main__': main()
