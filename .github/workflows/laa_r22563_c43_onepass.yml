@@ -1,0 +1,164 @@
+name: LAA R22563 C43 one-use Zsh archaeology
+on:
+  push:
+    branches: [laa-r22563-c43-onepass]
+permissions:
+  contents: read
+  actions: write
+env:
+  BUNDLE_SHA256: 2f97fccfed59337d2fd3afdd1a947d3e6f06a017a26174d97612f018aeebb6fd
+  BUNDLE_B64: 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
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Restore frozen source-zero science bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' "$BUNDLE_B64" | base64 -d > bundle.tgz
+          test "$(sha256sum bundle.tgz | awk '{print $1}')" = "$BUNDLE_SHA256"
+          mkdir payload && tar -xzf bundle.tgz -C payload
+          python payload/research/r22563_c43/c43_forge.py
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('payload'); c=json.loads((root/'configs/R22563_C43_PREOUTPUT_CONTRACT.json').read_text())
+          for rel,m in c['preoutput_bindings'].items():
+            p=root/rel; assert hashlib.sha256(p.read_bytes()).hexdigest()==m['sha256']; assert p.stat().st_size==m['size']
+          rows=(root/'datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl').read_text().splitlines(); assert len(rows)==576
+          assert c['model_outputs_observed_before_seal']==0 and c['raw_weight_bytes_local_before_seal']==0
+          print('PREOUTPUT_BINDINGS_PASS')
+          PY
+      - name: Exact tree contract without raw weight smudge
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/duoyuncloud/zsh-cli-lora a
+          git clone -q --depth 1 https://huggingface.co/Qwen/Qwen2-0.5B b
+          test "$(git -C a rev-parse HEAD)" = 884613f1800062085dbdf8fa5790fab0b70388dd
+          test "$(git -C b rev-parse HEAD)" = 91d2aff3f957f99e4c74c962f2f408dcc88a18d8
+          python - <<'PY'
+          import pathlib
+          a={p.name for p in pathlib.Path('a').iterdir() if p.name!='.git'}; b={p.name for p in pathlib.Path('b').iterdir() if p.name!='.git'}
+          reqa={'adapter_config.json','adapter_model.safetensors','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt','added_tokens.json','special_tokens_map.json'}
+          reqb={'config.json','model.safetensors','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt'}
+          assert not (reqa-a), reqa-a; assert not (reqb-b), reqb-b
+          assert not ({'pytorch_model.bin','training_args.bin'} & a)
+          assert not ({'pytorch_model.bin'} & b)
+          def ptr(path):
+            t=path.read_text(errors='replace'); d={}
+            for l in t.splitlines():
+              if l.startswith('oid sha256:'): d['sha']=l.split(':',1)[1]
+              elif l.startswith('size '): d['size']=int(l.split()[1])
+            return d
+          assert ptr(pathlib.Path('a/adapter_model.safetensors'))=={'sha':'2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a','size':1106719360}
+          assert ptr(pathlib.Path('b/model.safetensors'))=={'sha':'9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad','size':988097824}
+          print('EXACT_TREE_CONTRACT_PASS')
+          PY
+      - name: Runtime dependency closure and controller self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          printf '%s' "$BUNDLE_B64" | base64 -d > bundle.tgz
+          rm -rf payload && mkdir payload && tar -xzf bundle.tgz -C payload
+          PYTHONDONTWRITEBYTECODE=1 python payload/research/r22563_c43/c43_science.py --self-test | tee selftest.json
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-preflight, path: selftest.json, retention-days: 1}
+  capture:
+    needs: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Download all Adapter metadata first, then exact Adapter raw object
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p escrow_adapter
+          A=https://huggingface.co/duoyuncloud/zsh-cli-lora/resolve/884613f1800062085dbdf8fa5790fab0b70388dd
+          for f in adapter_config.json tokenizer.json tokenizer_config.json vocab.json merges.txt added_tokens.json special_tokens_map.json chat_template.jinja config.json README.md; do curl -L --fail --retry 3 -o escrow_adapter/$f "$A/$f"; done
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_model.safetensors "$A/adapter_model.safetensors"
+          test "$(stat -c%s escrow_adapter/adapter_model.safetensors)" = 1106719360
+          test "$(sha256sum escrow_adapter/adapter_model.safetensors | awk '{print $1}')" = 2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-raw-adapter, path: escrow_adapter, retention-days: 1, compression-level: 0}
+      - name: Download all Base metadata first, then exact Base raw object
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p escrow_base
+          B=https://huggingface.co/Qwen/Qwen2-0.5B/resolve/91d2aff3f957f99e4c74c962f2f408dcc88a18d8
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json vocab.json merges.txt LICENSE; do curl -L --fail --retry 3 -o escrow_base/$f "$B/$f"; done
+          curl -L --fail --retry 3 -o escrow_base/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s escrow_base/model.safetensors)" = 988097824
+          test "$(sha256sum escrow_base/model.safetensors | awk '{print $1}')" = 9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-raw-base, path: escrow_base, retention-days: 1, compression-level: 0}
+  science:
+    needs: capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with: {name: r22563-c43-raw-adapter, path: work/adapter}
+      - uses: actions/download-artifact@v4
+        with: {name: r22563-c43-raw-base, path: work/base}
+      - name: Restore frozen science and run maximum raw-free extraction
+        shell: bash
+        env: {OMP_NUM_THREADS: '4', MKL_NUM_THREADS: '4', TOKENIZERS_PARALLELISM: 'false'}
+        run: |
+          set -euo pipefail
+          test "$(sha256sum work/adapter/adapter_model.safetensors | awk '{print $1}')" = 2afafe383fd3070d656b773302c6b4e0623cce20bdbbb5e205a5a01c6c8cf36a
+          test "$(sha256sum work/base/model.safetensors | awk '{print $1}')" = 9cd8fc8c85a197b8c551d6b931b5709fe2611889d6b44945876472fecdf77cad
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          printf '%s' "$BUNDLE_B64" | base64 -d > bundle.tgz
+          test "$(sha256sum bundle.tgz | awk '{print $1}')" = "$BUNDLE_SHA256"
+          mkdir payload && tar -xzf bundle.tgz -C payload
+          python payload/research/r22563_c43/c43_forge.py
+          mkdir evidence
+          PYTHONDONTWRITEBYTECODE=1 python payload/research/r22563_c43/c43_science.py --run --work work --suite payload/datasets/r22563_c43/C43_ZSH_COMPLETION_SUITE.jsonl --out evidence --batch 4 | tee evidence/C43_STDOUT_SUMMARY.txt
+          find evidence -type f -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' | grep . && exit 91 || true
+          rm -rf work bundle.tgz payload
+          test ! -d work
+          python - <<'PY'
+          import json,pathlib,hashlib
+          root=pathlib.Path('evidence'); files=[]
+          for p in sorted(root.iterdir()):
+            if p.is_file(): files.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (root/'C43_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22563_C43_RAW_FREE_MANIFEST_V1','files':files,'raw_source_present':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-rawfree-evidence, path: evidence, retention-days: 1}
+  cleanup:
+    if: ${{ always() && needs.science.result == 'success' }}
+    needs: science
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete remote raw escrows after raw-free science exists
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > artifacts.json
+          python - <<'PY' > cleanup/targets.tsv
+          import json
+          o=json.load(open('artifacts.json'))
+          for a in o['artifacts']:
+            if a['name'] in {'r22563-c43-raw-adapter','r22563-c43-raw-base'}: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/targets.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/targets.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib,hashlib
+          lines=pathlib.Path('cleanup/deleted.txt').read_text().splitlines()
+          pathlib.Path('cleanup/R22563_C43_REMOTE_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22563_C43_REMOTE_RAW_DELETION_V1','deleted':lines,'count':len(lines),'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22563-c43-cleanup-receipt, path: cleanup/R22563_C43_REMOTE_RAW_DELETION.json, retention-days: 1}
