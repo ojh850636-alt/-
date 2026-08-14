@@ -1,0 +1,55 @@
+name: LAA R22564 C44 chezz metadata only
+on:
+  push:
+    branches: [laa-r22564-c44-chezz-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Exact metadata only, no raw weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/ducklin404/chezz adapter
+          git clone -q --depth 1 https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0 base
+          mkdir out
+          python - <<'PY'
+          import json, pathlib, hashlib, re
+          def ptr(p):
+              d={}
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+                  elif l.startswith('size '): d['size_bytes']=int(l.split()[1])
+              return d
+          a=pathlib.Path('adapter'); b=pathlib.Path('base')
+          cfg=json.loads((a/'adapter_config.json').read_text())
+          out={
+            'schema':'LAA_R22564_C44_METADATA_V1',
+            'adapter_repo':'ducklin404/chezz',
+            'adapter_revision':__import__('subprocess').check_output(['git','-C','adapter','rev-parse','HEAD'],text=True).strip(),
+            'adapter_files':sorted(p.name for p in a.iterdir() if p.name!='.git'),
+            'adapter_config':cfg,
+            'adapter_weight':ptr(a/'adapter_model.safetensors'),
+            'adapter_readme_sha256':hashlib.sha256((a/'README.md').read_bytes()).hexdigest(),
+            'base_repo':'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
+            'base_revision':__import__('subprocess').check_output(['git','-C','base','rev-parse','HEAD'],text=True).strip(),
+            'base_files':sorted(p.name for p in b.iterdir() if p.name!='.git'),
+            'base_weight':ptr(b/'model.safetensors'),
+            'base_config':json.loads((b/'config.json').read_text()),
+            'forbidden_adapter_files_present':sorted(set(['training_args.bin','pytorch_model.bin','adapter_model.bin']) & set(p.name for p in a.iterdir())),
+            'license_claim_from_card':'apache-2.0',
+            'model_output_bytes':0,
+            'raw_weight_bytes_downloaded':0
+          }
+          pathlib.Path('out/R22564_C44_METADATA.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22564-c44-meta
+          path: out/R22564_C44_METADATA.json
+          retention-days: 1
