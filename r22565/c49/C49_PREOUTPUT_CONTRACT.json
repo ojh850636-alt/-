@@ -1,0 +1,61 @@
+{
+  "adapter": {
+    "alpha": 1,
+    "license": "apache-2.0",
+    "r": 1,
+    "sha256": "e50ef9a7b3ab9ce41feb3b0003b777e087d04257c56311cce6c003fab225a7d1",
+    "size": 33128,
+    "target_modules": [
+      "query",
+      "value"
+    ],
+    "task_type": "SEQ_CLS"
+  },
+  "base": {
+    "license": "apache-2.0",
+    "repo": "cross-encoder/ms-marco-MiniLM-L-4-v2",
+    "revision": "777b2f369bc1c2f850df8bd367ed1654bda4497b",
+    "sha256": "3db1c98132b54901976d6da56fa711756c7780a6263d5db8f336232584f5fe58",
+    "size": 76671186
+  },
+  "behavior_gate": {
+    "full_accuracy_min": 0.65,
+    "full_minus_head_min": 0.03,
+    "full_minus_layer_shuffle_min": 0.02,
+    "full_minus_random_sign_min": 0.02,
+    "paired_bootstrap_ci_lower_min_exclusive": 0.01
+  },
+  "candidate": "TransferGraph/cross-encoder_ms-marco-MiniLM-L-4-v2-finetuned-lora-ag_news",
+  "candidate_revision": "bf5da2bdedc49a88a39ee7357f55b6bf75e108c1",
+  "claim_ceiling": "E3_BROAD_LAYER_PROJECTION_LOCALIZATION_ONLY",
+  "conditions": [
+    "BASE",
+    "HEAD_ONLY",
+    "LORA_ONLY",
+    "FULL",
+    "RANDOM_SIGN_SAME_HEAD",
+    "LAYER_SHUFFLED_SAME_HEAD",
+    "DOSE_0.25",
+    "DOSE_0.5",
+    "DOSE_1.5"
+  ],
+  "e3_gate": {
+    "max_layer_drop_min": 0.015,
+    "max_projection_drop_min": 0.02,
+    "requires_behavior_gate": true
+  },
+  "e4_forbidden": true,
+  "evaluation": {
+    "ag_news_rows_ingested": 0,
+    "cases": 576,
+    "source": "procedural fresh only",
+    "suite_sha256": "51b08687533ca87f53b65cf5313851c2405a58d096da811677c8caf6a11f02ba",
+    "training_data_license_limitation": "HF dataset repo current license metadata reports unknown"
+  },
+  "raw_source_present_in_delivery": false,
+  "schema": "LAA_R22565_C49_PREOUTPUT_CONTRACT_V1",
+  "science_code": {
+    "forge_sha256": "d7de2022160fd627cde1fdacf5749690feea626e9cfb7c3294b72c50830e8bb8",
+    "science_sha256": "9f0a973b46322f811410dff0fa908512f1ba008f16579c2f469f7eeb1fc4cf49"
+  }
+}
