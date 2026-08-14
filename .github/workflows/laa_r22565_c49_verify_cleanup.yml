@@ -1,0 +1,30 @@
+name: LAA R22565 C49 source-zero cleanup verifier
+on:
+  push:
+    branches: [laa-r22565-c49-minilm-agnews]
+    paths: [r22565/c49/VERIFY_CLEANUP_01.txt]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify authoritative raw artifacts are absent
+        env: {GH_TOKEN: '${{ github.token }}'}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir receipt
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/31851360447/artifacts?per_page=100" > current.json
+          python - <<'PY'
+          import json,pathlib
+          a=json.load(open('current.json'))['artifacts']
+          raw=[x for x in a if x['name'] in {'r22565-c49-v2-raw-adapter','r22565-c49-v2-raw-base'}]
+          assert raw==[], raw
+          out={'schema':'LAA_R22565_C49_REMOTE_RAW_DELETION_VERIFICATION_V1','authoritative_source_run':31851360447,'raw_artifacts_remaining':0,'raw_names_checked':['r22565-c49-v2-raw-adapter','r22565-c49-v2-raw-base'],'science_recovery_run':31851601437,'hf_redownload_bytes_in_recovery':0,'source_reacquisition_allowed':False,'verdict':'PASS_REMOTE_RAW_ZERO'}
+          pathlib.Path('receipt/R22565_C49_REMOTE_RAW_DELETION.json').write_text(json.dumps(out,indent=2,sort_keys=True))
+          print(json.dumps(out,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with: {name: r22565-c49-deletion-verification, path: receipt/R22565_C49_REMOTE_RAW_DELETION.json, retention-days: 1}
