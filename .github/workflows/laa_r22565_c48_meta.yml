@@ -1,0 +1,58 @@
+name: LAA R22565 C48 AG News metadata-only audit
+on:
+  push:
+    branches: [laa-r22565-c48-agnews-meta]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact metadata only — no raw model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/TransferGraph/cross-encoder_ms-marco-MiniLM-L-4-v2-finetuned-lora-ag_news cand
+          BASE=$(python - <<'PY'
+          import json
+          print(json.load(open('cand/adapter_config.json'))['base_model_name_or_path'])
+          PY
+          )
+          git clone -q --depth 1 "https://huggingface.co/$BASE" base
+          mkdir out
+          python - <<'PY'
+          import pathlib,json,subprocess,re,hashlib
+          def rev(d): return subprocess.check_output(['git','-C',d,'rev-parse','HEAD'],text=True).strip()
+          def ptr(p):
+              d={}
+              if not p.exists(): return None
+              for l in p.read_text(errors='replace').splitlines():
+                  if l.startswith('oid sha256:'): d['sha256']=l.split(':',1)[1]
+                  if l.startswith('size '): d['size']=int(l.split()[1])
+              return d
+          c=pathlib.Path('cand'); b=pathlib.Path('base')
+          cfg=json.loads((c/'adapter_config.json').read_text())
+          cr=(c/'README.md').read_text(errors='replace')
+          br=(b/'README.md').read_text(errors='replace') if (b/'README.md').exists() else ''
+          base_weights=[p for p in [b/'model.safetensors',b/'pytorch_model.bin'] if p.exists()]
+          obj={
+            'schema':'LAA_R22565_C48_META_V1',
+            'candidate_revision':rev('cand'),'base_revision':rev('base'),
+            'adapter_pointer':ptr(c/'adapter_model.safetensors'),'adapter_config':cfg,
+            'candidate_files':sorted(p.name for p in c.iterdir() if p.name!='.git'),
+            'base_weight_pointers':{p.name:ptr(p) for p in base_weights},
+            'candidate_license_frontmatter':re.findall(r'(?mi)^license\s*:\s*([^\r\n]+)',cr),
+            'candidate_dataset_frontmatter':re.findall(r'(?mi)^\s*-\s*(ag_news)\s*$',cr),
+            'base_license_frontmatter':re.findall(r'(?mi)^license\s*:\s*([^\r\n]+)',br),
+            'readme_accuracy':float(re.search(r'accuracy:\s*([0-9.]+)',cr).group(1)) if re.search(r'accuracy:\s*([0-9.]+)',cr) else None,
+            'seed_42':('seed: 42' in cr),
+          }
+          pathlib.Path('out/C48_META.json').write_text(json.dumps(obj,indent=2,sort_keys=True))
+          print(json.dumps(obj,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c48-meta
+          path: out/C48_META.json
+          retention-days: 1
