@@ -1,0 +1,171 @@
+name: LAA R22565 C48 one-use AG News archaeology
+on:
+  push:
+    branches: [laa-r22565-c48-agnews-meta]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Frozen source-zero C48 contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum r22565/c48/c48_forge.py | awk '{print $1}')" = 9dedb403a07cdeec4c78e14f76bec75d13d317b6dac681a5f2dc39fedb40374f
+          test "$(stat -c%s r22565/c48/c48_forge.py)" = 5609
+          test "$(sha256sum r22565/c48/c48_science.py | awk '{print $1}')" = 8bcf89f8703ecbc44c5d4f9d4610b663b3a630a43520b3a8855272df815e5793
+          test "$(stat -c%s r22565/c48/c48_science.py)" = 10552
+          test "$(sha256sum r22565/c48/R22565_C48_PREOUTPUT_CONTRACT.json | awk '{print $1}')" = 07b4d6bb06e102da54e9d2c1f0407bc7779f2c91503326d2d91d54dca3176e8d
+          mkdir -p source_zero
+          cp r22565/c48/c48_forge.py source_zero/
+          cp r22565/c48/c48_science.py source_zero/
+          (cd source_zero && python c48_forge.py)
+          test "$(sha256sum source_zero/C48_AGNEWS_FRESH_SUITE.jsonl | awk '{print $1}')" = f3bd38cdf47dc1d6b0dcbfd4644261e931f139556399749a4c6eb0a528f924e6
+          test "$(stat -c%s source_zero/C48_AGNEWS_FRESH_SUITE.jsonl)" = 116667
+          export GIT_LFS_SKIP_SMUDGE=1
+          git clone -q --depth 1 https://huggingface.co/TransferGraph/cross-encoder_ms-marco-MiniLM-L-4-v2-finetuned-lora-ag_news cand
+          git clone -q --depth 1 https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-4-v2 baseptr
+          test "$(git -C cand rev-parse HEAD)" = bf5da2bdedc49a88a39ee7357f55b6bf75e108c1
+          test "$(git -C baseptr rev-parse HEAD)" = 777b2f369bc1c2f850df8bd367ed1654bda4497b
+          grep -q 'oid sha256:e50ef9a7b3ab9ce41feb3b0003b777e087d04257c56311cce6c003fab225a7d1' cand/adapter_model.safetensors
+          grep -q 'size 33128' cand/adapter_model.safetensors
+          grep -q 'oid sha256:3db1c98132b54901976d6da56fa711756c7780a6263d5db8f336232584f5fe58' baseptr/model.safetensors
+          grep -q 'size 76671186' baseptr/model.safetensors
+          for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json vocab.txt model.safetensors; do test -f "baseptr/$f"; done
+          test -f cand/adapter_config.json
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          PYTHONDONTWRITEBYTECODE=1 python source_zero/c48_science.py --self-test
+  capture_adapter:
+    needs: preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact C48 Adapter and immediate escrow
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir escrow_adapter
+          A=https://huggingface.co/TransferGraph/cross-encoder_ms-marco-MiniLM-L-4-v2-finetuned-lora-ag_news/resolve/bf5da2bdedc49a88a39ee7357f55b6bf75e108c1
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_config.json "$A/adapter_config.json"
+          curl -L --fail --retry 3 -o escrow_adapter/adapter_model.safetensors "$A/adapter_model.safetensors"
+          test "$(stat -c%s escrow_adapter/adapter_model.safetensors)" = 33128
+          test "$(sha256sum escrow_adapter/adapter_model.safetensors | awk '{print $1}')" = e50ef9a7b3ab9ce41feb3b0003b777e087d04257c56311cce6c003fab225a7d1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c48-raw-adapter
+          path: escrow_adapter
+          retention-days: 1
+          compression-level: 0
+  capture_base:
+    needs: capture_adapter
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exact C48 Base and immediate escrow
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir escrow_base
+          B=https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-4-v2/resolve/777b2f369bc1c2f850df8bd367ed1654bda4497b
+          for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json vocab.txt; do curl -L --fail --retry 3 -o "escrow_base/$f" "$B/$f"; done
+          curl -L --fail --retry 3 -o escrow_base/model.safetensors "$B/model.safetensors"
+          test "$(stat -c%s escrow_base/model.safetensors)" = 76671186
+          test "$(sha256sum escrow_base/model.safetensors | awk '{print $1}')" = 3db1c98132b54901976d6da56fa711756c7780a6263d5db8f336232584f5fe58
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c48-raw-base
+          path: escrow_base
+          retention-days: 1
+          compression-level: 0
+  science:
+    needs: capture_base
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22565-c48-raw-adapter
+          path: raw_adapter
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22565-c48-raw-base
+          path: raw_base
+      - name: Run frozen C48 behavior and causal archaeology
+        shell: bash
+        env:
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+          TOKENIZERS_PARALLELISM: 'false'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p work/adapter work/base evidence source_zero
+          cp r22565/c48/c48_forge.py source_zero/
+          cp r22565/c48/c48_science.py source_zero/
+          (cd source_zero && python c48_forge.py)
+          AFILE=$(find raw_adapter -type f -name adapter_model.safetensors -print -quit)
+          ACFG=$(find raw_adapter -type f -name adapter_config.json -print -quit)
+          BFILE=$(find raw_base -type f -name model.safetensors -print -quit)
+          test -n "$AFILE"; test -n "$ACFG"; test -n "$BFILE"
+          cp "$AFILE" work/adapter/adapter_model.safetensors
+          cp "$ACFG" work/adapter/adapter_config.json
+          for f in config.json tokenizer.json tokenizer_config.json special_tokens_map.json vocab.txt; do SRC=$(find raw_base -type f -name "$f" -print -quit); test -n "$SRC"; cp "$SRC" "work/base/$f"; done
+          cp "$BFILE" work/base/model.safetensors
+          test "$(sha256sum work/adapter/adapter_model.safetensors | awk '{print $1}')" = e50ef9a7b3ab9ce41feb3b0003b777e087d04257c56311cce6c003fab225a7d1
+          test "$(sha256sum work/base/model.safetensors | awk '{print $1}')" = 3db1c98132b54901976d6da56fa711756c7780a6263d5db8f336232584f5fe58
+          test "$(sha256sum source_zero/C48_AGNEWS_FRESH_SUITE.jsonl | awk '{print $1}')" = f3bd38cdf47dc1d6b0dcbfd4644261e931f139556399749a4c6eb0a528f924e6
+          python -m pip install -q torch==2.10.0 transformers==4.57.1 peft==0.18.1 accelerate==1.14.0 safetensors==0.7.0
+          python source_zero/c48_science.py --self-test > evidence/C48_RUNTIME_SELFTEST.json
+          python source_zero/c48_science.py --run --work work --suite source_zero/C48_AGNEWS_FRESH_SUITE.jsonl --out evidence --batch 32 | tee evidence/C48_STDOUT_SUMMARY.txt
+          rm -rf work raw_adapter raw_base
+          if find evidence -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' \) | grep -q .; then exit 91; fi
+          python - <<'PY'
+          import hashlib,json,pathlib
+          r=pathlib.Path('evidence'); fs=[]
+          for p in sorted(r.iterdir()):
+              if p.is_file(): fs.append({'name':p.name,'size':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          (r/'C48_RAW_FREE_MANIFEST.json').write_text(json.dumps({'schema':'LAA_R22565_C48_RAW_FREE_V1','files':fs,'raw_source_present':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c48-rawfree-evidence
+          path: evidence
+          retention-days: 1
+  cleanup:
+    if: ${{ always() && needs.science.result == 'success' }}
+    needs: science
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete C48 authoritative raw escrows
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir cleanup
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > a.json
+          python - <<'PY' > cleanup/targets.tsv
+          import json
+          for a in json.load(open('a.json'))['artifacts']:
+              if a['name'] in {'r22565-c48-raw-adapter','r22565-c48-raw-base'}: print(a['id'],a['name'],sep='\t')
+          PY
+          test "$(wc -l < cleanup/targets.tsv)" = 2
+          while IFS=$'\t' read -r id name; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; echo "$id $name DELETED"; done < cleanup/targets.tsv > cleanup/deleted.txt
+          python - <<'PY'
+          import json,pathlib
+          lines=pathlib.Path('cleanup/deleted.txt').read_text().splitlines()
+          pathlib.Path('cleanup/C48_RAW_DELETION.json').write_text(json.dumps({'schema':'LAA_R22565_C48_RAW_DELETION_V1','deleted':lines,'count':len(lines),'source_reacquisition_allowed':False},indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22565-c48-cleanup
+          path: cleanup/C48_RAW_DELETION.json
+          retention-days: 1
