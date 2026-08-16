@@ -1,78 +1,112 @@
-name: R22568 C52 Premodel Seal
+name: R22568 C52 One-Use Calendar Archaeology
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  preseal:
+  onepass:
     runs-on: ubuntu-latest
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
-      - name: Dependency closure without model weights
+      - name: Recover and verify source-zero authority artifacts
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python -m pip install -q 'torch==2.8.0' 'transformers==4.56.2' 'peft==0.17.1' 'safetensors==0.6.2'
+          mkdir -p inherited_meta inherited_preseal r22568_evidence
+          gh api repos/ojh850636-alt/-/actions/artifacts/9263617176/zip > metadata.zip
+          gh api repos/ojh850636-alt/-/actions/artifacts/9263670402/zip > preseal.zip
+          unzip -q metadata.zip -d inherited_meta
+          unzip -q preseal.zip -d inherited_preseal
           python - <<'PY'
-          import json, datetime, re, torch, transformers, peft, safetensors
-          print({"torch":torch.__version__,"transformers":transformers.__version__,"peft":peft.__version__,"safetensors":safetensors.__version__})
+          import json, hashlib
+          from pathlib import Path
+          p=json.load(open('inherited_preseal/R22568_C52_PREOUTPUT_SEAL.json'))
+          assert p['model_weight_bytes_present']==0 and p['model_outputs_observed']==0
+          assert p['suite_n']==384
+          assert p['suite_sha256']=='34aa41d17083f277ea060459db4cf93a467d9f42494f30dfa0660e4f0b749b47'
+          assert p['contract_sha256']=='9319dbc4e4ee1ad548278feb57326156ad9af0ffc3e2980c25f5181227d4e9e6'
+          print('PRESEAL_CHAIN_PASS')
           PY
-      - name: Build and independently verify output-free calendar suite
+          cp inherited_meta/R22568_C52_CANDIDATE_AUDIT.json r22568_evidence/
+          cp inherited_preseal/R22568_C52_PREOUTPUT_SEAL.json r22568_evidence/
+          cp inherited_preseal/R22568_C52_SUITE.jsonl r22568_evidence/
+      - name: Install exact analysis runtime
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p r22568_preseal
+          python -m pip install -q 'torch==2.8.0' 'transformers==4.56.2' 'peft==0.17.1' 'safetensors==0.6.2' 'huggingface_hub==0.34.4' 'numpy==2.2.6'
           python - <<'PY'
-          import json, hashlib, pathlib, sys
-          sys.path.insert(0,'.')
-          from r22568.c52_contract import generate_suite, verifier_a, verifier_b, suite_digest, contract_digest, THRESHOLDS
-          cases=generate_suite()
-          # verifier self-tests use target-rendered JSON only; no model output exists.
-          for c in cases:
-              txt=json.dumps(c['target'],ensure_ascii=False)
-              a=verifier_a(txt,c['target']); b=verifier_b(txt,c['target'])
-              assert a['json_valid'] and a['exact'] and a['field_exact']==1.0
-              assert b['schema'] and b['typed_semantic']==1.0 and b['negative_clean']
-          out=pathlib.Path('r22568_preseal')
-          with (out/'R22568_C52_SUITE.jsonl').open('w') as f:
-              for c in cases: f.write(json.dumps(c,ensure_ascii=False,sort_keys=True)+'\n')
-          script=pathlib.Path('r22568/c52_contract.py')
-          receipt={
-            'schema':'R22568_C52_PREOUTPUT_SEAL_V1',
-            'candidate':'waliaMuskaan011/calendar-event-extractor-smollm',
-            'adapter_revision':'08d0bd53801b5bf035b44ff4ae084c94a51126ee',
-            'runtime_reference_base':'HuggingFaceTB/SmolLM-360M',
-            'runtime_reference_base_revision':'59f7ef243ee09a72cbc14cb054393a3e3b771d41',
-            'training_time_base_revision_proven':False,
-            'model_weight_bytes_present':0,
-            'model_outputs_observed':0,
-            'suite_n':len(cases),
-            'suite_sha256':suite_digest(cases),
-            'contract_sha256':contract_digest(),
-            'contract_script_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),
-            'thresholds':THRESHOLDS,
-            'splits':{s:sum(c['split']==s for c in cases) for s in sorted({c['split'] for c in cases})},
-            'verifier_a_selftest':'PASS_384_OF_384',
-            'verifier_b_selftest':'PASS_384_OF_384',
-            'positive_and_failure_lanes_precommitted':True,
-            'planned_conditions':['BASE','FULL','RANDOM_SIGN','LAYER_SHUFFLE','DOSE_0.25','DOSE_0.5','DOSE_1.5'],
-            'planned_generation_conditions':['BASE','FULL','RANDOM_SIGN','LAYER_SHUFFLE'],
-            'planned_causal_if_admitted':['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj','early_band','middle_band','late_band','matched_random'],
-            'claim_ceiling_without_independent_worker':'E3_BROAD_LOCALIZATION_ONLY',
-          }
-          (out/'R22568_C52_PREOUTPUT_SEAL.json').write_text(json.dumps(receipt,indent=2))
-          print(json.dumps(receipt,indent=2))
+          import torch,transformers,peft,safetensors,huggingface_hub,numpy,json
+          print(json.dumps({'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'huggingface_hub':huggingface_hub.__version__,'numpy':numpy.__version__},sort_keys=True))
           PY
-      - name: Assert no model-weight source consumed
+      - name: Verify current contract before source ingress
         shell: bash
         run: |
           set -euo pipefail
-          test ! -e adapter_model.safetensors
-          test ! -e model.safetensors
-          find . -maxdepth 3 -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' \) -print -quit | grep -q . && exit 1 || true
+          python - <<'PY'
+          from r22568.c52_contract import generate_suite,suite_digest,contract_digest
+          assert len(generate_suite())==384
+          assert suite_digest()=='34aa41d17083f277ea060459db4cf93a467d9f42494f30dfa0660e4f0b749b47'
+          assert contract_digest()=='9319dbc4e4ee1ad548278feb57326156ad9af0ffc3e2980c25f5181227d4e9e6'
+          print('CURRENT_CONTRACT_MATCHES_PRESEAL')
+          PY
+      - name: One-use exact ingress and maximum raw-free extraction
+        shell: bash
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          python -B r22568/c52_onepass.py
+      - name: Delete all raw source and private runtime state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          targets=[Path('private_c52'),Path('metadata.zip'),Path('preseal.zip'),Path('inherited_meta'),Path('inherited_preseal')]
+          before=[]
+          for p in targets:
+              if p.exists():
+                  before.append({'path':str(p),'is_dir':p.is_dir()})
+                  if p.is_dir(): shutil.rmtree(p)
+                  else: p.unlink()
+          remain=[str(p) for p in targets if p.exists()]
+          receipt={'schema':'R22568_C52_RAW_DELETION_V1','targets_present_before_delete':before,'remaining_after_delete':remain,'pass':not remain}
+          Path('r22568_evidence').mkdir(exist_ok=True)
+          Path('r22568_evidence/R22568_C52_RAW_DELETION.json').write_text(json.dumps(receipt,indent=2))
+          if remain: raise SystemExit(3)
+          PY
+          rm -rf ~/.cache/huggingface ~/.cache/torch ~/.cache/pip || true
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+      - name: Compile portable code and raw-free artifact audit
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp r22568/c52_contract.py r22568_evidence/R22568_C52_CONTRACT.py
+          cp r22568/c52_onepass.py r22568_evidence/R22568_C52_ONEPASS.py
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('r22568_evidence')
+          forbidden_ext={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack'}
+          bad=[]; rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              if p.suffix.lower() in forbidden_ext: bad.append(str(p))
+              h=hashlib.sha256(p.read_bytes()).hexdigest(); rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':h})
+          receipt={'schema':'R22568_C52_RAWFREE_ARTIFACT_AUDIT_V1','files_before_receipt':len(rows),'forbidden_files':bad,'raw_weight_count':len(bad),'pass':not bad,'manifest_entries':rows}
+          (root/'R22568_C52_ARTIFACT_AUDIT.json').write_text(json.dumps(receipt,indent=2))
+          if bad: raise SystemExit(4)
+          PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: r22568-c52-preseal
-          path: r22568_preseal/
+          name: r22568-c52-terminal-rawfree-evidence
+          path: r22568_evidence/
           retention-days: 1
           if-no-files-found: error
