@@ -1,4 +1,4 @@
-name: R22566 C50 Koine direct archaeology
+name: R22566 C50 metadata-only size audit
 
 on:
   pull_request:
@@ -9,73 +9,26 @@ permissions:
   pull-requests: write
   issues: write
 
-env:
-  PYTHONDONTWRITEBYTECODE: '1'
-  HF_HUB_DISABLE_TELEMETRY: '1'
-  TOKENIZERS_PARALLELISM: 'false'
-
 jobs:
-  archaeology:
+  metadata:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - name: Restore presealed runner
+      - name: Query exact Hugging Face revision metadata only
+        env:
+          ADAPTER_API: https://huggingface.co/api/models/ainouche-abderahmane/koine-t5-omni/revision/3272fae16d13b8ea16d957800df69dbe0d51d247
+          BASE_API: https://huggingface.co/api/models/bowphs/GreTa/revision/8fe5b7aa66ddda9fe7a7b8a397f0edd1ac5b5041
         run: |
-          cat .github/scripts/r22566_c50_runner.part0 \
-              .github/scripts/r22566_c50_runner.part1 \
-              .github/scripts/r22566_c50_runner.part2 \
-              .github/scripts/r22566_c50_runner.part3 > /tmp/r22566_c50_runner.py
-          python -B -m py_compile /tmp/r22566_c50_runner.py
-          rm -rf /tmp/__pycache__
-      - name: Install exact runtime
-        run: |
-          python -m pip install --disable-pip-version-check --no-cache-dir --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
-          python -m pip install --disable-pip-version-check --no-cache-dir \
-            'transformers==5.0.0' 'peft==0.19.1' 'accelerate==1.14.0' \
-            'huggingface_hub==1.4.1' 'safetensors==0.7.0' 'tokenizers==0.22.2' \
-            'numpy==2.3.5' 'protobuf==6.33.5' 'sentencepiece==0.2.1'
-      - name: Execute one-use C50 archaeology
-        run: |
-          mkdir -p evidence rawwork
-          python -B /tmp/r22566_c50_runner.py --out evidence --work rawwork | tee /tmp/C50_STDOUT.txt
-          test ! -e rawwork || test -z "$(find rawwork -mindepth 1 -print -quit)"
-      - name: Raw-free evidence audit
-        run: |
-          python -B - <<'PY'
-          from pathlib import Path
-          import json, re
-          root=Path('evidence')
-          files=sorted(p for p in root.rglob('*') if p.is_file())
-          assert files, 'no evidence files'
-          banned_ext={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack','.ckpt','.pyc'}
-          bad=[str(p) for p in files if p.suffix.lower() in banned_ext]
-          assert not bad, bad
-          banned_keys=re.compile(r'(^|_)(lora_[ab]|state_dict|raw_(logits|activations?|hidden|weights?)|delta_w)(_|$)',re.I)
-          for p in files:
-            if p.suffix=='.json':
-              obj=json.loads(p.read_text())
-              stack=[obj]
-              while stack:
-                x=stack.pop()
-                if isinstance(x,dict):
-                  for k,v in x.items():
-                    assert not banned_keys.search(str(k)), (p,k)
-                    stack.append(v)
-                elif isinstance(x,list): stack.extend(x)
-          print({'evidence_files':len(files),'raw_weight_files':0,'audit':'PASS'})
+          python - <<'PY'
+          import json, os, urllib.request
+          for label,url,target in [('ADAPTER',os.environ['ADAPTER_API'],'adapter_model.safetensors'),('BASE',os.environ['BASE_API'],'model.safetensors')]:
+              with urllib.request.urlopen(url, timeout=30) as r:
+                  obj=json.load(r)
+              row=next(x for x in obj.get('siblings',[]) if x.get('rfilename')==target)
+              lfs=row.get('lfs') or {}
+              print(json.dumps({'label':label,'sha':obj.get('sha'),'file':target,'size':lfs.get('size') or row.get('size'),'lfs_sha256':lfs.get('sha256'),'xet':row.get('xetHash')},sort_keys=True))
           PY
-          rm -rf rawwork /tmp/r22566_c50_runner.py /tmp/C50_STDOUT.txt ~/.cache/huggingface ~/.cache/pip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: R22566_C50_RAWFREE_EVIDENCE
-          path: evidence
-          compression-level: 9
-          retention-days: 1
-      - name: Publish run receipt
+      - name: Publish metadata receipt
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -83,14 +36,10 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REPO: ${{ github.repository }}
         run: |
-          python -B - <<'PY'
+          python - <<'PY'
           import json, os, urllib.request
-          body={'body':f"R22566_C50_RUN_ID={os.environ['RUN_ID']}"}
-          req=urllib.request.Request(
-            f"https://api.github.com/repos/{os.environ['REPO']}/issues/{os.environ['PR_NUMBER']}/comments",
-            data=json.dumps(body).encode(),
-            headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},
-            method='POST')
-          try: print(urllib.request.urlopen(req,timeout=30).read().decode())
-          except Exception as e: print(f'nonfatal receipt comment failure: {e}')
+          body={'body':f"R22566_C50_METADATA_SIZE_RUN_ID={os.environ['RUN_ID']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/{os.environ['PR_NUMBER']}/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          try: urllib.request.urlopen(req,timeout=30).read()
+          except Exception as e: print('nonfatal',e)
           PY
