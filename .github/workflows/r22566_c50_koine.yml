@@ -14,19 +14,22 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Query exact Hugging Face revision metadata only
-        env:
-          ADAPTER_API: https://huggingface.co/api/models/ainouche-abderahmane/koine-t5-omni/revision/3272fae16d13b8ea16d957800df69dbe0d51d247
-          BASE_API: https://huggingface.co/api/models/bowphs/GreTa/revision/8fe5b7aa66ddda9fe7a7b8a397f0edd1ac5b5041
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install metadata client only
+        run: python -m pip install --disable-pip-version-check --no-cache-dir 'huggingface_hub==1.4.1'
+      - name: Query exact Hugging Face file metadata only
         run: |
           python - <<'PY'
-          import json, os, urllib.request
-          for label,url,target in [('ADAPTER',os.environ['ADAPTER_API'],'adapter_model.safetensors'),('BASE',os.environ['BASE_API'],'model.safetensors')]:
-              with urllib.request.urlopen(url, timeout=30) as r:
-                  obj=json.load(r)
-              row=next(x for x in obj.get('siblings',[]) if x.get('rfilename')==target)
-              lfs=row.get('lfs') or {}
-              print(json.dumps({'label':label,'sha':obj.get('sha'),'file':target,'size':lfs.get('size') or row.get('size'),'lfs_sha256':lfs.get('sha256'),'xet':row.get('xetHash')},sort_keys=True))
+          import json
+          from huggingface_hub import hf_hub_url, get_hf_file_metadata
+          rows=[
+            ('ADAPTER','ainouche-abderahmane/koine-t5-omni','3272fae16d13b8ea16d957800df69dbe0d51d247','adapter_model.safetensors'),
+            ('BASE','bowphs/GreTa','8fe5b7aa66ddda9fe7a7b8a397f0edd1ac5b5041','model.safetensors')]
+          for label,repo,rev,file in rows:
+              m=get_hf_file_metadata(hf_hub_url(repo,file,revision=rev))
+              print(json.dumps({'label':label,'repo':repo,'revision':rev,'file':file,'size':m.size,'etag':m.etag,'commit_hash':m.commit_hash,'location':str(m.location).split('?')[0]},sort_keys=True))
           PY
       - name: Publish metadata receipt
         if: always()
