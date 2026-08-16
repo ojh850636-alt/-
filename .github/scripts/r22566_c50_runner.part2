@@ -1,0 +1,97 @@
+    def eval_teacher(items, mode='full', dose=1.0, ablate=None):
+        restore_scales()
+        if dose!=1.0: set_scales(dose)
+        if ablate is not None:
+            for name,m,orig in loras:
+                if ablate(name): m.scaling['default']=0.0
+        per=[]
+        cm=model.disable_adapter() if mode=='base' else modified_b('random' if mode=='random' else 'shuffle' if mode=='shuffle' else 'none') if mode in ('random','shuffle') else contextlib.nullcontext()
+        with cm:
+            for batch in batches(items):
+                ins=tok([x['input'] for x in batch],return_tensors='pt',padding=True,truncation=True,max_length=256)
+                tg=tok(text_target=[x['target'] for x in batch],return_tensors='pt',padding=True,truncation=True,max_length=256)
+                labels=tg['input_ids']; mask=labels.ne(tok.pad_token_id)
+                dec=labels.clone(); dec[~mask]=tok.pad_token_id
+                # shift right using model helper
+                decoder_input_ids=model.get_base_model()._shift_right(dec)
+                outp=model(input_ids=ins['input_ids'],attention_mask=ins['attention_mask'],decoder_input_ids=decoder_input_ids,use_cache=False)
+                lp=torch.log_softmax(outp.logits.float(),dim=-1); safe=labels.clone(); safe[~mask]=0
+                tok_lp=lp.gather(-1,safe.unsqueeze(-1)).squeeze(-1)
+                pred=outp.logits.argmax(-1)
+                for j,x in enumerate(batch):
+                    m=mask[j]; n=int(m.sum()); nll=float(-(tok_lp[j][m].mean()).cpu()); acc=float((pred[j][m]==labels[j][m]).float().mean().cpu())
+                    per.append({'id':x['id'],'task':x['task'],'nll':nll,'token_acc':acc,'tokens':n})
+        restore_scales(); return per
+
+    def aggregate(per):
+        by=defaultdict(list)
+        for x in per: by[x['task']].append(x)
+        return {t:{'n':len(v),'mean_nll':sum(x['nll'] for x in v)/len(v),'mean_teacher_token_acc':sum(x['token_acc'] for x in v)/len(v)} for t,v in by.items()}
+    cond={}
+    cond['BASE']=eval_teacher(suite,'base')
+    cond['FULL']=eval_teacher(suite,'full')
+    cond['RANDOM_SIGN']=eval_teacher(suite,'random')
+    cond['LAYER_SHUFFLE']=eval_teacher(suite,'shuffle')
+    for d in (0.25,0.5,1.5): cond[f'DOSE_{d}']=eval_teacher(suite,'full',dose=d)
+    aggs={k:aggregate(v) for k,v in cond.items()}
+
+    # generation confirmation on 24 locked cases (8 each for three deterministic tasks)
+    gen_cases=[]
+    for task in ('pos','lemma','restore'):
+        gen_cases += deterministic_order([x for x in suite if x['task']==task],f'gen-{task}')[:8]
+    def gen_eval(mode):
+        rows=[]; cm=model.disable_adapter() if mode=='base' else contextlib.nullcontext()
+        with cm:
+            for x in gen_cases:
+                ins=tok(x['input'],return_tensors='pt',truncation=True,max_length=256)
+                y=model.generate(**ins,max_new_tokens=128,num_beams=1,do_sample=False)
+                pred=tok.decode(y[0],skip_special_tokens=True)
+                if x['task']=='pos':
+                    p=pred.upper().split(); g=x['target'].upper().split(); score=sum(a==b for a,b in zip(p,g))/max(len(g),1); exact=(p==g)
+                elif x['task']=='lemma':
+                    p=norm_text(pred).split(); g=norm_text(x['target']).split(); score=sum(a==b for a,b in zip(p,g))/max(len(g),1); exact=(p==g)
+                else:
+                    p=norm_text(pred); g=norm_text(x['target']); exact=(p==g); score=1.0 if exact else 0.0
+                rows.append({'id':x['id'],'task':x['task'],'exact':bool(exact),'score':float(score),'prediction_digest':hashlib.sha256(norm_text(pred).encode()).hexdigest()})
+        return rows
+    generation={'BASE':gen_eval('base'),'FULL':gen_eval('full')}
+
+    # pair stats by task
+    effects={}
+    lookup={k:{(x['task'],x['id']):x for x in v} for k,v in cond.items()}
+    for task in sorted({x['task'] for x in suite}):
+        keys=[(x['task'],x['id']) for x in suite if x['task']==task]
+        gain=[lookup['BASE'][k]['nll']-lookup['FULL'][k]['nll'] for k in keys]
+        full_vs_random=[lookup['RANDOM_SIGN'][k]['nll']-lookup['FULL'][k]['nll'] for k in keys]
+        full_vs_shuffle=[lookup['LAYER_SHUFFLE'][k]['nll']-lookup['FULL'][k]['nll'] for k in keys]
+        effects[task]={'base_minus_full_nll':paired_bootstrap(gain),'random_minus_full_nll':paired_bootstrap(full_vs_random),'shuffle_minus_full_nll':paired_bootstrap(full_vs_shuffle)}
+
+    positive_tasks=[t for t,e in effects.items() if e['base_minus_full_nll']['low']>0 and e['random_minus_full_nll']['low']>0 and e['shuffle_minus_full_nll']['low']>0 and t!='normalize_identity']
+    failure_tasks=[t for t,e in effects.items() if e['base_minus_full_nll']['high']<0]
+
+    # broad/fine causal screen on locked subset if either lane has evidence
+    causal=[]
+    if positive_tasks or failure_tasks:
+        causal_tasks=positive_tasks[:3] or failure_tasks[:2]
+        causal_suite=[]
+        for t in causal_tasks: causal_suite += deterministic_order([x for x in suite if x['task']==t],f'causal-{t}')[:32]
+        full_c=eval_teacher(causal_suite,'full')
+        full_map={(x['task'],x['id']):x for x in full_c}
+        def sel_factory(label):
+            def f(n):
+                enc='.encoder.' in n; dec='.decoder.' in n
+                if label=='ENC_ATTN': return enc and 'SelfAttention' in n
+                if label=='ENC_FFN': return enc and 'DenseReluDense' in n
+                if label=='DEC_SELF': return dec and 'SelfAttention' in n
+                if label=='DEC_CROSS': return dec and 'EncDecAttention' in n
+                if label=='DEC_FFN': return dec and 'DenseReluDense' in n
+                if label in ('Q','K','V','O','WI0','WI1','WO'):
+                    p={'Q':'.q','K':'.k','V':'.v','O':'.o','WI0':'.wi_0','WI1':'.wi_1','WO':'.wo'}[label]
+                    return p in n
+                m=re.search(r'\.(encoder|decoder)\.block\.(\d+)\.',n)
+                if m and label.startswith('ENC_') and m.group(1)=='encoder':
+                    z=int(m.group(2)); return (label=='ENC_EARLY' and z<4) or (label=='ENC_MID' and 4<=z<8) or (label=='ENC_LATE' and z>=8)
+                if m and label.startswith('DEC_') and m.group(1)=='decoder':
+                    z=int(m.group(2)); return (label=='DEC_EARLY' and z<4) or (label=='DEC_MID' and 4<=z<8) or (label=='DEC_LATE' and z>=8)
+                return False
+            return f
