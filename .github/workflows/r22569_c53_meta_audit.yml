@@ -1,54 +1,58 @@
-name: R22569 C53 Metadata Audit 2
+name: R22569 C53 RAG Faithfulness Archaeology
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  meta:
+  archaeology:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit second candidate batch without model weights
+      - uses: actions/checkout@v4
+      - name: Source-free preoutput seal
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out
+          python scripts/r22569_c53_rag_archaeology.py preseal --out preseal
+          test -f preseal/R22569_C53_PREOUTPUT_SEAL.json
+      - name: Install bounded analysis runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'transformers>=4.48,<5' 'peft>=0.14,<0.18' 'huggingface_hub>=0.27,<1' 'safetensors>=0.4.5' sentencepiece
+      - name: One-use exact ingress, behavior controls, conditional causal screen, raw deletion
+        shell: bash
+        env:
+          TOKENIZERS_PARALLELISM: 'false'
+          OMP_NUM_THREADS: '2'
+          MKL_NUM_THREADS: '2'
+        run: |
+          set -euo pipefail
+          python scripts/r22569_c53_rag_archaeology.py run --preseal preseal --out rawfree --raw raw_private
+          test ! -e raw_private
+          rm -f preseal/suite_private.json
+          test ! -e preseal/suite_private.json
+          grep -q 'weight_bytes_present_at_seal": 0' preseal/R22569_C53_PREOUTPUT_SEAL.json
+          test -f rawfree/C53_TERMINAL_EVIDENCE.json
+          test -f rawfree/C53_CLEANUP.json
+      - name: Confirm exported artifact is raw-free
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! find rawfree preseal -type f | grep -Ei '\.(safetensors|bin|pt|pth|pkl|pickle|ckpt)$'
+          ! find rawfree preseal -type f | grep -Ei '(tokenizer\.json|spiece\.model|sentencepiece|raw.*output|activation|logit|hidden)'
           python - <<'PY'
-          import json, re, urllib.request, urllib.parse, pathlib, hashlib
-          repos = [
-            'ambrosehui/flan-t5-small-rag-hallucinations-judgment',
-            'shibing624/chinese-text-correction-1.5b-lora',
-            'nbogdan/flant5-small-1ex-overall-1epochs',
-            'davidramos/flan-t5-small-generation-code-documentation-50k-data',
-          ]
-          def get_json(url):
-              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22569-meta2/1.0'})
-              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
-          def get_text(url):
-              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22569-meta2/1.0'})
-              try:
-                  with urllib.request.urlopen(req,timeout=30) as r: return r.read().decode('utf-8','replace')
-              except Exception: return None
-          records=[]
-          for repo in repos:
-              try:
-                  m=get_json('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true')
-                  sha=m.get('sha'); siblings=m.get('siblings') or []; files=[]
-                  for x in siblings:
-                      lfs=x.get('lfs') or {}; files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
-                  readme=get_text(f'https://huggingface.co/{repo}/resolve/{sha}/README.md') if sha else None
-                  cfg=get_text(f'https://huggingface.co/{repo}/resolve/{sha}/adapter_config.json') if sha else None
-                  try: cfgj=json.loads(cfg) if cfg else None
-                  except Exception: cfgj=None
-                  card=m.get('cardData') or {}
-                  records.append({'repo':repo,'exists':True,'exact_revision':sha,'license':card.get('license') or m.get('license'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),'base_model_card':card.get('base_model'),'datasets':card.get('datasets'),'adapter_config':cfgj,'files':files,'readme':(readme or '')[:120000] if readme is not None else None,'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest() if readme is not None else None,'safetensor_files':[f for f in files if (f.get('name') or '').endswith('.safetensors')],'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)]})
-              except Exception as e: records.append({'repo':repo,'exists':False,'error':repr(e)})
-          out={'schema':'R22569_C53_METADATA_AUDIT_V2','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':records}
-          pathlib.Path('out/R22569_C53_METADATA_AUDIT_V2.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          import json, pathlib
+          t=json.loads(pathlib.Path('rawfree/C53_TERMINAL_EVIDENCE.json').read_text())
+          c=json.loads(pathlib.Path('rawfree/C53_CLEANUP.json').read_text())
+          assert c['raw_root_deleted'] and c['raw_weights_remaining']==0
+          print(json.dumps(t,indent=2))
           PY
-          sha256sum out/R22569_C53_METADATA_AUDIT_V2.json > out/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: r22569-c53-meta-audit-v2
-          path: out/
+          name: r22569-c53-rawfree-evidence
+          path: |
+            preseal/R22569_C53_PREOUTPUT_SEAL.json
+            rawfree/
           retention-days: 1
           if-no-files-found: error
