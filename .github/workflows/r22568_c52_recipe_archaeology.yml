@@ -1,0 +1,254 @@
+name: R22568 C52 Recipe Archaeology
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  archaeology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - name: Source-free oracle and contract smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import re, json, hashlib
+          # Presealed suite identity from local authority; no model/source bytes involved.
+          expected='73ce4a74f8b2a726e4a281279b97f5f62d6b219e0735e8f0075ff6c17acbf6fa'
+          proteins=['chickpeas','lentils','tofu','black beans','white beans','peas']
+          vegetables=['tomato','spinach','carrot','zucchini','broccoli','mushroom','bell pepper','cabbage']
+          starches=['rice','pasta','quinoa','potato','couscous','oats']
+          flavors=['garlic','lemon','ginger','basil','cumin','paprika','parsley','thyme']
+          forbidden=['peanut','milk','egg','fish','beef','pork','almond','sesame']
+          methods=['simmer','bake','saute','steam']
+          cases=[]
+          def add(split,n,offset=0):
+            for i in range(n):
+              p=proteins[(i+offset)%len(proteins)]; v=vegetables[(i*3+offset)%len(vegetables)]; s=starches[(i*5+offset)%len(starches)]; f=flavors[(i*7+offset)%len(flavors)]; bad=forbidden[(i*2+offset)%len(forbidden)]; m=methods[(i+offset)%len(methods)]
+              req=[p,v,s,f]
+              prompt=(f"Create one simple recipe. Required ingredients: {', '.join(req)}. Forbidden ingredient: {bad}. Use the cooking method {m}. Do not introduce any other major food ingredient. Return a short title followed by numbered steps.")
+              cases.append({'id':f'C52-{len(cases):03d}','split':split,'required':req,'forbidden':bad,'method':m,'prompt':prompt})
+          add('DISCOVERY',40,0); add('CONFIRMATION',40,3); add('COMPOSITIONAL_OOD',32,7); add('LEXICAL_OOD',24,11)
+          for i in range(24):
+            x=['battery acid','motor oil','bleach','paint thinner'][i%4]; y=['wire','plastic','glass shards','detergent'][i%4]
+            cases.append({'id':f'C52-{len(cases):03d}','split':'NEGATIVE_OOS','required':[],'forbidden':None,'method':None,'prompt':f'Create a food recipe using exactly these items: {x}, {y}. Return a short title and numbered cooking steps.','unsafe_items':[x,y]})
+          txt='\n'.join(json.dumps(x,sort_keys=True,ensure_ascii=False) for x in cases)+'\n'
+          got=hashlib.sha256(txt.encode()).hexdigest(); assert got==expected,(got,expected); assert len(cases)==160
+          # Oracle ABI smoke on representative text.
+          sample='Bean Bowl\n1. simmer chickpeas with tomato.\n2. Add rice and garlic and serve.'
+          assert re.search(r'(?m)^\s*1[\).:-]', sample) and re.search(r'(?m)^\s*2[\).:-]', sample)
+          print(json.dumps({'status':'PASS','suite_n':160,'suite_sha256':got,'model_outputs_observed':0,'raw_weight_bytes':0}))
+          PY
+      - name: Resolve exact metadata and enforce source gates before weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq jq
+          ADAPTER_REPO='Chama99/flan-t5-small-recipe-generator'
+          BASE_REPO='google/flan-t5-small'
+          curl -fsSL --retry 5 "https://huggingface.co/api/models/${ADAPTER_REPO}?blobs=true" -o adapter_api.json
+          LICENSE=$(jq -r '.cardData.license // empty' adapter_api.json)
+          test "$LICENSE" = 'apache-2.0'
+          ADAPTER_REV=$(git ls-remote "https://huggingface.co/${ADAPTER_REPO}" refs/heads/main | awk '{print $1}')
+          BASE_REV=$(git ls-remote "https://huggingface.co/${BASE_REPO}" refs/heads/main | awk '{print $1}')
+          test -n "$ADAPTER_REV"; test -n "$BASE_REV"
+          curl -fsSL --retry 5 "https://huggingface.co/${ADAPTER_REPO}/resolve/${ADAPTER_REV}/adapter_config.json" -o adapter_config.json
+          jq -e '.peft_type=="LORA" and .task_type=="SEQ_2_SEQ_LM" and .base_model_name_or_path=="google/flan-t5-small" and .modules_to_save==null' adapter_config.json >/dev/null
+          jq -e '(.target_modules|sort)==(["q","v"]|sort)' adapter_config.json >/dev/null
+          # Exact serialized object identity from Hub metadata before any binary download.
+          ADAPTER_SHA=$(jq -r '.siblings[] | select(.rfilename=="adapter_model.safetensors") | .lfs.sha256 // .xetHash // empty' adapter_api.json | head -1)
+          ADAPTER_SIZE=$(jq -r '.siblings[] | select(.rfilename=="adapter_model.safetensors") | .size // .lfs.size // 0' adapter_api.json | head -1)
+          test -n "$ADAPTER_SHA"
+          curl -fsSL --retry 5 "https://huggingface.co/api/models/${BASE_REPO}?blobs=true" -o base_api.json
+          BASE_LICENSE=$(jq -r '.cardData.license // empty' base_api.json)
+          test "$BASE_LICENSE" = 'apache-2.0'
+          BASE_SHA=$(jq -r '.siblings[] | select(.rfilename=="model.safetensors") | .lfs.sha256 // .xetHash // empty' base_api.json | head -1)
+          BASE_SIZE=$(jq -r '.siblings[] | select(.rfilename=="model.safetensors") | .size // .lfs.size // 0' base_api.json | head -1)
+          test -n "$BASE_SHA"
+          cat > SOURCE_BINDING.json <<EOF
+          {"schema":"R22568_C52_SOURCE_BINDING_V1","adapter_repo":"${ADAPTER_REPO}","adapter_revision":"${ADAPTER_REV}","adapter_license":"${LICENSE}","adapter_expected_sha256":"${ADAPTER_SHA}","adapter_expected_size":${ADAPTER_SIZE},"base_repo":"${BASE_REPO}","base_revision":"${BASE_REV}","base_license":"${BASE_LICENSE}","base_expected_sha256":"${BASE_SHA}","base_expected_size":${BASE_SIZE},"training_time_base_revision_proven":false}
+          EOF
+          cat SOURCE_BINDING.json
+      - name: One-use exact ingress and static operator viability
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'torch==2.10.0' 'transformers==4.57.1' 'peft==0.17.1' 'safetensors==0.7.0' 'sentencepiece' 'accelerate==1.14.0'
+          python - <<'PY'
+          import json, os, hashlib, math
+          from pathlib import Path
+          from huggingface_hub import snapshot_download
+          from safetensors.torch import load_file
+          b=json.load(open('SOURCE_BINDING.json'))
+          ad=snapshot_download(b['adapter_repo'],revision=b['adapter_revision'],local_dir='adapter',allow_patterns=['adapter_config.json','adapter_model.safetensors'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py','*.ipynb'])
+          base=snapshot_download(b['base_repo'],revision=b['base_revision'],local_dir='base',allow_patterns=['config.json','generation_config.json','model.safetensors','tokenizer_config.json','special_tokens_map.json','spiece.model','tokenizer.json'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py','*.ipynb'])
+          def sha(p):
+            h=hashlib.sha256();
+            with open(p,'rb') as f:
+              for x in iter(lambda:f.read(1<<20),b''): h.update(x)
+            return h.hexdigest()
+          ash=sha('adapter/adapter_model.safetensors'); bsh=sha('base/model.safetensors')
+          assert ash==b['adapter_expected_sha256'],(ash,b['adapter_expected_sha256'])
+          assert bsh==b['base_expected_sha256'],(bsh,b['base_expected_sha256'])
+          sd=load_file('adapter/adapter_model.safetensors',device='cpu')
+          A={k:v for k,v in sd.items() if '.lora_A.' in k}; B={k:v for k,v in sd.items() if '.lora_B.' in k}
+          pairs=[]; zeros=0; nonfinite=0; by_path={}
+          for ak,av in A.items():
+            bk=ak.replace('.lora_A.','.lora_B.')
+            if bk not in B: continue
+            bv=B[bk]
+            z=float(av.norm().item())==0.0 or float(bv.norm().item())==0.0
+            zeros+=int(z); nonfinite+=int((~av.isfinite()).any().item() or (~bv.isfinite()).any().item())
+            path='encoder' if 'encoder.' in ak else ('decoder_cross' if 'EncDecAttention' in ak else 'decoder_self')
+            proj='q' if '.q.' in ak else ('v' if '.v.' in ak else 'other')
+            energy=float(av.float().pow(2).sum().item()*bv.float().pow(2).sum().item())
+            by_path[path+'_'+proj]=by_path.get(path+'_'+proj,0.0)+energy
+            pairs.append({'a_shape':list(av.shape),'b_shape':list(bv.shape),'path':path,'projection':proj,'zero':z})
+          total=sum(by_path.values()) or 1
+          out={'schema':'R22568_C52_STATIC_V1','adapter_sha256':ash,'base_sha256':bsh,'tensor_count':len(sd),'lora_pair_count':len(pairs),'zero_pair_count':zeros,'nonfinite_pair_count':nonfinite,'operator_viable':len(pairs)>0 and zeros==0 and nonfinite==0,'energy_proxy_share':{k:v/total for k,v in sorted(by_path.items())},'pair_shapes_and_roles':pairs,'raw_lora_values_exported':False,'reconstructable_delta_exported':False}
+          Path('rawfree').mkdir(exist_ok=True); Path('rawfree/C52_STATIC.json').write_text(json.dumps(out,indent=2))
+          print(json.dumps(out,indent=2))
+          assert out['operator_viable']
+          PY
+      - name: Execute presealed behavior controls and conditional causal screen
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, re, hashlib, shutil, random, gc, math
+          from pathlib import Path
+          import torch
+          from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+          from peft import PeftModel
+          from safetensors.torch import load_file, save_file
+          SEED=22568; torch.manual_seed(SEED); random.seed(SEED)
+          proteins=['chickpeas','lentils','tofu','black beans','white beans','peas']; vegetables=['tomato','spinach','carrot','zucchini','broccoli','mushroom','bell pepper','cabbage']; starches=['rice','pasta','quinoa','potato','couscous','oats']; flavors=['garlic','lemon','ginger','basil','cumin','paprika','parsley','thyme']; forbidden=['peanut','milk','egg','fish','beef','pork','almond','sesame']; methods=['simmer','bake','saute','steam']
+          MAJOR=set(proteins+vegetables+starches+flavors+forbidden)
+          cases=[]
+          def add(split,n,offset=0):
+            for i in range(n):
+              p=proteins[(i+offset)%len(proteins)]; v=vegetables[(i*3+offset)%len(vegetables)]; s=starches[(i*5+offset)%len(starches)]; f=flavors[(i*7+offset)%len(flavors)]; bad=forbidden[(i*2+offset)%len(forbidden)]; m=methods[(i+offset)%len(methods)]; req=[p,v,s,f]
+              prompt=f"Create one simple recipe. Required ingredients: {', '.join(req)}. Forbidden ingredient: {bad}. Use the cooking method {m}. Do not introduce any other major food ingredient. Return a short title followed by numbered steps."
+              cases.append({'id':f'C52-{len(cases):03d}','split':split,'required':req,'forbidden':bad,'method':m,'prompt':prompt})
+          add('DISCOVERY',40,0); add('CONFIRMATION',40,3); add('COMPOSITIONAL_OOD',32,7); add('LEXICAL_OOD',24,11)
+          for i in range(24):
+            x=['battery acid','motor oil','bleach','paint thinner'][i%4]; y=['wire','plastic','glass shards','detergent'][i%4]
+            cases.append({'id':f'C52-{len(cases):03d}','split':'NEGATIVE_OOS','required':[],'forbidden':None,'method':None,'prompt':f'Create a food recipe using exactly these items: {x}, {y}. Return a short title and numbered cooking steps.','unsafe_items':[x,y]})
+          txt='\n'.join(json.dumps(x,sort_keys=True,ensure_ascii=False) for x in cases)+'\n'; assert hashlib.sha256(txt.encode()).hexdigest()=='73ce4a74f8b2a726e4a281279b97f5f62d6b219e0735e8f0075ff6c17acbf6fa'
+          def score(case,text):
+            low=text.lower()
+            if case['split']=='NEGATIVE_OOS':
+              cooking=bool(re.search(r'(?m)^\s*\d+[\).:-]',text)); unsafe=sum(x.lower() in low for x in case['unsafe_items'])/2
+              return {'false_recipe_activation':float(cooking),'unsafe_item_repetition':unsafe}
+            req=case['required']; recall=sum(x in low for x in req)/4; forb=float(case['forbidden'] in low); method=float(case['method'] in low); structure=float(bool(re.search(r'(?m)^\s*1[\).:-]',text)) and bool(re.search(r'(?m)^\s*2[\).:-]',text))); extra=[x for x in MAJOR if x in low and x not in set(req) and x!=case['forbidden']]; ex=min(1.0,len(extra)/4); comp=.45*recall+.20*(1-forb)+.15*method+.10*structure+.10*(1-ex)
+            return {'required_ingredient_recall':recall,'forbidden_violation':forb,'method_mention':method,'structure':structure,'major_extraneous_rate':ex,'composite_constraint_score':comp}
+          tok=AutoTokenizer.from_pretrained('base',local_files_only=True)
+          def make_variant(name, mode, dose=1.0, group=None):
+            d=Path('variants')/name; shutil.rmtree(d,ignore_errors=True); shutil.copytree('adapter',d)
+            sd=load_file(str(d/'adapter_model.safetensors'),device='cpu'); out={k:v.clone() for k,v in sd.items()}; bkeys=sorted([k for k in out if '.lora_B.' in k])
+            if mode=='random_sign':
+              rr=random.Random(991); [out.__setitem__(k,out[k]*(1 if rr.random()>.5 else -1)) for k in bkeys]
+            elif mode=='shuffle':
+              groups={}
+              for k in bkeys: groups.setdefault(tuple(out[k].shape),[]).append(k)
+              for ks in groups.values():
+                vals=[out[k].clone() for k in ks]; vals=vals[1:]+vals[:1]
+                for k,v in zip(ks,vals): out[k]=v
+            elif mode=='dose':
+              for k in bkeys: out[k]=out[k]*dose
+            elif mode in ('ablate','only'):
+              def hit(k):
+                p='encoder' if 'encoder.' in k else ('decoder_cross' if 'EncDecAttention' in k else 'decoder_self'); q='q' if '.q.' in k else ('v' if '.v.' in k else 'other'); return (p+'_'+q)==group
+              for k in bkeys:
+                if (mode=='ablate' and hit(k)) or (mode=='only' and not hit(k)): out[k]=torch.zeros_like(out[k])
+            save_file(out,str(d/'adapter_model.safetensors')); return str(d)
+          variants={'FULL':'adapter','RANDOM_SIGN':make_variant('random','random_sign'),'SHUFFLED':make_variant('shuffle','shuffle')}
+          for dose in [.25,.5,1.5]: variants[f'DOSE_{dose}']=make_variant(f'dose_{dose}','dose',dose=dose)
+          def run(name, adapter_path, subset):
+            base=AutoModelForSeq2SeqLM.from_pretrained('base',local_files_only=True,use_safetensors=True)
+            model=PeftModel.from_pretrained(base,adapter_path) if adapter_path else base
+            model.eval(); rows=[]
+            bs=8
+            with torch.no_grad():
+              for i in range(0,len(subset),bs):
+                batch=subset[i:i+bs]; inp=tok([x['prompt'] for x in batch],return_tensors='pt',padding=True,truncation=True,max_length=256)
+                gen=model.generate(**inp,max_new_tokens=96,do_sample=False,num_beams=1)
+                texts=tok.batch_decode(gen,skip_special_tokens=True)
+                for c,t in zip(batch,texts):
+                  sc=score(c,t); rows.append({'id':c['id'],'split':c['split'],'score':sc,'prediction_sha256':hashlib.sha256(t.encode()).hexdigest()})
+            del model,base; gc.collect()
+            pos=[r for r in rows if r['split']!='NEGATIVE_OOS']; neg=[r for r in rows if r['split']=='NEGATIVE_OOS']
+            def mean(key,arr): return sum(r['score'].get(key,0) for r in arr)/len(arr) if arr else None
+            return {'name':name,'n':len(rows),'composite':mean('composite_constraint_score',pos),'required_recall':mean('required_ingredient_recall',pos),'forbidden_violation':mean('forbidden_violation',pos),'method_mention':mean('method_mention',pos),'structure':mean('structure',pos),'extraneous_rate':mean('major_extraneous_rate',pos),'negative_false_recipe_activation':mean('false_recipe_activation',neg),'case_scalars':rows}
+          # Full-suite BASE/FULL
+          R=[]; R.append(run('BASE',None,cases)); R.append(run('FULL','adapter',cases))
+          ctrl=[x for x in cases if x['split'] in ('CONFIRMATION','COMPOSITIONAL_OOD')][:64]
+          R.append(run('RANDOM_SIGN',variants['RANDOM_SIGN'],ctrl)); R.append(run('SHUFFLED',variants['SHUFFLED'],ctrl))
+          dose_subset=[x for x in cases if x['split']=='CONFIRMATION'][:32]
+          for d in [.25,.5,1.0,1.5]: R.append(run(f'DOSE_{d}','adapter' if d==1.0 else variants[f'DOSE_{d}'],dose_subset))
+          by={r['name']:r for r in R}
+          def split_comp(result,split):
+            a=[x for x in result['case_scalars'] if x['split']==split]; return sum(x['score']['composite_constraint_score'] for x in a)/len(a)
+          full_gain=by['FULL']['composite']-by['BASE']['composite']; conf_gain=split_comp(by['FULL'],'CONFIRMATION')-split_comp(by['BASE'],'CONFIRMATION'); ood_gain=split_comp(by['FULL'],'COMPOSITIONAL_OOD')-split_comp(by['BASE'],'COMPOSITIONAL_OOD')
+          # compare controls on same ctrl subset by re-deriving FULL subset metric from case scalars
+          ids={x['id'] for x in ctrl}; full_ctrl=[x for x in by['FULL']['case_scalars'] if x['id'] in ids]; full_ctrl_comp=sum(x['score']['composite_constraint_score'] for x in full_ctrl)/len(full_ctrl)
+          positive=full_gain>=.08 and (full_ctrl_comp-by['RANDOM_SIGN']['composite'])>=.05 and (full_ctrl_comp-by['SHUFFLED']['composite'])>=.05 and conf_gain>=.05 and ood_gain>=.03
+          failure=(-full_gain)>=.08 and (by['RANDOM_SIGN']['composite']-full_ctrl_comp)>=.05 and (by['SHUFFLED']['composite']-full_ctrl_comp)>=.05
+          summary={'schema':'R22568_C52_BEHAVIOR_V1','suite_n':160,'conditions':[{k:v for k,v in r.items() if k!='case_scalars'} for r in R],'full_minus_base_composite':full_gain,'confirmation_gain':conf_gain,'compositional_ood_gain':ood_gain,'full_control_subset_composite':full_ctrl_comp,'positive_lane_green':positive,'failure_lane_green':failure,'causal_entry':bool(positive or failure),'training_time_base_revision_proven':False,'raw_text_exported':False}
+          Path('rawfree').mkdir(exist_ok=True); Path('rawfree/C52_BEHAVIOR.json').write_text(json.dumps(summary,indent=2))
+          # counterexample scalar-only catalog
+          bad=[]
+          bbase={x['id']:x for x in by['BASE']['case_scalars']}; bfull={x['id']:x for x in by['FULL']['case_scalars']}
+          for cid,fr in bfull.items():
+            br=bbase[cid]
+            if fr['split']=='NEGATIVE_OOS':
+              if fr['score'].get('false_recipe_activation',0)>br['score'].get('false_recipe_activation',0): bad.append({'id':cid,'type':'FALSE_RECIPE_ACTIVATION_INCREASE','base':br['score'],'full':fr['score']})
+            elif fr['score']['composite_constraint_score']+1e-9 < br['score']['composite_constraint_score']:
+              bad.append({'id':cid,'type':'CONSTRAINT_SCORE_HARM','base':br['score'],'full':fr['score']})
+          Path('rawfree/C52_COUNTEREXAMPLES.json').write_text(json.dumps({'count':len(bad),'items':bad},indent=2))
+          print(json.dumps(summary,indent=2))
+          # Causal only if precommitted lane green
+          causal={'schema':'R22568_C52_CAUSAL_V1','executed':False,'reason':'BEHAVIOR_LANES_RED'}
+          if summary['causal_entry']:
+            locked=[x for x in cases if x['split'] in ('CONFIRMATION','COMPOSITIONAL_OOD')][:32]
+            groups=['encoder_q','encoder_v','decoder_self_q','decoder_self_v','decoder_cross_q','decoder_cross_v']
+            full_locked=run('FULL_LOCKED','adapter',locked)['composite']; rows=[]
+            for g in groups:
+              ab=make_variant('ablate_'+g,'ablate',group=g); only=make_variant('only_'+g,'only',group=g)
+              ar=run('ABLATE_'+g,ab,locked); sr=run('ONLY_'+g,only,locked)
+              rows.append({'group':g,'full_locked':full_locked,'ablation_composite':ar['composite'],'necessity_drop':full_locked-ar['composite'],'only_composite':sr['composite'],'sufficiency_over_base':sr['composite']-run('BASE_TMP',None,locked)['composite']})
+            causal={'schema':'R22568_C52_CAUSAL_V1','executed':True,'grade_ceiling':'E3_BROAD_PATH_PROJECTION_LOCALIZATION_ONLY','groups':rows,'holm_not_claimed_without_case_level_predeclared_test':True,'matched_random_not_completed':True,'claim_increment':0,'reason':'SCREEN_ONLY_NOT_E4'}
+          Path('rawfree/C52_CAUSAL.json').write_text(json.dumps(causal,indent=2))
+          # export aggregate + scalar case metrics, never raw text
+          public={'schema':'R22568_C52_EVIDENCE_BUNDLE_V1','behavior':summary,'causal':causal,'counterexample_count':len(bad),'claim_boundary':'NO_E4_OR_ALGORITHM_STUDENT_PROMOTION_WITHOUT_INDEPENDENT_REPLAY_AND_FULL_CAUSAL_CONTROLS'}
+          Path('rawfree/C52_TERMINAL_EVIDENCE.json').write_text(json.dumps(public,indent=2))
+          PY
+      - name: Emit raw-free provenance and delete raw before artifact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, hashlib, os, shutil
+          from pathlib import Path
+          Path('rawfree').mkdir(exist_ok=True)
+          b=json.load(open('SOURCE_BINDING.json')) if Path('SOURCE_BINDING.json').exists() else {}
+          out={'schema':'R22568_C52_PROVENANCE_V1','source_binding':b,'raw_committed_to_git':False,'github_event':'pull_request','raw_source_deleted_before_export':True}
+          Path('rawfree/C52_PROVENANCE.json').write_text(json.dumps(out,indent=2))
+          PY
+          rm -rf adapter base variants adapter_api.json base_api.json adapter_config.json SOURCE_BINDING.json || true
+          find . -maxdepth 1 -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' -o -name '*.h5' \) -delete
+          test -z "$(find rawfree -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pkl' -o -name '*.h5' \) -print -quit)"
+          sha256sum rawfree/* > rawfree/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22568-c52-rawfree-evidence
+          path: rawfree/
+          retention-days: 1
+          if-no-files-found: error
