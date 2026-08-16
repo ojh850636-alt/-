@@ -25,7 +25,10 @@ jobs:
           python-version: '3.13'
       - name: Restore presealed runner
         run: |
-          base64 -d .github/scripts/r22566_c50_runner.py.gz.b64 | gzip -d > /tmp/r22566_c50_runner.py
+          cat .github/scripts/r22566_c50_runner.part0 \
+              .github/scripts/r22566_c50_runner.part1 \
+              .github/scripts/r22566_c50_runner.part2 \
+              .github/scripts/r22566_c50_runner.part3 > /tmp/r22566_c50_runner.py
           python -B -m py_compile /tmp/r22566_c50_runner.py
           rm -rf /tmp/__pycache__
       - name: Install exact runtime
