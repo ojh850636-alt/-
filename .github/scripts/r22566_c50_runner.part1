@@ -1,0 +1,84 @@
+    ad=snapshot_download(repo_id=ADAPTER_REPO,revision=ADAPTER_REV,allow_patterns=['README.md','adapter_config.json','adapter_model.safetensors','metrics.json','morph_tags.json'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py','*.ipynb'],local_dir=work/'adapter')
+    bd=snapshot_download(repo_id=BASE_REPO,revision=BASE_REV,allow_patterns=['README.md','config.json','model.safetensors','tokenizer.json','tokenizer_config.json','special_tokens_map.json'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py','*.ipynb'],local_dir=work/'base')
+    aw=work/'adapter'/'adapter_model.safetensors'; bw=work/'base'/'model.safetensors'
+    if sha256_file(aw)!=ADAPTER_SHA: raise RuntimeError('ADAPTER_SHA_MISMATCH')
+    if sha256_file(bw)!=BASE_SHA: raise RuntimeError('BASE_SHA_MISMATCH')
+    cfg=json.loads((work/'adapter'/'adapter_config.json').read_text())
+    if cfg.get('base_model_name_or_path')!=BASE_REPO or cfg.get('peft_type')!='LORA' or cfg.get('r')!=64 or cfg.get('lora_alpha')!=128 or cfg.get('modules_to_save') not in (None,[]): raise RuntimeError(f'ADAPTER_CONFIG_CONTRACT:{cfg}')
+    data_path=work/DATA_FILE; urllib.request.urlretrieve(DATA_URL,data_path)
+    data_text=data_path.read_text(encoding='utf-8')
+    suite=make_suite(parse_conllu(data_text))
+    suite_public=[{k:v for k,v in x.items() if k not in ('text',)} for x in suite]
+    preseal={
+      'schema':'LUCIA_AA_R22566_C50_PREOUTPUT_SEAL_V1','candidate':'R22566-C50-KOINE-T5-OMNI-MULTITASK-GREEK','model_outputs_observed':0,
+      'adapter':{'repo':ADAPTER_REPO,'revision':ADAPTER_REV,'sha256':ADAPTER_SHA,'license':'cc-by-nc-sa-4.0'},
+      'base':{'repo':BASE_REPO,'revision':BASE_REV,'sha256':BASE_SHA,'license':'apache-2.0','training_time_revision_proven':False},
+      'dataset':{'repo':DATA_REPO,'revision':DATA_REV,'file':DATA_FILE,'sha256':sha256_file(data_path),'license':'CC-BY-NC-SA-3.0'},
+      'suite_digest':canonical_json_sha(suite_public),'suite_counts':dict((t,sum(x['task']==t for x in suite)) for t in sorted({x['task'] for x in suite})),
+      'conditions':['BASE','FULL','RANDOM_SIGN','LAYER_SHUFFLE','DOSE_0.25','DOSE_0.5','DOSE_1.5'],
+      'causal_lanes_precommitted':['POSITIVE_CAPABILITY','NEGATIVE_FAILURE'],
+      'causal_groups':['ENC_ATTN','ENC_FFN','DEC_SELF','DEC_CROSS','DEC_FFN','Q','K','V','O','WI0','WI1','WO','ENC_EARLY','ENC_MID','ENC_LATE','DEC_EARLY','DEC_MID','DEC_LATE'],
+      'claim_cap':'E3_BROAD_LOCALIZATION_ONLY_NO_INDEPENDENT_ENVIRONMENT_REPLAY',
+      'gates':{'effect_ci_excludes_zero':True,'control_separation_required':True,'generation_confirmation_required':True,'e4_requires_independent_environment':True}
+    }
+    (out/'C50_PREOUTPUT_SEAL.json').write_text(json.dumps(preseal,ensure_ascii=False,indent=2,sort_keys=True))
+
+    # non-reconstructive static operator audit
+    rows=[]; nonfinite=zero=0; params=0; energy=defaultdict(float)
+    with safe_open(aw,framework='pt',device='cpu') as f:
+        for k in f.keys():
+            t=f.get_tensor(k); params+=t.numel(); n=float(torch.linalg.vector_norm(t.float()))
+            if not torch.isfinite(t).all(): nonfinite+=1
+            if n==0: zero+=1
+            role='encoder' if '.encoder.' in k else 'decoder' if '.decoder.' in k else 'other'
+            proj=next((p for p in ['q','k','v','o','wi_0','wi_1','wo','wi'] if f'.{p}.' in k), 'other')
+            energy[f'{role}:{proj}']+=n*n
+            rows.append({'key_digest':hashlib.sha256(k.encode()).hexdigest()[:16],'shape':list(t.shape),'dtype':str(t.dtype),'norm':n,'role':role,'projection':proj})
+    et=sum(energy.values()) or 1.0
+    static={'schema':'LUCIA_AA_R22566_C50_STATIC_V1','tensor_count':len(rows),'parameter_count':params,'nonfinite_tensor_count':nonfinite,'exact_zero_tensor_count':zero,'rank':64,'alpha':128,'factor_energy_proxy':{k:v/et for k,v in sorted(energy.items())},'reconstructable_values_emitted':False}
+    (out/'C50_STATIC.json').write_text(json.dumps(static,indent=2,sort_keys=True))
+
+    tok=AutoTokenizer.from_pretrained(work/'base',local_files_only=True,trust_remote_code=False)
+    tok.pad_token='<pad>'; tok.eos_token='</s>'; tok.add_special_tokens({'additional_special_tokens':[f'<extra_id_{i}>' for i in range(100)]})
+    base=AutoModelForSeq2SeqLM.from_pretrained(work/'base',local_files_only=True,use_safetensors=True,trust_remote_code=False)
+    base.config.tie_word_embeddings=False; base.config.vocab_size=len(tok)
+    model=PeftModel.from_pretrained(base,work/'adapter',local_files_only=True,is_trainable=False)
+    model.eval(); torch.set_grad_enabled(False)
+    device=torch.device('cpu'); model.to(device)
+
+    loras=[]
+    for name,m in model.named_modules():
+        if isinstance(m,LoraLayer) and 'default' in getattr(m,'scaling',{}):
+            loras.append((name,m,float(m.scaling['default'])))
+    if not loras: raise RuntimeError('NO_LORA_LAYERS')
+    def set_scales(factor=1.0, selector=None):
+        for name,m,orig in loras:
+            m.scaling['default']=orig*(factor if selector is None or selector(name) else 1.0)
+    def restore_scales():
+        for _,m,orig in loras: m.scaling['default']=orig
+    @contextlib.contextmanager
+    def modified_b(mode):
+        saved=[]
+        try:
+            if mode=='random':
+                g=torch.Generator(device='cpu'); g.manual_seed(22566)
+                for name,m,_ in loras:
+                    if 'default' not in m.lora_B: continue
+                    w=m.lora_B['default'].weight; saved.append((w,w.detach().clone()))
+                    sign=torch.randint(0,2,w.shape,generator=g,dtype=torch.int64).to(w.device)*2-1
+                    w.mul_(sign.to(w.dtype))
+            elif mode=='shuffle':
+                groups=defaultdict(list)
+                for name,m,_ in loras:
+                    if 'default' in m.lora_B: groups[tuple(m.lora_B['default'].weight.shape)].append((name,m.lora_B['default'].weight))
+                rnd=random.Random(22566)
+                for shape,items in groups.items():
+                    if len(items)<2: continue
+                    originals=[w.detach().clone() for _,w in items]; perm=list(range(len(items))); rnd.shuffle(perm)
+                    for (_,w),j in zip(items,perm): saved.append((w,w.detach().clone())); w.copy_(originals[j])
+            yield
+        finally:
+            for w,v in saved: w.copy_(v)
+
+    def batches(items,bs=8):
+        for i in range(0,len(items),bs): yield items[i:i+bs]
