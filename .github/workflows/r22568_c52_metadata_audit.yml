@@ -1,0 +1,74 @@
+name: R22568 C52 Metadata Audit
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit three source-zero candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.request, urllib.parse
+          from pathlib import Path
+          candidates = [
+            {"id":"CALENDAR","repo":"waliaMuskaan011/calendar-event-extractor-smollm","question":"calendar temporal normalization + typed event extraction"},
+            {"id":"GEC","repo":"arjunverma2004/LiquidAI-grammarly-lora","question":"grammatical error correction preserving semantics"},
+            {"id":"PLTN","repo":"Folx/qwen3-0.6b-pl-text-normalization","question":"Polish written-to-spoken text normalization with numbers/units"},
+          ]
+          def get_json(url):
+            req=urllib.request.Request(url, headers={"User-Agent":"LAA-R22568-metadata"})
+            with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
+          def get_text(url):
+            req=urllib.request.Request(url, headers={"User-Agent":"LAA-R22568-metadata"})
+            try:
+              with urllib.request.urlopen(req, timeout=60) as r: return r.read().decode('utf-8','replace')
+            except Exception as e: return f"__ERROR__:{type(e).__name__}:{e}"
+          out=[]
+          for c in candidates:
+            api=get_json('https://huggingface.co/api/models/'+c['repo'])
+            rev=api.get('sha')
+            siblings=api.get('siblings') or []
+            files=[x.get('rfilename') for x in siblings]
+            config=get_text(f"https://huggingface.co/{c['repo']}/resolve/{rev}/adapter_config.json") if 'adapter_config.json' in files else None
+            readme=get_text(f"https://huggingface.co/{c['repo']}/resolve/{rev}/README.md") if 'README.md' in files else None
+            cfg={}
+            try: cfg=json.loads(config) if config and not config.startswith('__ERROR__') else {}
+            except: pass
+            base=cfg.get('base_model_name_or_path') or (api.get('cardData') or {}).get('base_model')
+            base_api=None
+            if isinstance(base,str) and '/' in base and not base.startswith('/'):
+              try: base_api=get_json('https://huggingface.co/api/models/'+base)
+              except Exception as e: base_api={"error":repr(e)}
+            file_meta=[]
+            for s in siblings:
+              n=s.get('rfilename')
+              if n in {'adapter_model.safetensors','adapter_model.bin','adapters.safetensors','model.safetensors'}:
+                file_meta.append({"name":n,"size":s.get('size'),"blobId":s.get('blobId'),"lfs":s.get('lfs'),"xetHash":s.get('xetHash')})
+            out.append({
+              **c,
+              "revision":rev,
+              "license":(api.get('cardData') or {}).get('license'),
+              "tags":api.get('tags'),
+              "files":files,
+              "weight_meta":file_meta,
+              "adapter_config":cfg,
+              "base_model":base,
+              "base_revision_current": (base_api or {}).get('sha') if isinstance(base_api,dict) else None,
+              "base_license": ((base_api or {}).get('cardData') or {}).get('license') if isinstance(base_api,dict) else None,
+              "base_files":[x.get('rfilename') for x in ((base_api or {}).get('siblings') or [])] if isinstance(base_api,dict) else [],
+              "readme_head": (readme or '')[:12000],
+            })
+          Path('r22568_meta').mkdir()
+          Path('r22568_meta/R22568_C52_CANDIDATE_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          print(json.dumps(out,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22568-c52-metadata
+          path: r22568_meta/
+          retention-days: 1
+          if-no-files-found: error
