@@ -1,0 +1,86 @@
+name: R22569 C53 Metadata Audit
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit four candidates without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, re, urllib.request, urllib.parse, pathlib, hashlib
+          repos = [
+            'akshayparam/google-flan_t5_chordgen_lora',
+            'djoneslocker/grep-linux-assistant',
+            'romgerale/flan-t5-small-trained',
+            'ambrosehui/flan-t5-small-safety-judgment',
+          ]
+          def get_json(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22569-meta/1.0'})
+              with urllib.request.urlopen(req,timeout=30) as r:
+                  return json.load(r)
+          def get_text(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22569-meta/1.0'})
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as r:
+                      return r.read().decode('utf-8','replace')
+              except Exception as e:
+                  return None
+          def scrub_readme(s):
+              if s is None: return None
+              # README is metadata/docs, but cap size to keep artifact bounded.
+              return s[:120000]
+          records=[]
+          for repo in repos:
+              api='https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true'
+              try:
+                  m=get_json(api)
+                  sha=m.get('sha')
+                  siblings=m.get('siblings') or []
+                  files=[]
+                  for x in siblings:
+                      name=x.get('rfilename')
+                      lfs=x.get('lfs') or {}
+                      files.append({'name':name,'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
+                  readme=get_text(f'https://huggingface.co/{repo}/resolve/{sha}/README.md') if sha else None
+                  cfg=get_text(f'https://huggingface.co/{repo}/resolve/{sha}/adapter_config.json') if sha else None
+                  cfgj=None
+                  if cfg:
+                      try: cfgj=json.loads(cfg)
+                      except Exception: pass
+                  card=m.get('cardData') or {}
+                  rec={
+                    'repo':repo,'exists':True,'exact_revision':sha,
+                    'license':card.get('license') or m.get('license'),
+                    'pipeline_tag':m.get('pipeline_tag'),
+                    'library_name':m.get('library_name'),
+                    'tags':m.get('tags') or [],
+                    'base_model_card':card.get('base_model'),
+                    'adapter_config':cfgj,
+                    'files':files,
+                    'readme':scrub_readme(readme),
+                    'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest() if readme is not None else None,
+                    'has_adapter_config':cfgj is not None,
+                    'safetensor_files':[f for f in files if (f.get('name') or '').endswith('.safetensors')],
+                    'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)],
+                  }
+              except Exception as e:
+                  rec={'repo':repo,'exists':False,'error':repr(e)}
+              records.append(rec)
+          out={'schema':'R22569_C53_METADATA_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':records}
+          p=pathlib.Path('out/R22569_C53_METADATA_AUDIT.json')
+          p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          print(json.dumps([{k:r.get(k) for k in ['repo','exists','exact_revision','license','has_adapter_config']} for r in records],indent=2))
+          PY
+          sha256sum out/R22569_C53_METADATA_AUDIT.json > out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22569-c53-meta-audit
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
