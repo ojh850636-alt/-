@@ -1,0 +1,132 @@
+from __future__ import annotations
+import argparse, contextlib, hashlib, json, math, os, random, re, shutil, sys, unicodedata, urllib.request
+from collections import defaultdict
+from pathlib import Path
+
+os.environ.setdefault('TOKENIZERS_PARALLELISM','false')
+os.environ.setdefault('HF_HUB_DISABLE_TELEMETRY','1')
+os.environ.setdefault('PYTHONDONTWRITEBYTECODE','1')
+
+ADAPTER_REPO='ainouche-abderahmane/koine-t5-omni'
+ADAPTER_REV='3272fae16d13b8ea16d957800df69dbe0d51d247'
+ADAPTER_SHA='493b32c4176d35f1fe0ec5267cbcec2d2e25e9792508027012533d64381db98c'
+BASE_REPO='bowphs/GreTa'
+BASE_REV='8fe5b7aa66ddda9fe7a7b8a397f0edd1ac5b5041'
+BASE_SHA='e39718365d83115e51f1ab7a2c501ea5e2ae259a162e25ac5cd20efbef9dd92f'
+DATA_REPO='UniversalDependencies/UD_Ancient_Greek-PROIEL'
+DATA_REV='a4ab8d436de97d4598d410d91ea20b4127d04a5f'
+DATA_FILE='grc_proiel-ud-test.conllu'
+DATA_URL=f'https://raw.githubusercontent.com/{DATA_REPO}/{DATA_REV}/{DATA_FILE}'
+UPOS_TO_MORPH={'ADJ':'A-','ADV':'D-','CCONJ':'C-','SCONJ':'C-','INTJ':'I-','NOUN':'N-','PROPN':'N-','ADP':'P-','VERB':'V-','AUX':'V-','PART':'X-'}
+
+
+def sha256_file(p:Path):
+    h=hashlib.sha256()
+    with p.open('rb') as f:
+        for b in iter(lambda:f.read(1024*1024), b''): h.update(b)
+    return h.hexdigest()
+
+def canonical_json_sha(obj):
+    return hashlib.sha256(json.dumps(obj,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+def strip_marks(s:str):
+    return ''.join(ch for ch in unicodedata.normalize('NFD',s) if unicodedata.category(ch)!='Mn').replace('ς','σ')
+
+def norm_text(s:str):
+    s=unicodedata.normalize('NFC',s).strip().lower()
+    s=re.sub(r'\s+',' ',s)
+    s=re.sub(r'\s+([,.;:!?·])',r'\1',s)
+    return s
+
+def parse_conllu(text:str):
+    out=[]
+    for block in re.split(r'\n\s*\n', text.strip()):
+        meta={}; toks=[]
+        for line in block.splitlines():
+            if line.startswith('#'):
+                if '=' in line:
+                    k,v=line[1:].split('=',1); meta[k.strip()]=v.strip()
+                continue
+            cols=line.split('\t')
+            if len(cols)<10 or '-' in cols[0] or '.' in cols[0]: continue
+            toks.append({'id':int(cols[0]),'form':cols[1],'lemma':cols[2],'upos':cols[3],'xpos':cols[4],'feats':cols[5]})
+        if toks:
+            out.append({'meta':meta,'tokens':toks})
+    return out
+
+def deterministic_order(rows, salt):
+    return sorted(rows,key=lambda x:hashlib.sha256((salt+'|'+x['id']).encode()).hexdigest())
+
+def make_suite(sentences):
+    pools={'pos':[],'lemma':[],'restore':[],'infill':[],'normalize_identity':[]}
+    for i,s in enumerate(sentences):
+        toks=[t for t in s['tokens'] if t['upos']!='PUNCT']
+        if not (4<=len(toks)<=14): continue
+        sid=s['meta'].get('sent_id',f's{i}')
+        text=' '.join(t['form'] for t in toks)
+        base={'id':sid,'text':text,'token_count':len(toks),'source_ref':s['meta'].get('reference') or s['meta'].get('ref') or ''}
+        # POS: never guess unsupported PROIEL→MorphGNT mappings. Build deterministic
+        # contiguous micro-spans only from UPOS classes with an unambiguous coarse map.
+        safe_runs=[]; run=[]
+        for t in toks:
+            if t['upos'] in UPOS_TO_MORPH:
+                run.append(t)
+            else:
+                if len(run)>=4: safe_runs.append(run[:10])
+                run=[]
+        if len(run)>=4: safe_runs.append(run[:10])
+        for j,span in enumerate(safe_runs):
+            ptext=' '.join(t['form'] for t in span)
+            pools['pos'].append({**base,'id':f"{sid}:pos{j}",'text':ptext,'token_count':len(span),
+                'task':'pos','input':'pos: '+ptext,'target':' '.join(UPOS_TO_MORPH[t['upos']] for t in span)})
+        if all(t['lemma'] not in ('_','') for t in toks):
+            pools['lemma'].append({**base,'task':'lemma','input':'lemma: '+text,'target':' '.join(t['lemma'] for t in toks)})
+        stripped=' '.join(strip_marks(t['form']) for t in toks)
+        if stripped!=text:
+            pools['restore'].append({**base,'task':'restore','input':'restore: '+stripped,'target':text})
+        mid=len(toks)//2
+        if len(toks)>=6:
+            masked=' '.join([t['form'] for t in toks[:mid]]+['<extra_id_0>']+[t['form'] for t in toks[mid+1:]])
+            target=f"<extra_id_0> {toks[mid]['form']} <extra_id_1>"
+            pools['infill'].append({**base,'task':'infill','input':masked,'target':target})
+        pools['normalize_identity'].append({**base,'task':'normalize_identity','input':'normalize: '+text,'target':text})
+    sizes={'pos':48,'lemma':48,'restore':48,'infill':24,'normalize_identity':24}
+    suite=[]
+    for task,n in sizes.items():
+        ordered=deterministic_order(pools[task],f'C50-{task}')[:n]
+        if len(ordered)<n: raise RuntimeError(f'INSUFFICIENT_{task}_{len(ordered)}')
+        suite+=ordered
+    # ensure unique task+id pairs
+    assert len({(x['task'],x['id']) for x in suite})==len(suite)
+    return suite
+
+def paired_bootstrap(delta, seed=22566, n=2000):
+    if not delta: return {'mean':0.0,'low':0.0,'high':0.0}
+    rnd=random.Random(seed); vals=[]; m=len(delta)
+    for _ in range(n):
+        vals.append(sum(delta[rnd.randrange(m)] for _ in range(m))/m)
+    vals.sort(); return {'mean':sum(delta)/m,'low':vals[int(.025*n)],'high':vals[min(n-1,int(.975*n))]}
+
+def one_sided_sign_p(deltas):
+    nz=[x for x in deltas if abs(x)>1e-12]
+    n=len(nz); k=sum(x>0 for x in nz)
+    if not n:return 1.0
+    return sum(math.comb(n,i) for i in range(k,n+1))/(2**n)
+
+def holm(rows):
+    ranked=sorted(rows,key=lambda x:x['p_raw']); m=len(ranked); last=0.0
+    for i,r in enumerate(ranked):
+        adj=min(1.0,(m-i)*r['p_raw']); adj=max(last,adj); r['p_holm']=adj; last=adj
+    return rows
+
+def main():
+    ap=argparse.ArgumentParser(); ap.add_argument('--out',required=True); ap.add_argument('--work',required=True); args=ap.parse_args()
+    out=Path(args.out); work=Path(args.work); out.mkdir(parents=True,exist_ok=True); work.mkdir(parents=True,exist_ok=True)
+    from huggingface_hub import snapshot_download
+    import torch
+    from safetensors import safe_open
+    from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
+    from peft import PeftModel
+    from peft.tuners.lora.layer import LoraLayer
+
+    # exact source capture, no pickle/remote code
