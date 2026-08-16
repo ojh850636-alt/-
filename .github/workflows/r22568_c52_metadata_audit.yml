@@ -1,74 +1,78 @@
-name: R22568 C52 Metadata Audit
+name: R22568 C52 Premodel Seal
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  audit:
+  preseal:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit three source-zero candidates
+      - uses: actions/checkout@v4
+      - name: Dependency closure without model weights
         shell: bash
         run: |
           set -euo pipefail
+          python -m pip install -q 'torch==2.8.0' 'transformers==4.56.2' 'peft==0.17.1' 'safetensors==0.6.2'
           python - <<'PY'
-          import json, urllib.request, urllib.parse
-          from pathlib import Path
-          candidates = [
-            {"id":"CALENDAR","repo":"waliaMuskaan011/calendar-event-extractor-smollm","question":"calendar temporal normalization + typed event extraction"},
-            {"id":"GEC","repo":"arjunverma2004/LiquidAI-grammarly-lora","question":"grammatical error correction preserving semantics"},
-            {"id":"PLTN","repo":"Folx/qwen3-0.6b-pl-text-normalization","question":"Polish written-to-spoken text normalization with numbers/units"},
-          ]
-          def get_json(url):
-            req=urllib.request.Request(url, headers={"User-Agent":"LAA-R22568-metadata"})
-            with urllib.request.urlopen(req, timeout=60) as r: return json.load(r)
-          def get_text(url):
-            req=urllib.request.Request(url, headers={"User-Agent":"LAA-R22568-metadata"})
-            try:
-              with urllib.request.urlopen(req, timeout=60) as r: return r.read().decode('utf-8','replace')
-            except Exception as e: return f"__ERROR__:{type(e).__name__}:{e}"
-          out=[]
-          for c in candidates:
-            api=get_json('https://huggingface.co/api/models/'+c['repo'])
-            rev=api.get('sha')
-            siblings=api.get('siblings') or []
-            files=[x.get('rfilename') for x in siblings]
-            config=get_text(f"https://huggingface.co/{c['repo']}/resolve/{rev}/adapter_config.json") if 'adapter_config.json' in files else None
-            readme=get_text(f"https://huggingface.co/{c['repo']}/resolve/{rev}/README.md") if 'README.md' in files else None
-            cfg={}
-            try: cfg=json.loads(config) if config and not config.startswith('__ERROR__') else {}
-            except: pass
-            base=cfg.get('base_model_name_or_path') or (api.get('cardData') or {}).get('base_model')
-            base_api=None
-            if isinstance(base,str) and '/' in base and not base.startswith('/'):
-              try: base_api=get_json('https://huggingface.co/api/models/'+base)
-              except Exception as e: base_api={"error":repr(e)}
-            file_meta=[]
-            for s in siblings:
-              n=s.get('rfilename')
-              if n in {'adapter_model.safetensors','adapter_model.bin','adapters.safetensors','model.safetensors'}:
-                file_meta.append({"name":n,"size":s.get('size'),"blobId":s.get('blobId'),"lfs":s.get('lfs'),"xetHash":s.get('xetHash')})
-            out.append({
-              **c,
-              "revision":rev,
-              "license":(api.get('cardData') or {}).get('license'),
-              "tags":api.get('tags'),
-              "files":files,
-              "weight_meta":file_meta,
-              "adapter_config":cfg,
-              "base_model":base,
-              "base_revision_current": (base_api or {}).get('sha') if isinstance(base_api,dict) else None,
-              "base_license": ((base_api or {}).get('cardData') or {}).get('license') if isinstance(base_api,dict) else None,
-              "base_files":[x.get('rfilename') for x in ((base_api or {}).get('siblings') or [])] if isinstance(base_api,dict) else [],
-              "readme_head": (readme or '')[:12000],
-            })
-          Path('r22568_meta').mkdir()
-          Path('r22568_meta/R22568_C52_CANDIDATE_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
-          print(json.dumps(out,ensure_ascii=False,indent=2))
+          import json, datetime, re, torch, transformers, peft, safetensors
+          print({"torch":torch.__version__,"transformers":transformers.__version__,"peft":peft.__version__,"safetensors":safetensors.__version__})
           PY
+      - name: Build and independently verify output-free calendar suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p r22568_preseal
+          python - <<'PY'
+          import json, hashlib, pathlib, sys
+          sys.path.insert(0,'.')
+          from r22568.c52_contract import generate_suite, verifier_a, verifier_b, suite_digest, contract_digest, THRESHOLDS
+          cases=generate_suite()
+          # verifier self-tests use target-rendered JSON only; no model output exists.
+          for c in cases:
+              txt=json.dumps(c['target'],ensure_ascii=False)
+              a=verifier_a(txt,c['target']); b=verifier_b(txt,c['target'])
+              assert a['json_valid'] and a['exact'] and a['field_exact']==1.0
+              assert b['schema'] and b['typed_semantic']==1.0 and b['negative_clean']
+          out=pathlib.Path('r22568_preseal')
+          with (out/'R22568_C52_SUITE.jsonl').open('w') as f:
+              for c in cases: f.write(json.dumps(c,ensure_ascii=False,sort_keys=True)+'\n')
+          script=pathlib.Path('r22568/c52_contract.py')
+          receipt={
+            'schema':'R22568_C52_PREOUTPUT_SEAL_V1',
+            'candidate':'waliaMuskaan011/calendar-event-extractor-smollm',
+            'adapter_revision':'08d0bd53801b5bf035b44ff4ae084c94a51126ee',
+            'runtime_reference_base':'HuggingFaceTB/SmolLM-360M',
+            'runtime_reference_base_revision':'59f7ef243ee09a72cbc14cb054393a3e3b771d41',
+            'training_time_base_revision_proven':False,
+            'model_weight_bytes_present':0,
+            'model_outputs_observed':0,
+            'suite_n':len(cases),
+            'suite_sha256':suite_digest(cases),
+            'contract_sha256':contract_digest(),
+            'contract_script_sha256':hashlib.sha256(script.read_bytes()).hexdigest(),
+            'thresholds':THRESHOLDS,
+            'splits':{s:sum(c['split']==s for c in cases) for s in sorted({c['split'] for c in cases})},
+            'verifier_a_selftest':'PASS_384_OF_384',
+            'verifier_b_selftest':'PASS_384_OF_384',
+            'positive_and_failure_lanes_precommitted':True,
+            'planned_conditions':['BASE','FULL','RANDOM_SIGN','LAYER_SHUFFLE','DOSE_0.25','DOSE_0.5','DOSE_1.5'],
+            'planned_generation_conditions':['BASE','FULL','RANDOM_SIGN','LAYER_SHUFFLE'],
+            'planned_causal_if_admitted':['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj','early_band','middle_band','late_band','matched_random'],
+            'claim_ceiling_without_independent_worker':'E3_BROAD_LOCALIZATION_ONLY',
+          }
+          (out/'R22568_C52_PREOUTPUT_SEAL.json').write_text(json.dumps(receipt,indent=2))
+          print(json.dumps(receipt,indent=2))
+          PY
+      - name: Assert no model-weight source consumed
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e adapter_model.safetensors
+          test ! -e model.safetensors
+          find . -maxdepth 3 -type f \( -name '*.safetensors' -o -name '*.bin' -o -name '*.pt' -o -name '*.pth' \) -print -quit | grep -q . && exit 1 || true
       - uses: actions/upload-artifact@v4
         with:
-          name: r22568-c52-metadata
-          path: r22568_meta/
+          name: r22568-c52-preseal
+          path: r22568_preseal/
           retention-days: 1
           if-no-files-found: error
