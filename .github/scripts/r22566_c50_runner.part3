@@ -1,0 +1,43 @@
+        labels=['ENC_ATTN','ENC_FFN','DEC_SELF','DEC_CROSS','DEC_FFN','Q','K','V','O','WI0','WI1','WO','ENC_EARLY','ENC_MID','ENC_LATE','DEC_EARLY','DEC_MID','DEC_LATE']
+        for lab in labels:
+            selector=sel_factory(lab); nmod=sum(selector(n) for n,_,_ in loras)
+            if not nmod: continue
+            ab=eval_teacher(causal_suite,'full',ablate=selector); amap={(x['task'],x['id']):x for x in ab}
+            diffs=[amap[k]['nll']-full_map[k]['nll'] for k in full_map]
+            causal.append({'hypothesis':lab,'module_count':nmod,'ablation_nll_increase':paired_bootstrap(diffs),'p_raw':one_sided_sign_p(diffs)})
+        holm(causal)
+        # matched random controls by broad top module count, no claim promotion from these alone
+        if causal:
+            top=max(causal,key=lambda x:x['ablation_nll_increase']['mean'])
+            n=top['module_count']; names=[x[0] for x in loras]
+            for seed in (11,29,47):
+                rnd=random.Random(seed); chosen=set(rnd.sample(names,min(n,len(names))))
+                ab=eval_teacher(causal_suite,'full',ablate=lambda name,c=chosen:name in c); amap={(x['task'],x['id']):x for x in ab}
+                diffs=[amap[k]['nll']-full_map[k]['nll'] for k in full_map]
+                causal.append({'hypothesis':f'MATCHED_RANDOM_{seed}','module_count':len(chosen),'ablation_nll_increase':paired_bootstrap(diffs),'p_raw':one_sided_sign_p(diffs),'p_holm':None})
+
+    gen_summary={}
+    for mode,rowsg in generation.items():
+        for task in ('pos','lemma','restore'):
+            v=[x for x in rowsg if x['task']==task]; gen_summary.setdefault(task,{})[mode]={'n':len(v),'exact':sum(x['exact'] for x in v)/len(v),'score':sum(x['score'] for x in v)/len(v)}
+
+    grade='E2_BEHAVIOR_ONLY'
+    supported=[x for x in causal if not x['hypothesis'].startswith('MATCHED_RANDOM') and x.get('p_holm',1)<=0.05 and x['ablation_nll_increase']['low']>0]
+    if supported: grade='E3_BROAD_MULTITASK_ROUTING_LOCALIZATION_ONLY'
+    behavior={'schema':'LUCIA_AA_R22566_C50_BEHAVIOR_CAUSAL_V1','candidate':'R22566-C50-KOINE-T5-OMNI-MULTITASK-GREEK','suite_digest':preseal['suite_digest'],'aggregates':aggs,'effects':effects,'positive_control_separated_tasks':positive_tasks,'failure_tasks':failure_tasks,'generation':gen_summary,'causal_screen':causal,'supported_broad_candidates':[x['hypothesis'] for x in supported],'scientific_grade':grade,'e4_claim':False,'algorithm':False,'student':False,'promotion':False,'training_time_base_revision_proven':False,'raw_outputs_emitted':False}
+    (out/'C50_BEHAVIOR_CAUSAL.json').write_text(json.dumps(behavior,ensure_ascii=False,indent=2,sort_keys=True))
+
+    # raw-free brain materials and evidence hashes only
+    counter=[]
+    for task,e in effects.items():
+        if e['base_minus_full_nll']['mean']<0: counter.append({'task':task,'type':'ADAPTER_HARM_FAMILY','effect':e['base_minus_full_nll']})
+    brain={'schema':'LUCIA_AA_R22566_C50_BRAIN_MATERIAL_V1','candidate':'R22566-C50-KOINE-T5-OMNI-MULTITASK-GREEK','capability_triggers':positive_tasks,'failure_triggers':failure_tasks,'routing_hypotheses':[x['hypothesis'] for x in supported],'method_genes':['MULTITASK_PREFIX_ROUTING_MUST_BE_CAUSALLY_SEPARATED','MODEL_CARD_WORKS_LABEL_IS_NOT_AUTHORITY','TRAINING_TIME_BASE_REVISION_MISSING_CAPS_CLAIM','CONFIG_TARGETS_REQUIRE_MATERIALIZED_OPERATOR_AUDIT'],'counterexamples':counter,'programdb_boundary':'NON_EXECUTABLE_UNTIL_CLEAN_ROOM_ALGORITHM','skillgenome_status':'QUARANTINED_CANDIDATE','claim_cap':'E3_ONLY','source_weights_retained':False}
+    (out/'C50_BRAIN_MATERIAL.json').write_text(json.dumps(brain,ensure_ascii=False,indent=2,sort_keys=True))
+    receipt={'schema':'LUCIA_AA_R22566_C50_RUN_RECEIPT_V1','verdict':'COMPLETE_RAW_FREE_EVIDENCE','source_files':{'adapter_sha256':sha256_file(aw),'base_sha256':sha256_file(bw),'dataset_sha256':sha256_file(data_path)},'suite_digest':preseal['suite_digest'],'evidence_files':{},'raw_source_deletion_required_after_artifact_upload':True}
+    for p in sorted(out.glob('*.json')): receipt['evidence_files'][p.name]={'size':p.stat().st_size,'sha256':sha256_file(p)}
+    (out/'C50_RUN_RECEIPT.json').write_text(json.dumps(receipt,indent=2,sort_keys=True))
+    print(json.dumps({'verdict':'COMPLETE','positive_tasks':positive_tasks,'failure_tasks':failure_tasks,'grade':grade,'supported_broad_candidates':[x['hypothesis'] for x in supported]},ensure_ascii=False,indent=2))
+    # Runner-local raw cleanup before exit; GitHub runner is ephemeral too.
+    shutil.rmtree(work,ignore_errors=True)
+
+if __name__=='__main__': main()
