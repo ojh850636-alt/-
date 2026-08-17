@@ -10,7 +10,6 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       TOKENIZERS_PARALLELISM: 'false'
-      HF_HOME: ${{ runner.temp }}/hf-home-c54
     steps:
       - uses: actions/checkout@v4
       - name: Decode and bind exact presealed runner
@@ -19,7 +18,7 @@ jobs:
           set -euo pipefail
           base64 -d .github/scripts/r22570_c54_runner.py.gz.b64 | gzip -d > "$RUNNER_TEMP/r22570_c54_runner.py"
           echo 'a43623e8f58f72b9b8f9dae9ad9664fc47e5f3b07ba8b7fcb2b23566f855d189  '"$RUNNER_TEMP"'/r22570_c54_runner.py' | sha256sum -c -
-          python -m py_compile "$RUNNER_TEMP/r22570_c54_runner.py"
+          PYTHONDONTWRITEBYTECODE=1 python -m py_compile "$RUNNER_TEMP/r22570_c54_runner.py"
           find "$RUNNER_TEMP" -name '__pycache__' -type d -prune -exec rm -rf {} +
       - name: Source-free preoutput seal and verifier mutation smoke
         shell: bash
@@ -39,12 +38,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c54"
           python -m pip install -q --upgrade pip
           python -m pip install -q 'torch>=2.6,<3' 'transformers>=4.48,<6' 'peft>=0.14,<1' 'safetensors>=0.5,<1' 'huggingface_hub>=0.27,<2' 'accelerate>=1,<2' sentencepiece
       - name: One-use exact ingress behavior controls and conditional broad causal screen
         shell: bash
         run: |
           set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c54"
           PYTHONDONTWRITEBYTECODE=1 python "$RUNNER_TEMP/r22570_c54_runner.py" execute --out rawfree --work c54-work
       - name: Verify raw deletion and raw-free export contract
         shell: bash
