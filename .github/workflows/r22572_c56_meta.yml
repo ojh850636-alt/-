@@ -12,20 +12,30 @@ jobs:
       TOKENIZERS_PARALLELISM: 'false'
     steps:
       - uses: actions/checkout@v4
-      - name: Bind exact presealed runner
+      - name: Bind exact compressed presealed runner
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object .github/scripts/r22572_c56_runner.py)" = '97f7a52b375fd3b260bf478c4f255429e0669e9c'
-          PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22572_c56_runner.py
-          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+          test "$(git hash-object .github/scripts/r22572_c56_runner.py.xz)" = 'af7cbef6bb14fc2ed2de5cb84fa4defacf774543'
+          echo 'b21083208ef981282992b16efed8ce81a3039762a2f6ad35d1f62e356ad04702  .github/scripts/r22572_c56_runner.py.xz' | sha256sum -c -
+          python - <<'PY'
+          import lzma,pathlib,hashlib,os
+          src=pathlib.Path('.github/scripts/r22572_c56_runner.py.xz').read_bytes()
+          raw=lzma.decompress(src)
+          assert hashlib.sha256(raw).hexdigest()=='fb5331000c1efcc540db4d3116833af8a7594f57197f9e060ea202917348fae6'
+          dst=pathlib.Path(os.environ['RUNNER_TEMP'])/'r22572_c56_runner.py'
+          dst.write_bytes(raw)
+          print('RUNNER_DECODE_PASS',len(raw),hashlib.sha256(raw).hexdigest())
+          PY
+          PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile "$RUNNER_TEMP/r22572_c56_runner.py"
+          find "$RUNNER_TEMP" -name '__pycache__' -type d -prune -exec rm -rf {} +
       - name: Source-free preoutput seal and verifier mutations
         shell: bash
         run: |
           set -euo pipefail
           rm -rf rawfree c56-work
-          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22572_c56_runner.py preseal --out rawfree
-          RUNNER_SHA256=$(sha256sum .github/scripts/r22572_c56_runner.py | awk '{print $1}')
+          PYTHONDONTWRITEBYTECODE=1 python -B "$RUNNER_TEMP/r22572_c56_runner.py" preseal --out rawfree
+          RUNNER_SHA256=$(sha256sum "$RUNNER_TEMP/r22572_c56_runner.py" | awk '{print $1}')
           python - "$RUNNER_SHA256" <<'PY'
           import json,sys,pathlib
           s=json.load(open('rawfree/C56_PREOUTPUT_SEAL.json'))
@@ -35,7 +45,7 @@ jobs:
           assert s['verifier_smoke']['verifier_b_contract_pass']==256
           assert s['verifier_smoke']['label_flip_mutation_detected']==64
           assert s['verifier_smoke']['direction_swap_mutation_pass']==24
-          pathlib.Path('rawfree/C56_RUNNER_BINDING.json').write_text(json.dumps({'schema':'R22572_C56_RUNNER_BINDING_V1','git_blob_sha':'97f7a52b375fd3b260bf478c4f255429e0669e9c','runtime_sha256':sys.argv[1],'suite_sha256':s['suite_sha256'],'weights_present':0},indent=2))
+          pathlib.Path('rawfree/C56_RUNNER_BINDING.json').write_text(json.dumps({'schema':'R22572_C56_RUNNER_BINDING_V2','compressed_git_blob_sha':'af7cbef6bb14fc2ed2de5cb84fa4defacf774543','compressed_sha256':'b21083208ef981282992b16efed8ce81a3039762a2f6ad35d1f62e356ad04702','runtime_sha256':sys.argv[1],'suite_sha256':s['suite_sha256'],'weights_present':0},indent=2))
           print('PREOUTPUT_SEAL_PASS',s['suite_sha256'])
           PY
       - name: Exact metadata and serving contract gate before binary
@@ -92,7 +102,6 @@ jobs:
           with torch.inference_mode(): lg=model(input_ids=x,logits_to_keep=1).logits
           assert tuple(lg.shape)==(1,1,10000) and torch.isfinite(lg[:,:,9693]).all() and torch.isfinite(lg[:,:,2152]).all()
           model.delete_adapter('abi_probe');model.set_adapter('default')
-          # Dynamic control names are never used in the scientific runner; controls mutate one loaded adapter in memory.
           pathlib.Path('rawfree/C56_RUNTIME_ABI.json').write_text(json.dumps({'schema':'R22572_C56_RUNTIME_ABI_V1','qwen3_causal_lm':True,'logits_to_keep_1':True,'yes_id':9693,'no_id':2152,'peft_add_select_delete':True,'trust_remote_code':False,'dynamic_scientific_adapters_created':0},indent=2))
           print('RUNTIME_ABI_PASS',tuple(lg.shape))
           PY
@@ -103,7 +112,7 @@ jobs:
         run: |
           set -euo pipefail
           export HF_HOME="$RUNNER_TEMP/hf-home-c56"
-          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22572_c56_runner.py execute --out rawfree --work c56-work
+          PYTHONDONTWRITEBYTECODE=1 python -B "$RUNNER_TEMP/r22572_c56_runner.py" execute --out rawfree --work c56-work
       - name: Always enforce destructive cleanup and raw-free export
         if: always()
         shell: bash
