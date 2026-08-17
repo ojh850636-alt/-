@@ -16,7 +16,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '73cd1a218191981a150df65bd9350fd08caaf685b0ae106b8bccb4db4935ad55  .github/scripts/r22571_c55_runner.py' | sha256sum -c -
+          test "$(git hash-object .github/scripts/r22571_c55_runner.py)" = 'ac60e3b7c34fd8d981651ebe7d8f817fac4a3317'
           PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22571_c55_runner.py
           find . -name '__pycache__' -type d -prune -exec rm -rf {} +
       - name: Source-free preoutput seal and verifier mutations
@@ -25,14 +25,16 @@ jobs:
           set -euo pipefail
           rm -rf rawfree c55-work
           PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22571_c55_runner.py preseal --out rawfree
-          python - <<'PY'
-          import json
+          RUNNER_SHA256=$(sha256sum .github/scripts/r22571_c55_runner.py | awk '{print $1}')
+          python - "$RUNNER_SHA256" <<'PY'
+          import json,sys,pathlib
           s=json.load(open('rawfree/C55_PREOUTPUT_SEAL.json'))
           assert s['weights_present']==0 and s['model_outputs_observed']==0 and s['training_rows_used']==0
           assert s['suite_n']==256 and s['suite_sha256']=='b61ffddec7536d3b874241aba4fa35c6f4c3383bcb20875768a5bf2bdc4e5762'
           assert s['verifier_smoke']['verifier_a_contract_pass']==256
           assert s['verifier_smoke']['verifier_b_contract_pass']==256
-          print('PREOUTPUT_SEAL_PASS',s['suite_sha256'])
+          pathlib.Path('rawfree/C55_RUNNER_BINDING.json').write_text(json.dumps({'schema':'R22571_C55_RUNNER_BINDING_V1','git_blob_sha':'ac60e3b7c34fd8d981651ebe7d8f817fac4a3317','runtime_sha256':sys.argv[1],'suite_sha256':s['suite_sha256'],'weights_present':0},indent=2))
+          print('PREOUTPUT_SEAL_PASS',s['suite_sha256'],'runner_sha256',sys.argv[1])
           PY
       - name: Install exact bounded runtime before binary
         shell: bash
@@ -64,25 +66,22 @@ jobs:
           export HF_HOME="$RUNNER_TEMP/hf-home-c55"
           rm -rf c55-work "$HF_HOME"
           EXEC_OUTCOME='${{ steps.execute.outcome }}'
-          python - <<PY
-          import json,pathlib,re,hashlib
-          root=pathlib.Path('rawfree');root.mkdir(exist_ok=True)
-          outcome=${EXEC_OUTCOME@Q}
+          python - "$EXEC_OUTCOME" <<'PY'
+          import json,pathlib,re,hashlib,sys
+          root=pathlib.Path('rawfree');root.mkdir(exist_ok=True);outcome=sys.argv[1]
           cp=root/'C55_CLEANUP.json'
-          if not cp.exists():
-              cp.write_text(json.dumps({'schema':'R22571_C55_CLEANUP_V1','controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'raw_root_deleted':True,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0},indent=2))
-          if outcome!='success' and not (root/'C55_ABORT.json').exists():
-              (root/'C55_ABORT.json').write_text(json.dumps({'schema':'R22571_C55_ABORT_V1','execute_outcome':outcome,'scientific_increment':0,'claim':'NO_BEHAVIOR_OR_CAUSAL_CREDIT_FROM_ABORTED_RUN'},indent=2))
+          if not cp.exists(): cp.write_text(json.dumps({'schema':'R22571_C55_CLEANUP_V1','controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'raw_root_deleted':True,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0},indent=2))
+          if outcome!='success' and not (root/'C55_ABORT.json').exists(): (root/'C55_ABORT.json').write_text(json.dumps({'schema':'R22571_C55_ABORT_V1','execute_outcome':outcome,'scientific_increment':0,'claim':'NO_BEHAVIOR_OR_CAUSAL_CREDIT_FROM_ABORTED_RUN'},indent=2))
           bad=[]
           for p in root.rglob('*'):
               if not p.is_file(): continue
               n=p.name.lower()
-              if re.search(r'\.(safetensors|bin|pt|pth|pkl|pickle|model|npy|npz)$',n):bad.append(str(p))
-              if n.startswith('tokenizer') or n in {'vocab.json','merges.txt','special_tokens_map.json'}:bad.append(str(p))
+              if re.search(r'\.(safetensors|bin|pt|pth|pkl|pickle|model|npy|npz)$',n): bad.append(str(p))
+              if n.startswith('tokenizer') or n in {'vocab.json','merges.txt','special_tokens_map.json'}: bad.append(str(p))
           assert not bad,bad
           lines=[]
           for p in sorted(root.rglob('*')):
-              if p.is_file() and p.name!='SHA256SUMS.txt':lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}")
+              if p.is_file() and p.name!='SHA256SUMS.txt': lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}")
           (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
           print('RAW_FREE_PASS',len(lines),'execute',outcome)
           PY
