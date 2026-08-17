@@ -41,36 +41,38 @@ jobs:
           export HF_HOME="$RUNNER_TEMP/hf-home-c56"
           python -m pip install -q --upgrade pip
           python -m pip install -q 'torch>=2.8,<3' 'transformers>=5.6,<5.7' 'peft>=0.18,<0.19' 'safetensors>=0.6,<1' 'huggingface_hub>=1,<2' 'accelerate>=1,<2'
-      - name: Exact Granite architecture and PEFT lifecycle source-free smoke
+      - name: Exact full-config meta-device Granite PEFT compatibility gate
         shell: bash
         run: |
           set -euo pipefail
           export HF_HOME="$RUNNER_TEMP/hf-home-c56"
           PYTHONDONTWRITEBYTECODE=1 python -B - <<'PY'
           import json,pathlib
+          from accelerate import init_empty_weights
           from transformers import AutoConfig,AutoModelForCausalLM
           from peft import LoraConfig,get_peft_model
           BASE='ibm-granite/granite-4.0-micro';REV='56111ae135df9c53a78c99028e7bc24035a9e979'
           cfg=AutoConfig.from_pretrained(BASE,revision=REV,trust_remote_code=False)
-          for k,v in [('num_hidden_layers',2),('hidden_size',128),('intermediate_size',256),('num_attention_heads',4),('num_key_value_heads',2),('vocab_size',512),('max_position_embeddings',256),('pad_token_id',0),('bos_token_id',1),('eos_token_id',2)]:
-            if hasattr(cfg,k):setattr(cfg,k,v)
-          if hasattr(cfg,'head_dim'):cfg.head_dim=32
-          if hasattr(cfg,'embedding_size'):cfg.embedding_size=128
-          # Granite MoE/hybrid configs can retain expert dimensions; shrink if present.
-          for k,v in [('num_local_experts',4),('num_experts_per_tok',2),('shared_intermediate_size',256),('moe_intermediate_size',128)]:
-            if hasattr(cfg,k):setattr(cfg,k,v)
-          model=AutoModelForCausalLM.from_config(cfg,trust_remote_code=False)
+          with init_empty_weights():
+            model=AutoModelForCausalLM.from_config(cfg,trust_remote_code=False)
           targets=['q_proj','k_proj','v_proj','o_proj','input_linear','output_linear']
-          peft=get_peft_model(model,LoraConfig(r=4,lora_alpha=8,target_modules=targets,bias='none',task_type='CAUSAL_LM'))
-          pairs=[]
-          for n,m in peft.named_modules():
-            if hasattr(m,'lora_A') and 'default' in m.lora_A and hasattr(m,'lora_B') and 'default' in m.lora_B:pairs.append(n)
-          assert pairs
-          first=next(m for m in peft.modules() if hasattr(m,'lora_B') and 'default' in m.lora_B)
-          b=first.lora_B['default'].weight;old=b.detach().clone();b.data.zero_();b.data.copy_(old)
+          target_classes={}
+          for n,m in model.named_modules():
+            if any(n.endswith(t) for t in targets): target_classes.setdefault(n.split('.')[-1],set()).add(m.__class__.__name__)
+          payload={'schema':'R22572_C56_EXACT_TARGET_CLASS_PREFLIGHT_V1','source_weight_bytes':0,'exact_base_revision':REV,'architecture':model.__class__.__name__,'target_classes':{k:sorted(v) for k,v in target_classes.items()},'targets':targets}
           pathlib.Path('rawfree').mkdir(exist_ok=True)
-          pathlib.Path('rawfree/C56_RUNTIME_ABI.json').write_text(json.dumps({'schema':'R22572_C56_RUNTIME_ABI_V2','source_bytes':0,'exact_base_revision':REV,'architecture':model.__class__.__name__,'peft_pairs':len(pairs),'targets':targets,'inplace_zero_restore':True,'special_token_remap_for_tiny_smoke':True,'pass':True},indent=2))
-          print('RUNTIME_ABI_PASS',model.__class__.__name__,len(pairs))
+          try:
+            peft=get_peft_model(model,LoraConfig(r=4,lora_alpha=8,target_modules=targets,bias='none',task_type='CAUSAL_LM'))
+            pairs=sum(1 for _,m in peft.named_modules() if hasattr(m,'lora_A') and 'default' in m.lora_A and hasattr(m,'lora_B') and 'default' in m.lora_B)
+            payload.update({'peft_injection_pass':True,'peft_pairs':pairs})
+            pathlib.Path('rawfree/C56_RUNTIME_ABI.json').write_text(json.dumps(payload,indent=2))
+            assert pairs>0
+            print('EXACT_META_PEFT_PASS',model.__class__.__name__,pairs,payload['target_classes'])
+          except Exception as e:
+            payload.update({'peft_injection_pass':False,'error_type':type(e).__name__,'error_text':str(e)[:800]})
+            pathlib.Path('rawfree/C56_RUNTIME_ABI.json').write_text(json.dumps(payload,indent=2))
+            print('EXACT_META_PEFT_FAIL',type(e).__name__,str(e),payload['target_classes'])
+            raise
           PY
           test ! -e c56-work
       - name: One-use exact ingress behavior controls and conditional causal screen
