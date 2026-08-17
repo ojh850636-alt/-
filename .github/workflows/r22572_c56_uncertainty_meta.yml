@@ -1,0 +1,76 @@
+name: R22572 C56 Uncertainty Metadata Audit
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit uncertainty candidates without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json,re,urllib.request,urllib.parse,pathlib,hashlib
+          candidates=[
+            {'repo':'ibm-granite/granitelib-core-r1.0','prefix':'uncertainty/granite-4.0-micro/lora','base':'ibm-granite/granite-4.0-micro'},
+            {'repo':'ibm-granite/granite-3.3-8b-lora-uncertainty','prefix':'','base':'ibm-granite/granite-3.3-8b-instruct'},
+            {'repo':'ibm-granite/granite-3.3-8b-alora-uncertainty','prefix':'','base':'ibm-granite/granite-3.3-8b-instruct'},
+            {'repo':'ibm-granite/granite-uncertainty-3.0-8b-lora','prefix':'','base':None},
+          ]
+          def jget(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22572-meta/1.0'})
+            with urllib.request.urlopen(req,timeout=40) as r:return json.load(r)
+          def tget(repo,sha,path,limit=120000):
+            u=f'https://huggingface.co/{repo}/resolve/{sha}/{path}'
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22572-meta/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=40) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
+            except Exception:return None
+          recs=[]
+          for c in candidates:
+            repo=c['repo'];pref=c['prefix'].strip('/')
+            try:
+              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true')
+              sha=m.get('sha');card=m.get('cardData') or {}; sib=m.get('siblings') or []
+              files=[]
+              for x in sib:
+                name=x.get('rfilename'); lfs=x.get('lfs') or {}
+                if pref and not (name==pref or name.startswith(pref+'/')): continue
+                files.append({'name':name,'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
+              def P(x): return f'{pref}/{x}' if pref else x
+              cfg_txt=tget(repo,sha,P('adapter_config.json'),50000)
+              try: cfg=json.loads(cfg_txt) if cfg_txt else None
+              except Exception: cfg={'_parse_error':True,'sha256':hashlib.sha256(cfg_txt.encode()).hexdigest()}
+              readme=tget(repo,sha,P('README.md')) or (tget(repo,sha,'uncertainty/README.md') if pref else tget(repo,sha,'README.md'))
+              lic=card.get('license') or m.get('license')
+              # top-level granitelib card is authoritative Apache-2.0 for nested library assets
+              base=c['base'] or (cfg or {}).get('base_model_name_or_path')
+              recs.append({'repo':repo,'prefix':pref,'exact_revision':sha,'license':lic,'base_model':base,'adapter_config':cfg,'files':files,'readme':(readme or '')[:120000],'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest() if readme is not None else None,'safe_weights':[f for f in files if (f.get('name') or '').endswith('.safetensors')],'pickle_risk':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)]})
+            except Exception as e: recs.append({'repo':repo,'prefix':pref,'error':repr(e)})
+          # audit exact base metadata without downloading weights
+          bases={}
+          for r in recs:
+            b=r.get('base_model')
+            if not b or b in bases: continue
+            try:
+              bm=jget('https://huggingface.co/api/models/'+urllib.parse.quote(b,safe='/')+'?blobs=true'); bs= bm.get('siblings') or []
+              bfs=[]
+              for x in bs:
+                lfs=x.get('lfs') or {}; bfs.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
+              bases[b]={'exact_revision':bm.get('sha'),'license':(bm.get('cardData') or {}).get('license') or bm.get('license'),'files':bfs,'safe_weight_bytes':sum((f.get('size') or 0) for f in bfs if (f.get('name') or '').endswith('.safetensors')),'pickle_risk':[f for f in bfs if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)]}
+            except Exception as e:bases[b]={'error':repr(e)}
+          out={'schema':'R22572_C56_UNCERTAINTY_METADATA_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs,'bases':bases}
+          p=pathlib.Path('out/R22572_C56_UNCERTAINTY_METADATA_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n')
+          print(json.dumps([{'repo':r.get('repo'),'prefix':r.get('prefix'),'rev':r.get('exact_revision'),'license':r.get('license'),'base':r.get('base_model'),'safe':[(f.get('name'),f.get('size')) for f in r.get('safe_weights',[])]} for r in recs],indent=2))
+          print(json.dumps({k:{'rev':v.get('exact_revision'),'safe_weight_bytes':v.get('safe_weight_bytes'),'license':v.get('license')} for k,v in bases.items()},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22572-c56-uncertainty-meta
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
