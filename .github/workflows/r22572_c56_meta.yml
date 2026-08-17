@@ -1,64 +1,145 @@
-name: R22572 C56 Metadata Audit 2
+name: R22572 C56 Programmable Relation Archaeology
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  meta:
+  archaeology:
     runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      TOKENIZERS_PARALLELISM: 'false'
     steps:
-      - name: Audit second C56 batch without model weights
+      - uses: actions/checkout@v4
+      - name: Bind exact presealed runner
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out
+          test "$(git hash-object .github/scripts/r22572_c56_runner.py)" = '97f7a52b375fd3b260bf478c4f255429e0669e9c'
+          PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22572_c56_runner.py
+          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+      - name: Source-free preoutput seal and verifier mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf rawfree c56-work
+          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22572_c56_runner.py preseal --out rawfree
+          RUNNER_SHA256=$(sha256sum .github/scripts/r22572_c56_runner.py | awk '{print $1}')
+          python - "$RUNNER_SHA256" <<'PY'
+          import json,sys,pathlib
+          s=json.load(open('rawfree/C56_PREOUTPUT_SEAL.json'))
+          assert s['weights_present']==0 and s['model_outputs_observed']==0 and s['training_rows_used']==0
+          assert s['suite_n']==256 and s['suite_sha256']=='499616096788b870bb176f417fc4fb83dc1252adb409e27985eb01d9c05162df'
+          assert s['verifier_smoke']['verifier_a_contract_pass']==256
+          assert s['verifier_smoke']['verifier_b_contract_pass']==256
+          assert s['verifier_smoke']['label_flip_mutation_detected']==64
+          assert s['verifier_smoke']['direction_swap_mutation_pass']==24
+          pathlib.Path('rawfree/C56_RUNNER_BINDING.json').write_text(json.dumps({'schema':'R22572_C56_RUNNER_BINDING_V1','git_blob_sha':'97f7a52b375fd3b260bf478c4f255429e0669e9c','runtime_sha256':sys.argv[1],'suite_sha256':s['suite_sha256'],'weights_present':0},indent=2))
+          print('PREOUTPUT_SEAL_PASS',s['suite_sha256'])
+          PY
+      - name: Exact metadata and serving contract gate before binary
+        shell: bash
+        run: |
+          set -euo pipefail
           python - <<'PY'
-          import json,re,urllib.request,urllib.parse,pathlib,hashlib
-          repos=[
-            'Hanno-Labs/bosun-xs',
-            'Isaac74/qwen3-0.6b-lightweight-semantic-mathlib-search-adapter',
-            'richardyoung/CardioEmbed-BGE-small-v1.5',
-            'minhnv7/bge-reranker-v2m3-lora',
-          ]
+          import json,urllib.request,urllib.parse,pathlib,re,hashlib
+          A='Hanno-Labs/bosun-xs'; AREV='31129f876462c8b0ec3f360b4c82ab03c430f43e'; B='Qwen/Qwen3-Reranker-0.6B'
           def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22572-meta2/1.0'})
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22572-preflight/1.0'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          def tget(repo,sha,path,limit=160000):
-            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22572-meta2/1.0'})
-            try:
-              with urllib.request.urlopen(req,timeout=30) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
-            except Exception:return None
-          def audit(repo):
-            m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true')
-            sha=m.get('sha');card=m.get('cardData') or {};sib=m.get('siblings') or []
-            files=[]
-            for x in sib:
-              lfs=x.get('lfs') or {};files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
-            names={f.get('name') for f in files};configs={}
-            for p in ['adapter_config.json','config.json','modules.json','sentence_bert_config.json','train_config.json']:
-              if p in names:
-                s=tget(repo,sha,p,60000)
-                if p.endswith('.json') and s:
-                  try: configs[p]=json.loads(s)
-                  except Exception: configs[p]={'_parse_error':True,'sha256':hashlib.sha256(s.encode()).hexdigest()}
-            readme=tget(repo,sha,'README.md') if 'README.md' in names else None
-            license_docs={}
-            for p in ['LICENSE','LICENSE.txt','LICENSE.md','COPYING']:
-              if p in names:
-                s=tget(repo,sha,p,60000);license_docs[p]={'sha256':hashlib.sha256((s or '').encode()).hexdigest(),'text':s}
-            return {'repo':repo,'exact_revision':sha,'card_license':card.get('license') or m.get('license'),'base_model_card':card.get('base_model'),'datasets':card.get('datasets'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),'tags':m.get('tags') or [],'configs':configs,'files':files,'license_docs':license_docs,'readme':readme,'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest() if readme is not None else None,'safe_weight_files':[f for f in files if (f.get('name') or '').endswith('.safetensors')],'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)]}
-          recs=[]
-          for repo in repos:
-            try: recs.append(audit(repo))
-            except Exception as e: recs.append({'repo':repo,'error':repr(e)})
-          out={'schema':'R22572_C56_METADATA_AUDIT_V2','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs}
-          p=pathlib.Path('out/R22572_C56_METADATA_AUDIT_V2.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
-          pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n')
-          print(json.dumps([{k:r.get(k) for k in ['repo','exact_revision','card_license','base_model_card','pipeline_tag']} for r in recs],indent=2))
+          def tget(repo,rev,path):
+            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{rev}/{path}',headers={'User-Agent':'LAA-R22572-preflight/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r:return r.read().decode('utf-8')
+          am=jget('https://huggingface.co/api/models/'+urllib.parse.quote(A,safe='/')+'?blobs=true')
+          assert am['sha']==AREV and (am.get('cardData') or {}).get('license')=='apache-2.0'
+          af=[x['rfilename'] for x in am.get('siblings',[])]
+          assert all(x in af for x in ['adapter_config.json','adapter_model.safetensors','serving.json'])
+          assert not any(re.search(r'\.(bin|pt|pth|pkl|pickle)$',x,re.I) for x in af)
+          serving=json.loads(tget(A,AREV,'serving.json'))
+          assert serving['base_model']==B and serving['yes_id']==9693 and serving['no_id']==2152 and serving['max_len']==3072
+          assert isinstance(serving['prefix'],str) and isinstance(serving['suffix'],str)
+          bm=jget('https://huggingface.co/api/models/'+urllib.parse.quote(B,safe='/')+'?blobs=true')
+          bf=[x['rfilename'] for x in bm.get('siblings',[])]
+          assert any(x.endswith('.safetensors') for x in bf)
+          assert not any(re.search(r'\.(bin|pt|pth|pkl|pickle)$',x,re.I) for x in bf)
+          out={'schema':'R22572_C56_METADATA_PREFLIGHT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'adapter_repo':A,'adapter_revision':AREV,'adapter_license':(am.get('cardData') or {}).get('license'),'base_repo':B,'runtime_reference_base_revision':bm['sha'],'base_license':(bm.get('cardData') or {}).get('license'),'serving_contract':{'yes_id':serving['yes_id'],'no_id':serving['no_id'],'max_len':serving['max_len'],'prefix_sha256':hashlib.sha256(serving['prefix'].encode()).hexdigest(),'suffix_sha256':hashlib.sha256(serving['suffix'].encode()).hexdigest()},'adapter_pickle_files':[],'base_pickle_files':[]}
+          pathlib.Path('rawfree/C56_METADATA_PREFLIGHT.json').write_text(json.dumps(out,indent=2))
+          print('METADATA_PREFLIGHT_PASS',bm['sha'])
+          PY
+      - name: Install bounded exact analysis runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c56"
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'torch>=2.8,<3' 'transformers>=5.6,<5.7' 'peft>=0.19,<0.20' 'safetensors>=0.6,<1' 'huggingface_hub>=1,<2' 'accelerate>=1,<2'
+      - name: Exact Qwen3 and PEFT lifecycle source-free ABI smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c56"
+          PYTHONDONTWRITEBYTECODE=1 python - <<'PY'
+          import json,pathlib,torch
+          from transformers import Qwen3Config,Qwen3ForCausalLM
+          from peft import LoraConfig,get_peft_model
+          cfg=Qwen3Config(vocab_size=10000,hidden_size=32,intermediate_size=64,num_hidden_layers=2,num_attention_heads=4,num_key_value_heads=2,head_dim=8,max_position_embeddings=128)
+          base=Qwen3ForCausalLM(cfg).eval()
+          lc=LoraConfig(r=4,lora_alpha=8,target_modules=['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj'],task_type='CAUSAL_LM')
+          model=get_peft_model(base,lc,adapter_name='default').eval()
+          model.add_adapter('abi_probe',lc);model.set_adapter('abi_probe')
+          x=torch.tensor([[1,2,3,4]])
+          with torch.inference_mode(): lg=model(input_ids=x,logits_to_keep=1).logits
+          assert tuple(lg.shape)==(1,1,10000) and torch.isfinite(lg[:,:,9693]).all() and torch.isfinite(lg[:,:,2152]).all()
+          model.delete_adapter('abi_probe');model.set_adapter('default')
+          # Dynamic control names are never used in the scientific runner; controls mutate one loaded adapter in memory.
+          pathlib.Path('rawfree/C56_RUNTIME_ABI.json').write_text(json.dumps({'schema':'R22572_C56_RUNTIME_ABI_V1','qwen3_causal_lm':True,'logits_to_keep_1':True,'yes_id':9693,'no_id':2152,'peft_add_select_delete':True,'trust_remote_code':False,'dynamic_scientific_adapters_created':0},indent=2))
+          print('RUNTIME_ABI_PASS',tuple(lg.shape))
+          PY
+      - name: One-use exact ingress behavior controls and conditional causal screen
+        id: execute
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c56"
+          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22572_c56_runner.py execute --out rawfree --work c56-work
+      - name: Always enforce destructive cleanup and raw-free export
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c56"
+          rm -rf c56-work "$HF_HOME"
+          EXEC_OUTCOME='${{ steps.execute.outcome }}'
+          python - "$EXEC_OUTCOME" <<'PY'
+          import json,pathlib,re,hashlib,sys
+          root=pathlib.Path('rawfree');root.mkdir(exist_ok=True);outcome=sys.argv[1]
+          cp=root/'C56_CLEANUP.json'
+          if not cp.exists(): cp.write_text(json.dumps({'schema':'R22572_C56_CLEANUP_V1','controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'raw_root_deleted':True,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0},indent=2))
+          if outcome!='success' and not (root/'C56_ABORT.json').exists(): (root/'C56_ABORT.json').write_text(json.dumps({'schema':'R22572_C56_ABORT_V1','execute_outcome':outcome,'scientific_increment':0,'claim':'NO_BEHAVIOR_OR_CAUSAL_CREDIT_FROM_ABORTED_RUN'},indent=2))
+          bad=[]
+          for p in root.rglob('*'):
+            if not p.is_file():continue
+            n=p.name.lower()
+            if re.search(r'\.(safetensors|bin|pt|pth|pkl|pickle|model|npy|npz)$',n):bad.append(str(p))
+            if n.startswith('tokenizer') or n in {'vocab.json','merges.txt','special_tokens_map.json'}:bad.append(str(p))
+          assert not bad,bad
+          lines=[]
+          for p in sorted(root.rglob('*')):
+            if p.is_file() and p.name!='SHA256SUMS.txt':lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}")
+          (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
+          print('RAW_FREE_PASS',len(lines),'execute',outcome)
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: r22572-c56-meta-v2
-          path: out/
+          name: r22572-c56-rawfree-evidence
+          path: rawfree/
           retention-days: 1
           if-no-files-found: error
+      - name: Preserve scientific failure status after evidence escrow
+        if: always()
+        shell: bash
+        run: |
+          test '${{ steps.execute.outcome }}' = 'success'
