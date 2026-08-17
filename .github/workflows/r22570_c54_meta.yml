@@ -1,0 +1,68 @@
+name: R22570 C54 Metadata Audit
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Audit C54 candidates without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json,re,urllib.request,urllib.parse,pathlib,hashlib
+          repos=[
+            'amitashwini/mumble-cleanup-2stage',
+            'starwarindia/addrparser-iaparser',
+            'cnmoro/teenytinyllama-160m-text-simplification-ptbr',
+            'YoozLabs/Yooz-Quality-v2-Qwen3.5-0.8B-LoRA',
+          ]
+          def jget(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22570-meta/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          def tget(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22570-meta/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r:return r.read().decode('utf-8','replace')
+            except Exception:return None
+          recs=[]
+          for repo in repos:
+            try:
+              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true')
+              sha=m.get('sha'); card=m.get('cardData') or {}; sib=m.get('siblings') or []
+              files=[]
+              for x in sib:
+                lfs=x.get('lfs') or {}
+                files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
+              readme=tget(f'https://huggingface.co/{repo}/resolve/{sha}/README.md') if sha else None
+              configs={}
+              for p in ['adapter_config.json','adapter/adapter_config.json','adapters/adapter_config.json']:
+                s=tget(f'https://huggingface.co/{repo}/resolve/{sha}/{p}') if sha else None
+                if s:
+                  try: configs[p]=json.loads(s)
+                  except Exception: configs[p]={'_parse_error':True,'sha256':hashlib.sha256(s.encode()).hexdigest()}
+              recs.append({
+                'repo':repo,'exists':True,'exact_revision':sha,
+                'license':card.get('license') or m.get('license'),
+                'base_model_card':card.get('base_model'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),
+                'tags':m.get('tags') or [],'configs':configs,'files':files,
+                'readme':(readme or '')[:80000] if readme is not None else None,
+                'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest() if readme is not None else None,
+                'safe_weight_files':[f for f in files if (f.get('name') or '').endswith('.safetensors')],
+                'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f.get('name') or '',re.I)],
+              })
+            except Exception as e: recs.append({'repo':repo,'exists':False,'error':repr(e)})
+          out={'schema':'R22570_C54_METADATA_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs}
+          pathlib.Path('out/R22570_C54_METADATA_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(pathlib.Path('out/R22570_C54_METADATA_AUDIT.json').read_bytes()).hexdigest()+'  R22570_C54_METADATA_AUDIT.json\n')
+          print(json.dumps([{k:r.get(k) for k in ['repo','exists','exact_revision','license','base_model_card']} for r in recs],indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22570-c54-meta
+          path: out/
+          retention-days: 1
+          if-no-files-found: error
