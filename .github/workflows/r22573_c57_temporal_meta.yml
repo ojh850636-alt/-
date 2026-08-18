@@ -1,4 +1,4 @@
-name: R22573 C57 135M Novel Control Metadata Audit
+name: R22573 C57 EOT Base Binding Audit
 on:
   pull_request:
     branches: [main]
@@ -7,49 +7,29 @@ jobs:
   meta:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit EOT and other novel 135M adapters without weights
+      - name: Bind Vurtnec adapter and exact SmolLM2-135M base without weights
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json,re,urllib.request,urllib.parse,pathlib,hashlib
-          repos=['Vurtnec/eot-detector-smollm2','latishab/turnsense','Predixus/SmolLM2-135M-qlora-finetune-fault-parse','SoAnVa/lora_poker_model']
+          import json,urllib.request,urllib.parse,pathlib,hashlib
+          repos=['Vurtnec/eot-detector-smollm2','HuggingFaceTB/SmolLM2-135M']
           def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-meta3/1.0'})
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-eot-bind/1.0'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          def tget(repo,sha,path,limit=120000):
-            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-meta3/1.0'})
-            try:
-              with urllib.request.urlopen(req,timeout=30) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
-            except Exception:return None
-          recs=[]
+          rec={}
           for repo in repos:
-            try:
-              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};sib=m.get('siblings') or [];files=[]
-              for x in sib:
-                l=x.get('lfs') or {};files.append({'name':x.get('rfilename'),'size':x.get('size') or l.get('size'),'lfs_sha256':l.get('sha256')})
-              names={f['name'] for f in files};cfg=None
-              if 'adapter_config.json' in names:
-                s=tget(repo,sha,'adapter_config.json',50000)
-                try:cfg=json.loads(s) if s else None
-                except Exception:cfg={'_parse_error':True,'sha256':hashlib.sha256((s or '').encode()).hexdigest()}
-              readme=tget(repo,sha,'README.md') if 'README.md' in names else None
-              scripts={}
-              for p in ['finetune_livekit_eot.py','compare_eot_models.py','eval_finetuned_livekit.py','train.py','training.py']:
-                if p in names:
-                  s=tget(repo,sha,p,50000);scripts[p]={'sha256':hashlib.sha256((s or '').encode()).hexdigest(),'excerpt':(s or '')[:12000]}
-              lic={}
-              for p in ['LICENSE','LICENSE.txt','LICENSE.md','COPYING']:
-                if p in names:
-                  s=tget(repo,sha,p,30000);lic[p]={'sha256':hashlib.sha256((s or '').encode()).hexdigest(),'text':s}
-              recs.append({'repo':repo,'exact_revision':sha,'card_license':card.get('license') or m.get('license'),'base_model_card':card.get('base_model'),'datasets':card.get('datasets'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),'adapter_config':cfg,'files':files,'license_docs':lic,'scripts':scripts,'readme':readme,'safe_weight_files':[f for f in files if (f['name'] or '').endswith('.safetensors')],'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f['name'] or '',re.I)]})
-            except Exception as e:recs.append({'repo':repo,'error':repr(e)})
-          out={'schema':'R22573_C57_135M_NOVEL_CONTROL_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs};p=pathlib.Path('out/R22573_C57_135M_NOVEL_CONTROL_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps([{k:r.get(k) for k in ['repo','exact_revision','card_license','base_model_card']} for r in recs],indent=2))
+            m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};files=[]
+            for x in m.get('siblings') or []:
+              l=x.get('lfs') or {};n=x.get('rfilename')
+              if n in {'model.safetensors','adapter_model.safetensors','adapter_config.json','config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json'}:files.append({'name':n,'size':x.get('size') or l.get('size'),'lfs_sha256':l.get('sha256')})
+            rec[repo]={'revision':sha,'license':card.get('license') or m.get('license'),'files':files,'tags':m.get('tags') or []}
+          out={'schema':'R22573_C57_EOT_BASE_BINDING_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'records':rec};p=pathlib.Path('out/R22573_C57_EOT_BASE_BINDING.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps(out,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-135m-control-meta
+          name: r22573-c57-eot-base-binding
           path: out/
           retention-days: 1
           if-no-files-found: error
