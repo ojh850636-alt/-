@@ -1,68 +1,105 @@
-name: R22573 C57 CoEdIT Wallclock Preflight
+name: R22573 C57 Minimal-Edit GEC Archaeology
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  preflight:
+  archaeology:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
     env:
       PYTHONDONTWRITEBYTECODE: '1'
       TOKENIZERS_PARALLELISM: 'false'
     steps:
-      - name: Install source-free runtime
+      - uses: actions/checkout@v4
+      - name: Bind exact presealed code
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -q --upgrade pip
-          python -m pip install -q 'torch>=2.8,<3' 'transformers>=4.53,<6' 'peft>=0.18,<0.20'
-      - name: Benchmark full random CoEdIT architecture before binary
+          test "$(git hash-object .github/scripts/r22573_c57_suite.py)" = '70efea8c4eb4be0c1b56696b9ee1b65ddc00ac1a'
+          test "$(git hash-object .github/scripts/r22573_c57_runner.py)" = 'f8ffa2382f634f36bc95e3c984b21a65bc07ba61'
+          PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22573_c57_suite.py .github/scripts/r22573_c57_runner.py
+          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
+      - name: Source-free preoutput seal and verifier mutation smoke
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p out
+          rm -rf rawfree c57-work
+          PYTHONPATH=.github/scripts PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_runner.py preseal --out rawfree
           python - <<'PY'
-          import json,time,resource,torch,pathlib
-          from transformers import AutoConfig,AutoModelForSeq2SeqLM
-          from peft import LoraConfig,get_peft_model
-          BASE='grammarly/coedit-large'; REV='5637bcdf9d8d4419f97c8cfea36f7d35c79232b6'
-          t0=time.perf_counter(); cfg=AutoConfig.from_pretrained(BASE,revision=REV,trust_remote_code=False); config_s=time.perf_counter()-t0
-          t0=time.perf_counter(); base=AutoModelForSeq2SeqLM.from_config(cfg); init_s=time.perf_counter()-t0
-          lc=LoraConfig(r=16,lora_alpha=32,lora_dropout=.05,target_modules=['k','q','wi_1','wo','wi_0','o','v'],task_type='SEQ_2_SEQ_LM')
-          t0=time.perf_counter(); model=get_peft_model(base,lc); lora_s=time.perf_counter()-t0; model.eval()
-          # Exact-runtime lifecycle identifiers used later.
-          for name in ['control_random','control_shuffle','dose_0p25','dose_0p50','dose_1p50','minus_encoder_attn','minus_ffn']:
-              model.add_adapter(name,lc); model.set_adapter(name); model.delete_adapter(name)
-          model.set_adapter('default')
-          vocab=int(cfg.vocab_size); pad=int(getattr(cfg,'pad_token_id',0) or 0); eos=int(getattr(cfg,'eos_token_id',1) or 1)
-          def fwd(batch=4,src_len=32,tgt_len=24,reps=2):
-              x=torch.randint(2,vocab,(batch,src_len)); am=torch.ones_like(x); lab=torch.randint(2,vocab,(batch,tgt_len)); ts=[]
-              with torch.inference_mode():
-                  for _ in range(reps):
-                      s=time.perf_counter(); model(input_ids=x,attention_mask=am,labels=lab); ts.append(time.perf_counter()-s)
-              return sum(ts)/len(ts)
-          def gen(batch=2,src_len=32,new=16,reps=1):
-              x=torch.randint(2,vocab,(batch,src_len));am=torch.ones_like(x);ts=[]
-              with torch.inference_mode():
-                  for _ in range(reps):
-                      s=time.perf_counter(); model.generate(input_ids=x,attention_mask=am,max_new_tokens=new,num_beams=1,do_sample=False);ts.append(time.perf_counter()-s)
-              return sum(ts)/len(ts)
-          fwd_s=fwd(); gen16_s=gen()
-          # Planned C57 workload: BASE/FULL all 192; 5 controls x96; optional 7 causal x64.
-          fwd_cases_primary=192*2+96*5; fwd_cases_causal=64*7
-          fwd_batches_primary=(fwd_cases_primary+3)//4; fwd_batches_causal=(fwd_cases_causal+3)//4
-          # Generation BASE+FULL 64 cases each, batch2, conservatively 32 output tokens (~2x 16-token microbench).
-          gen_batches=(64*2+1)//2
-          est_primary=fwd_batches_primary*fwd_s + gen_batches*gen16_s*2
-          est_with_causal=est_primary+fwd_batches_causal*fwd_s
-          hard_timeout_s=50*60; green_limit=.70*hard_timeout_s
-          rec={'schema':'R22573_C57_WALLCLOCK_PREFLIGHT_V1','weights_downloaded':0,'model_outputs_from_source':0,'base_repo':BASE,'base_revision':REV,'config_seconds':config_s,'random_model_init_seconds':init_s,'lora_inject_seconds':lora_s,'forward_batch4_src32_tgt24_seconds':fwd_s,'generate_batch2_16tokens_seconds':gen16_s,'planned_primary_seconds':est_primary,'planned_with_conditional_causal_seconds':est_with_causal,'hard_timeout_seconds':hard_timeout_s,'green_limit_seconds':green_limit,'primary_green':est_primary<=green_limit,'with_causal_green':est_with_causal<=green_limit,'max_rss_kb':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'architecture':{'d_model':getattr(cfg,'d_model',None),'d_ff':getattr(cfg,'d_ff',None),'num_layers':getattr(cfg,'num_layers',None),'num_decoder_layers':getattr(cfg,'num_decoder_layers',None),'num_heads':getattr(cfg,'num_heads',None),'vocab_size':getattr(cfg,'vocab_size',None)}}
-          pathlib.Path('out/C57_WALLCLOCK_PREFLIGHT.json').write_text(json.dumps(rec,indent=2));print(json.dumps(rec,indent=2))
+          import json
+          s=json.load(open('rawfree/C57_PREOUTPUT_SEAL.json'))
+          assert s['weights_present']==0 and s['model_outputs_observed']==0 and s['training_rows_used']==0
+          assert s['suite_n']==192 and s['suite_sha256']=='b20e142cf93d694a90caf9abbb5c436fe8429761161bd4979aa9be86cca12cea'
+          assert len(s['control_ids'])==96 and len(s['generation_ids'])==64 and len(s['causal_generation_ids'])==24
+          assert s['verifier_smoke']['perfect']['composite']==1.0
+          assert s['verifier_smoke']['source_copy']['composite']<0.5
+          assert s['verifier_smoke']['overedit_mutation']['composite']<0.5
+          print('PRESEAL_PASS',s['suite_sha256'])
+          PY
+      - name: Install bounded exact runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'torch>=2.8,<3' 'transformers>=4.53,<6' 'peft>=0.18,<0.20' 'safetensors>=0.6,<1' 'huggingface_hub>=0.33,<2' 'accelerate>=1,<2' sentencepiece
+      - name: Exact architecture and PEFT lifecycle source-free smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
+          PYTHONPATH=.github/scripts PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_runner.py runtime-smoke --out rawfree
+          test ! -e c57-work
+      - name: One-use exact ingress behavior controls and conditional causal screen
+        id: execute
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
+          PYTHONPATH=.github/scripts PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_runner.py execute --out rawfree --work c57-work
+      - name: Always destructive cleanup and raw-free export
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
+          rm -rf c57-work "$HF_HOME"
+          EXEC='${{ steps.execute.outcome }}'
+          python - "$EXEC" <<'PY'
+          import json,pathlib,re,hashlib,sys
+          root=pathlib.Path('rawfree');root.mkdir(exist_ok=True);outcome=sys.argv[1]
+          cp=root/'C57_CLEANUP.json'
+          prior={}
+          if cp.exists():
+              try:prior=json.load(open(cp))
+              except Exception:prior={}
+          prior.update({'schema':'R22573_C57_CLEANUP_V1','controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'raw_root_deleted':True,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0})
+          cp.write_text(json.dumps(prior,indent=2))
+          if outcome!='success' and not (root/'C57_ABORT.json').exists():
+              (root/'C57_ABORT.json').write_text(json.dumps({'schema':'R22573_C57_ABORT_V1','execute_outcome':outcome,'scientific_increment':0,'claim':'NO_BEHAVIOR_OR_CAUSAL_CREDIT_FROM_ABORTED_RUN'},indent=2))
+          bad=[]
+          for p in root.rglob('*'):
+              if not p.is_file():continue
+              n=p.name.lower()
+              if re.search(r'\.(safetensors|bin|pt|pth|pkl|pickle|model|npy|npz)$',n):bad.append(str(p))
+              if n.startswith('tokenizer') or n in {'vocab.json','merges.txt','special_tokens_map.json','spiece.model'}:bad.append(str(p))
+          assert not bad,bad
+          lines=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file() and p.name!='SHA256SUMS.txt':lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}")
+          (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
+          print('RAW_FREE_PASS',len(lines),'execute',outcome)
           PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: r22573-c57-wallclock-preflight
-          path: out/
+          name: r22573-c57-rawfree-evidence
+          path: rawfree/
           retention-days: 1
           if-no-files-found: error
+      - name: Preserve scientific failure status after evidence escrow
+        if: always()
+        shell: bash
+        run: test '${{ steps.execute.outcome }}' = 'success'
