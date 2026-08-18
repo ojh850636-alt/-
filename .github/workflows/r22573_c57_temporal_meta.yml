@@ -1,4 +1,4 @@
-name: R22573 C57 SmolLMv1 135M Metadata Audit
+name: R22573 C57 ML CPT Metadata Audit
 on:
   pull_request:
     branches: [main]
@@ -7,26 +7,26 @@ jobs:
   meta:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit new-base 135M adapter candidates without weights
+      - name: Audit ML-paper CPT LoRA candidates without weights
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
           import json,re,urllib.request,urllib.parse,pathlib,hashlib
-          repos=['SameedHussain/smollm-135m-flight-25k','moneytrackersa/smollm-purchase-categorizer','ericlewis/SmolLM-135M-Instruct-xLAM-adapter','rahulnbiju007/SmolLM-135M-Instruct-lora-text-classification']
-          base_repos=['HuggingFaceTB/SmolLM-135M','HuggingFaceTB/SmolLM-135M-Instruct']
+          repos=['JaydeepR/SmolLM-135M-CPT-LoRA-r32','smjain/SmolLM-135M-paper-instructions-lora','farpluto/SmolLM-135M-Instruct-Finetune-LoRA']
+          base_repos=['HuggingFaceTB/SmolLM-135M','unsloth/SmolLM-135M']
           def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-meta4/1.0'})
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-cpt/1.0'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          def tget(repo,sha,path,limit=120000):
-            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-meta4/1.0'})
+          def tget(repo,sha,path,limit=100000):
+            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-cpt/1.0'})
             try:
               with urllib.request.urlopen(req,timeout=30) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
             except Exception:return None
           def audit(repo):
-            m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};sib=m.get('siblings') or [];files=[]
-            for x in sib:
+            m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};files=[]
+            for x in m.get('siblings') or []:
               l=x.get('lfs') or {};files.append({'name':x.get('rfilename'),'size':x.get('size') or l.get('size'),'lfs_sha256':l.get('sha256')})
             names={f['name'] for f in files};cfg=None
             if 'adapter_config.json' in names:
@@ -47,11 +47,11 @@ jobs:
           for repo in base_repos:
             try:bases.append(audit(repo))
             except Exception as e:bases.append({'repo':repo,'error':repr(e)})
-          out={'schema':'R22573_C57_SMOLLMV1_135M_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs,'bases':bases};p=pathlib.Path('out/R22573_C57_SMOLLMV1_135M_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps([{k:r.get(k) for k in ['repo','exact_revision','card_license','base_model_card','datasets']} for r in recs],indent=2))
+          out={'schema':'R22573_C57_ML_CPT_METADATA_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs,'bases':bases};p=pathlib.Path('out/R22573_C57_ML_CPT_METADATA_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps([{k:r.get(k) for k in ['repo','exact_revision','card_license','base_model_card','datasets']} for r in recs],indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-smollmv1-meta
+          name: r22573-c57-ml-cpt-meta
           path: out/
           retention-days: 1
           if-no-files-found: error
