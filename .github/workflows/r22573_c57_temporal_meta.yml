@@ -1,103 +1,61 @@
-name: R22573 C57 ML CPT Relation Archaeology
+name: R22573 C57 TinyBERT Adapter Discovery
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  archaeology:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
-    env:
-      PYTHONDONTWRITEBYTECODE: '1'
-      TOKENIZERS_PARALLELISM: 'false'
     steps:
-      - uses: actions/checkout@v4
-      - name: Bind exact presealed runner
+      - name: Discover adapter-only LoRAs on safe tiny BERT bases without weights
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object .github/scripts/r22573_c57_cpt_runner.py)" = 'b7dd82f323bcfbce5c8d08880aa468202ba6ca42'
-          PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22573_c57_cpt_runner.py
-          find . -name '__pycache__' -type d -prune -exec rm -rf {} +
-      - name: Source-free preoutput seal
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf rawfree c57-work
-          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_cpt_runner.py preseal --out rawfree
+          mkdir -p out
           python - <<'PY'
-          import json
-          s=json.load(open('rawfree/C57_PREOUTPUT_SEAL.json'))
-          assert s['weights_present']==0 and s['model_outputs_observed']==0 and s['training_rows_used']==0
-          assert s['pair_n']==96 and s['suite_sha256']=='ebef552c9f3d48d875d30e5e293b16d0f7fd9f4e973a5a83d5ad0f601e458f03'
-          assert s['fingerprint']=='DOMAIN_CPT_RELATION_PRIOR_VS_REGISTER'
-          print('PRESEAL_PASS',s['suite_sha256'])
-          PY
-      - name: Install bounded runtime before binary
-        shell: bash
-        run: |
-          set -euo pipefail
-          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
-          python -m pip install -q --upgrade pip
-          python -m pip install -q 'torch>=2.8,<3' 'transformers>=4.48,<5' 'peft>=0.18,<0.19' 'safetensors>=0.6,<1' 'huggingface_hub>=0.33,<2' 'accelerate>=1,<2'
-      - name: Exact 135M architecture wallclock and PEFT lifecycle preflight
-        shell: bash
-        run: |
-          set -euo pipefail
-          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
-          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_cpt_runner.py runtime-smoke --out rawfree
-          test ! -e c57-work
-          python - <<'PY'
-          import json
-          r=json.load(open('rawfree/C57_RUNTIME_PREFLIGHT.json'))
-          assert r['pass'] and r['selected_tier'] in {'LARGE','MEDIUM','SMALL'}
-          print('RUNTIME_PREFLIGHT_PASS',r['selected_tier'],r['tier_estimates_seconds'])
-          PY
-      - name: One-use exact ingress relation controls and conditional causal screen
-        id: execute
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
-          PYTHONDONTWRITEBYTECODE=1 python -B .github/scripts/r22573_c57_cpt_runner.py execute --out rawfree --work c57-work
-      - name: Always destructive cleanup and raw-free export
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          export HF_HOME="$RUNNER_TEMP/hf-home-c57"
-          rm -rf c57-work "$HF_HOME"
-          EXEC='${{ steps.execute.outcome }}'
-          python - "$EXEC" <<'PY'
-          import json,pathlib,re,hashlib,sys
-          root=pathlib.Path('rawfree');root.mkdir(exist_ok=True);outcome=sys.argv[1]
-          cp=root/'C57_CLEANUP.json'
-          if not cp.exists():cp.write_text(json.dumps({'schema':'R22573_C57_CLEANUP_V1','controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'raw_root_deleted':True,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0},indent=2))
-          else:
-            x=json.load(open(cp));x.update({'controlled_cleanup_by_workflow':True,'execute_outcome':outcome,'hf_cache_deleted':True,'raw_weights_remaining':0,'raw_tokenizer_remaining':0});cp.write_text(json.dumps(x,indent=2))
-          if outcome!='success' and not (root/'C57_ABORT.json').exists():(root/'C57_ABORT.json').write_text(json.dumps({'schema':'R22573_C57_ABORT_V1','execute_outcome':outcome,'scientific_increment':0,'claim':'NO_BEHAVIOR_OR_CAUSAL_CREDIT_FROM_ABORTED_RUN'},indent=2))
-          bad=[]
-          for p in root.rglob('*'):
-            if not p.is_file():continue
-            n=p.name.lower()
-            if re.search(r'\.(safetensors|bin|pt|pth|pkl|pickle|model|npy|npz)$',n):bad.append(str(p))
-            if n.startswith('tokenizer') or n in {'vocab.json','merges.txt','special_tokens_map.json'}:bad.append(str(p))
-          assert not bad,bad
-          lines=[]
-          for p in sorted(root.rglob('*')):
-            if p.is_file() and p.name!='SHA256SUMS.txt':lines.append(f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.relative_to(root).as_posix()}")
-          (root/'SHA256SUMS.txt').write_text('\n'.join(lines)+'\n')
-          print('RAW_FREE_PASS',len(lines),'execute',outcome)
+          import json,urllib.request,urllib.parse,pathlib,hashlib,re
+          bases=['google/bert_uncased_L-2_H-128_A-2','google/bert_uncased_L-4_H-256_A-4','google/bert_uncased_L-6_H-256_A-4','google/bert_uncased_L-4_H-512_A-8']
+          def jget(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-tinybert/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          def tget(repo,sha,path,limit=50000):
+            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-tinybert/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=20) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
+            except Exception:return None
+          candidates=[];seen=set();base_records=[]
+          for base in bases:
+            try:
+              bm=jget('https://huggingface.co/api/models/'+urllib.parse.quote(base,safe='/')+'?blobs=true');bcard=bm.get('cardData') or {};bf=[]
+              for x in bm.get('siblings') or []:
+                if x.get('rfilename') in {'model.safetensors','config.json'}:
+                  l=x.get('lfs') or {};bf.append({'name':x.get('rfilename'),'size':x.get('size') or l.get('size'),'sha256':l.get('sha256')})
+              base_records.append({'repo':base,'revision':bm.get('sha'),'license':bcard.get('license') or bm.get('license'),'files':bf})
+            except Exception as e:base_records.append({'repo':base,'error':repr(e)})
+            urls=[
+              'https://huggingface.co/api/models?filter='+urllib.parse.quote('base_model:adapter:'+base,safe=':/')+'&limit=200&full=true',
+              'https://huggingface.co/api/models?search='+urllib.parse.quote(base.split('/')[-1])+'&limit=200&full=true']
+            for u in urls:
+              try:rows=jget(u)
+              except Exception:continue
+              for m in rows:
+                rid=m.get('id') or m.get('modelId')
+                if not rid or rid in seen:continue
+                seen.add(rid)
+                try:
+                  d=jget('https://huggingface.co/api/models/'+urllib.parse.quote(rid,safe='/')+'?blobs=true');sha=d.get('sha');card=d.get('cardData') or {};sib=d.get('siblings') or [];names={x.get('rfilename') for x in sib}
+                  if 'adapter_config.json' not in names or 'adapter_model.safetensors' not in names:continue
+                  s=tget(rid,sha,'adapter_config.json');cfg=json.loads(s) if s else None
+                  if not cfg or cfg.get('base_model_name_or_path') not in bases:continue
+                  readme=tget(rid,sha,'README.md',60000) if 'README.md' in names else ''
+                  sf=next((x for x in sib if x.get('rfilename')=='adapter_model.safetensors'),None);l=(sf or {}).get('lfs') or {}
+                  candidates.append({'repo':rid,'revision':sha,'license':card.get('license') or d.get('license'),'base':cfg.get('base_model_name_or_path'),'task_type':cfg.get('task_type'),'r':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'targets':cfg.get('target_modules'),'modules_to_save':cfg.get('modules_to_save'),'adapter_size':(sf or {}).get('size') or l.get('size'),'adapter_sha256':l.get('sha256'),'datasets':card.get('datasets'),'pipeline_tag':d.get('pipeline_tag'),'readme_excerpt':(readme or '')[:8000]})
+                except Exception:continue
+          out={'schema':'R22573_C57_TINYBERT_ADAPTER_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'bases':base_records,'candidate_count':len(candidates),'candidates':candidates};p=pathlib.Path('out/R22573_C57_TINYBERT_ADAPTER_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps([{k:c.get(k) for k in ['repo','license','base','task_type','datasets']} for c in candidates],indent=2))
           PY
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: r22573-c57-cpt-rawfree-evidence
-          path: rawfree/
+          name: r22573-c57-tinybert-discovery
+          path: out/
           retention-days: 1
           if-no-files-found: error
-      - name: Preserve scientific failure status after evidence escrow
-        if: always()
-        shell: bash
-        run: test '${{ steps.execute.outcome }}' = 'success'
