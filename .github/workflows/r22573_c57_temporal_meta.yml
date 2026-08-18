@@ -1,4 +1,4 @@
-name: R22573 C57 Small Temporal Adapter Discovery
+name: R22573 C57 135M Temporal Adapter Discovery
 on:
   pull_request:
     branches: [main]
@@ -7,60 +7,46 @@ jobs:
   discover:
     runs-on: ubuntu-latest
     steps:
-      - name: Discover small adapter-only temporal/calendar candidates without weights
+      - name: Query 135M adapter trees without weights
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json,urllib.request,urllib.parse,pathlib,hashlib,re
-          qs=['calendar event lora','calendar extraction lora','event extraction smollm','date parser lora','temporal extraction lora','calendar json lora']
+          import json,urllib.request,urllib.parse,pathlib,hashlib
+          bases=['HuggingFaceTB/SmolLM-135M','HuggingFaceTB/SmolLM2-135M','HuggingFaceTB/SmolLM2-135M-Instruct']
+          terms=['calendar','event','date','schedule','temporal','extraction','json']
           def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-discovery/1.0'})
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-135m/1.0'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          def tget(repo,sha,path,limit=30000):
-            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-discovery/1.0'})
-            try:
-              with urllib.request.urlopen(req,timeout=20) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
-            except Exception:return None
-          ids=[]
-          for q in qs:
-            try:
-              rows=jget('https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true')
-              for m in rows:
-                rid=m.get('id') or m.get('modelId')
-                if rid and rid not in ids:ids.append(rid)
-            except Exception as e:pass
-          # Include exact known candidates and likely small-base calendar models even if search ranking misses them.
-          for rid in ['waliaMuskaan011/calendar-event-extractor-smollm','sarvkk/funcgemma-event-parser-v2','sigdelakshey/Compact-ToolCall-Planner-Qwen2.5-0.5B-v1']:
-            if rid not in ids:ids.append(rid)
-          recs=[]
-          for repo in ids[:160]:
-            try:
-              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};sib=m.get('siblings') or [];names={x.get('rfilename') for x in sib}
-              if 'adapter_config.json' not in names:continue
-              s=tget(repo,sha,'adapter_config.json');
-              try:cfg=json.loads(s) if s else None
+          rec=[];seen=set()
+          for base in bases:
+            urls=[
+              'https://huggingface.co/api/models?filter='+urllib.parse.quote('base_model:adapter:'+base,safe=':/')+'&limit=200&full=true',
+              'https://huggingface.co/api/models?search='+urllib.parse.quote(base.split('/')[-1])+'&limit=200&full=true']
+            for u in urls:
+              try:rows=jget(u)
               except Exception:continue
-              base=cfg.get('base_model_name_or_path') or card.get('base_model');
-              if not base:continue
-              files=[]
-              for x in sib:
-                lfs=x.get('lfs') or {};name=x.get('rfilename')
-                if name in {'adapter_model.safetensors','adapter_config.json','README.md'}:files.append({'name':name,'size':x.get('size') or lfs.get('size'),'lfs_sha256':lfs.get('sha256')})
-              readme=tget(repo,sha,'README.md',40000) if 'README.md' in names else ''
-              text=((repo+' '+str(base)+' '+(readme or ''))).lower()
-              # Keep only temporal/calendar/event candidates.
-              if not any(k in text for k in ['calendar','event','date','temporal','schedule']):continue
-              recs.append({'repo':repo,'exact_revision':sha,'card_license':card.get('license') or m.get('license'),'base_model':base,'r':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'targets':cfg.get('target_modules'),'files':files,'readme_excerpt':(readme or '')[:6000]})
-            except Exception:continue
-          out={'schema':'R22573_C57_SMALL_TEMPORAL_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'queries':qs,'candidate_count':len(recs),'candidates':recs}
-          p=pathlib.Path('out/R22573_C57_SMALL_TEMPORAL_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n')
-          print(json.dumps([{k:r.get(k) for k in ['repo','card_license','base_model','r']} for r in recs],indent=2))
+              for m in rows:
+                rid=m.get('id') or m.get('modelId');
+                if not rid or rid in seen:continue
+                seen.add(rid);txt=(rid+' '+str(m.get('tags'))+' '+str(m.get('cardData'))).lower()
+                if not any(t in txt for t in terms):continue
+                try:
+                  d=jget('https://huggingface.co/api/models/'+urllib.parse.quote(rid,safe='/')+'?blobs=true');sha=d.get('sha');card=d.get('cardData') or {};sib=d.get('siblings') or [];names={x.get('rfilename') for x in sib}
+                  if 'adapter_config.json' not in names:continue
+                  req=urllib.request.Request(f'https://huggingface.co/{rid}/resolve/{sha}/adapter_config.json',headers={'User-Agent':'LAA-R22573-135m/1.0'});cfg=json.loads(urllib.request.urlopen(req,timeout=20).read())
+                  saf=[]
+                  for x in sib:
+                    if x.get('rfilename')=='adapter_model.safetensors':
+                      l=x.get('lfs') or {};saf.append({'size':x.get('size') or l.get('size'),'sha256':l.get('sha256')})
+                  rec.append({'repo':rid,'revision':sha,'license':card.get('license') or d.get('license'),'base':cfg.get('base_model_name_or_path'),'r':cfg.get('r'),'targets':cfg.get('target_modules'),'safetensors':saf,'tags':d.get('tags')})
+                except Exception:continue
+          out={'schema':'R22573_C57_135M_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':rec};p=pathlib.Path('out/R22573_C57_135M_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps(rec,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-small-temporal-discovery
+          name: r22573-c57-135m-discovery
           path: out/
           retention-days: 1
           if-no-files-found: error
