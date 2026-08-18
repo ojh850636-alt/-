@@ -21,17 +21,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install exact analysis runtime
+      - name: Install analysis runtime from released package contract
         run: |
           python -m pip install --upgrade pip
-          python -m pip install 'portallib==0.2.0' 'huggingface_hub>=0.34,<1.0' 'safetensors>=0.4' 'numpy<3'
-      - name: Bind pre-output contract
+          python -m pip install 'portallib==0.2.0' 'safetensors>=0.4' 'numpy<3'
+          python -m pip freeze | sort > C58_ANALYSIS_RUNTIME_FREEZE.txt
+          python - <<'PY'
+          import importlib.metadata as m, json, pathlib
+          names=['portallib','torch','transformers','peft','huggingface-hub','safetensors','numpy','accelerate','tokenizers']
+          out={n:m.version(n) for n in names}
+          pathlib.Path('C58_ANALYSIS_RUNTIME.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Bind pre-output contract and amendment chain
         run: |
           python - <<'PY'
           import hashlib, json, pathlib
           files=[
             'r22574/C58_CANDIDATE_AUDIT.json',
             'r22574/C58_PREOUTPUT_SEAL.json',
+            'r22574/C58_PREOUTPUT_AMENDMENTS.json',
             'r22574/build_c58_procedural_rte.py',
             'r22574/c58_portal_adapter_first.py',
           ]
@@ -74,6 +82,8 @@ jobs:
           path: |
             c58_out/*.json
             C58_PREOUTPUT_BINDING.json
+            C58_ANALYSIS_RUNTIME.json
+            C58_ANALYSIS_RUNTIME_FREEZE.txt
           if-no-files-found: error
           retention-days: 1
       - name: Upload derivative RTE/COPA source escrow
