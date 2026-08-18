@@ -1,4 +1,4 @@
-name: R22573 C57 GEC Subpath Audit
+name: R22573 C57 Small-GEC Discovery Sweep
 on:
   pull_request:
     branches: [main]
@@ -7,46 +7,51 @@ jobs:
   meta:
     runs-on: ubuntu-latest
     steps:
-      - name: Audit morpheus candidate subpaths without weights
+      - name: Search HF metadata for small public PEFT GEC candidates
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json,urllib.request,pathlib,hashlib
-          repo='morpheuslord/rewrite'; sha='b0223f103634eb941e067996c07827c17a385a80'
-          paths=['adapter_config.json','README.md','checkpoints/best_model/adapter_config.json','checkpoints/best_model/README.md','checkpoints/checkpoint-1515/adapter_config.json','checkpoints/checkpoint-1515/README.md']
-          def tget(path,limit=120000):
-            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-subpath/1.0'})
+          import json,urllib.request,urllib.parse,pathlib,re
+          terms=['grammar correction','grammatical error correction','text correction lora','proofreading lora']
+          def jget(u):
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-discovery/1.0'})
+            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          ids=[]
+          for term in terms:
+            url='https://huggingface.co/api/models?'+urllib.parse.urlencode({'search':term,'limit':100,'full':'true'})
+            try: rows=jget(url)
+            except Exception as e:
+              print('SEARCH_FAIL',term,repr(e)); continue
+            for x in rows:
+              mid=x.get('modelId') or x.get('id')
+              if mid and mid not in ids: ids.append(mid)
+          recs=[]
+          for mid in ids[:240]:
             try:
-              with urllib.request.urlopen(req,timeout=30) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
-            except Exception as e:return None
-          rec={}
-          for p in paths:
-            s=tget(p)
-            if p.endswith('.json') and s:
-              try:val=json.loads(s)
-              except Exception:val={'_parse_error':True,'sha256':hashlib.sha256(s.encode()).hexdigest()}
-            else:val=s
-            rec[p]={'value':val,'sha256':hashlib.sha256((s or '').encode()).hexdigest() if s is not None else None}
-          # Base metadata only: no weight download
-          for base in ['grammarly/coedit-large','google/flan-t5-small']:
-            req=urllib.request.Request('https://huggingface.co/api/models/'+base+'?blobs=true',headers={'User-Agent':'LAA-R22573-subpath/1.0'})
-            with urllib.request.urlopen(req,timeout=30) as r:m=json.load(r)
-            card=m.get('cardData') or {}; files=[]
-            for x in m.get('siblings') or []:
-              lfs=x.get('lfs') or {}
-              if x.get('rfilename') in ['model.safetensors','config.json']:
-                files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'sha256':lfs.get('sha256')})
-            rec['BASE:'+base]={'revision':m.get('sha'),'license':card.get('license') or m.get('license'),'gated':m.get('gated'),'files':files}
-          out={'schema':'R22573_C57_GEC_SUBPATH_AUDIT_V2','weight_bytes_downloaded':0,'model_outputs_observed':0,'repo':repo,'exact_revision':sha,'records':rec}
-          p=pathlib.Path('out/R22573_C57_GEC_SUBPATH_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
-          pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n')
-          print(json.dumps(out,indent=2)[:12000])
+              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(mid,safe='/')+'?blobs=true')
+              card=m.get('cardData') or {}; tags=m.get('tags') or []; sib=m.get('siblings') or []
+              files=[]
+              for x in sib:
+                lfs=x.get('lfs') or {}; files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'sha256':lfs.get('sha256')})
+              adapters=[f for f in files if (f['name'] or '').endswith('adapter_model.safetensors')]
+              cfg_present=any((f['name'] or '')=='adapter_config.json' for f in files)
+              if not adapters or not cfg_present: continue
+              smallest=min([f['size'] for f in adapters if isinstance(f.get('size'),int)] or [10**18])
+              if smallest>100_000_000: continue
+              lic=card.get('license') or m.get('license'); base=card.get('base_model')
+              recs.append({'repo':mid,'revision':m.get('sha'),'license':lic,'base_model_card':base,'gated':m.get('gated'),'library_name':m.get('library_name'),'tags':tags,'smallest_adapter_bytes':smallest,'adapters':adapters,'file_count':len(files)})
+            except Exception: pass
+          # Prefer explicit license/base and smaller adapters in output ordering.
+          recs.sort(key=lambda r:(r['license'] is None,r['base_model_card'] is None,r['smallest_adapter_bytes']))
+          out={'schema':'R22573_C57_SMALL_GEC_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'search_terms':terms,'results':recs[:80]}
+          p=pathlib.Path('out/R22573_C57_SMALL_GEC_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
+          print(json.dumps(out,ensure_ascii=False,indent=2)[:20000])
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-gec-subpath-meta
+          name: r22573-c57-small-gec-discovery
           path: out/
           retention-days: 1
           if-no-files-found: error
