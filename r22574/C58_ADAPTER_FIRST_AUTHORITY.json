@@ -1,0 +1,52 @@
+{
+  "schema": "R22574_C58_ADAPTER_FIRST_AUTHORITY_V1",
+  "run_id": 32143923154,
+  "head_sha": "9a4f69e0254fb30f794db4c9b91a664ab2661696",
+  "verdict": "PASS_ADAPTER_FIRST_VIABLE_AUTHORIZE_BASE",
+  "native_source": {
+    "repo": "RampPublic/portal-qwen3-1.7b",
+    "revision": "v0.2.0",
+    "commit": "be09be533b5c0418ad20269f19ebb63e9efbc330",
+    "sha256": "732286e119c396c62b8c1d6b115f3ae6eec951a47eaa9bcdf0fee65564ff9688",
+    "one_use_consumed": true,
+    "local_native_source_deleted": true,
+    "native_source_redownload_forbidden": true
+  },
+  "native_structure": {
+    "tensor_count": 20,
+    "task_latent_shape": [14,256],
+    "canonical_core_parameter_count": 17483776,
+    "alignment_parameter_count": 7340928
+  },
+  "rte_export": {
+    "state_digest": "eb75fc24bad645370ccd5cf0e1d69d21a921adda31ece6919950f9a36e3d3f46",
+    "pair_count": 56,
+    "zero_effective_pairs": 0,
+    "nonfinite_pairs": 0,
+    "effective_rank_min": 8,
+    "effective_rank_max": 8,
+    "q_operator_energy_ratio": 0.42620675843656325,
+    "v_operator_energy_ratio": 0.5737932415634368,
+    "repeat_export_digest_identical": true
+  },
+  "task_geometry": {
+    "rte_top_latent_neighbors": [["cb",0.8368668834094818],["wsc",0.8292655525945131],["wic",0.8006590485549238],["boolq",0.7686842477773642]],
+    "rte_top_operator_neighbors": [["cb",0.9034157636280787],["wic",0.8745627417741056],["wsc",0.8401206727773708],["boolq",0.7997525988337665]],
+    "interpretation": "descriptive raw-free geometry only; not causal evidence"
+  },
+  "rawfree_artifact": {
+    "artifact_id": 9327062138,
+    "artifact_sha256": "f8cdb17b5ae375abdd040ce69609f407f07590f03de19dcf9989647b6ee7cb97"
+  },
+  "derivative_source_escrow": {
+    "artifact_id": 9327063037,
+    "artifact_sha256": "f9ce7a9f67d477cf5dd730453632ca4a16ee3f2895a4bfcc160163d3aea59898",
+    "contains": ["rte exported PEFT adapter","copa exported PEFT adapter"],
+    "native_portal_source_included": false,
+    "base_included": false,
+    "total_payload_bytes": 12881517,
+    "retention_days": 1
+  },
+  "scientific_increment": 0,
+  "next_authorized_stage": "EXACT_TRAINING_BASE_ONE_USE_BEHAVIOR_CAUSAL_CAMPAIGN"
+}
