@@ -1,0 +1,49 @@
+name: R22574 C58 runtime transport source-zero check
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  transport_check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify 4 exact chunks and decoded runtime archive
+        run: |
+          python - <<'PY'
+          import hashlib,json,pathlib,subprocess,base64,tarfile
+          a=json.loads(pathlib.Path('r22574/C58_RUNTIME_TRANSPORT_PREBASE_AMENDMENT.json').read_text())
+          assert a['base_weight_bytes_consumed_before_amendment']==0 and a['model_outputs_observed_before_amendment']==0
+          spec=a['replacement_transport']
+          parts=[]
+          for x in spec['chunks']:
+              p=pathlib.Path(x['path']); b=p.read_bytes(); s=b.decode().strip().encode()
+              assert len(s)==x['chars'],(p,len(s),x['chars'])
+              assert hashlib.sha256(s).hexdigest()==x['sha256'],(p,hashlib.sha256(s).hexdigest(),x['sha256'])
+              parts.append(s)
+          joined=b''.join(parts)
+          assert len(joined)==spec['concatenated_base64_chars']
+          assert hashlib.sha256(joined).hexdigest()==spec['concatenated_base64_sha256']
+          raw=base64.b64decode(joined,validate=True)
+          assert len(raw)==spec['decoded_tar_gz_bytes'],(len(raw),spec['decoded_tar_gz_bytes'])
+          assert hashlib.sha256(raw).hexdigest()==spec['decoded_tar_gz_sha256']
+          arc=pathlib.Path('/tmp/c58_runtime_bundle.tar.gz'); arc.write_bytes(raw)
+          subprocess.run(['tar','-tzf',str(arc)],check=True,stdout=subprocess.DEVNULL)
+          root=pathlib.Path('/tmp/c58_runtime_check'); root.mkdir(exist_ok=True)
+          subprocess.run(['tar','-xzf',str(arc),'-C',str(root)],check=True)
+          got={}
+          for name,expected in spec['extracted_scripts'].items():
+              p=root/name; h=hashlib.sha256(p.read_bytes()).hexdigest(); assert h==expected,(name,h,expected); got[name]=h
+          out={'schema':'R22574_C58_RUNTIME_TRANSPORT_CHECK_V1','verdict':'PASS','base_weight_bytes':0,'model_outputs':0,'chunk_count':len(parts),'base64_sha256':hashlib.sha256(joined).hexdigest(),'archive_sha256':hashlib.sha256(raw).hexdigest(),'scripts':got}
+          pathlib.Path('C58_RUNTIME_TRANSPORT_CHECK.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-runtime-transport-check
+          path: C58_RUNTIME_TRANSPORT_CHECK.json
+          if-no-files-found: error
+          retention-days: 1
