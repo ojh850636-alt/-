@@ -1,57 +1,68 @@
-name: R22573 C57 Small-GEC Discovery Sweep
+name: R22573 C57 CoEdIT Wallclock Preflight
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  meta:
+  preflight:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+      TOKENIZERS_PARALLELISM: 'false'
     steps:
-      - name: Search HF metadata for small public PEFT GEC candidates
+      - name: Install source-free runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q --upgrade pip
+          python -m pip install -q 'torch>=2.8,<3' 'transformers>=4.53,<6' 'peft>=0.18,<0.20'
+      - name: Benchmark full random CoEdIT architecture before binary
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json,urllib.request,urllib.parse,pathlib,re
-          terms=['grammar correction','grammatical error correction','text correction lora','proofreading lora']
-          def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-discovery/1.0'})
-            with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          ids=[]
-          for term in terms:
-            url='https://huggingface.co/api/models?'+urllib.parse.urlencode({'search':term,'limit':100,'full':'true'})
-            try: rows=jget(url)
-            except Exception as e:
-              print('SEARCH_FAIL',term,repr(e)); continue
-            for x in rows:
-              mid=x.get('modelId') or x.get('id')
-              if mid and mid not in ids: ids.append(mid)
-          recs=[]
-          for mid in ids[:240]:
-            try:
-              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(mid,safe='/')+'?blobs=true')
-              card=m.get('cardData') or {}; tags=m.get('tags') or []; sib=m.get('siblings') or []
-              files=[]
-              for x in sib:
-                lfs=x.get('lfs') or {}; files.append({'name':x.get('rfilename'),'size':x.get('size') or lfs.get('size'),'sha256':lfs.get('sha256')})
-              adapters=[f for f in files if (f['name'] or '').endswith('adapter_model.safetensors')]
-              cfg_present=any((f['name'] or '')=='adapter_config.json' for f in files)
-              if not adapters or not cfg_present: continue
-              smallest=min([f['size'] for f in adapters if isinstance(f.get('size'),int)] or [10**18])
-              if smallest>100_000_000: continue
-              lic=card.get('license') or m.get('license'); base=card.get('base_model')
-              recs.append({'repo':mid,'revision':m.get('sha'),'license':lic,'base_model_card':base,'gated':m.get('gated'),'library_name':m.get('library_name'),'tags':tags,'smallest_adapter_bytes':smallest,'adapters':adapters,'file_count':len(files)})
-            except Exception: pass
-          # Prefer explicit license/base and smaller adapters in output ordering.
-          recs.sort(key=lambda r:(r['license'] is None,r['base_model_card'] is None,r['smallest_adapter_bytes']))
-          out={'schema':'R22573_C57_SMALL_GEC_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'search_terms':terms,'results':recs[:80]}
-          p=pathlib.Path('out/R22573_C57_SMALL_GEC_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2))
-          print(json.dumps(out,ensure_ascii=False,indent=2)[:20000])
+          import json,time,resource,torch,pathlib
+          from transformers import AutoConfig,AutoModelForSeq2SeqLM
+          from peft import LoraConfig,get_peft_model
+          BASE='grammarly/coedit-large'; REV='5637bcdf9d8d4419f97c8cfea36f7d35c79232b6'
+          t0=time.perf_counter(); cfg=AutoConfig.from_pretrained(BASE,revision=REV,trust_remote_code=False); config_s=time.perf_counter()-t0
+          t0=time.perf_counter(); base=AutoModelForSeq2SeqLM.from_config(cfg); init_s=time.perf_counter()-t0
+          lc=LoraConfig(r=16,lora_alpha=32,lora_dropout=.05,target_modules=['k','q','wi_1','wo','wi_0','o','v'],task_type='SEQ_2_SEQ_LM')
+          t0=time.perf_counter(); model=get_peft_model(base,lc); lora_s=time.perf_counter()-t0; model.eval()
+          # Exact-runtime lifecycle identifiers used later.
+          for name in ['control_random','control_shuffle','dose_0p25','dose_0p50','dose_1p50','minus_encoder_attn','minus_ffn']:
+              model.add_adapter(name,lc); model.set_adapter(name); model.delete_adapter(name)
+          model.set_adapter('default')
+          vocab=int(cfg.vocab_size); pad=int(getattr(cfg,'pad_token_id',0) or 0); eos=int(getattr(cfg,'eos_token_id',1) or 1)
+          def fwd(batch=4,src_len=32,tgt_len=24,reps=2):
+              x=torch.randint(2,vocab,(batch,src_len)); am=torch.ones_like(x); lab=torch.randint(2,vocab,(batch,tgt_len)); ts=[]
+              with torch.inference_mode():
+                  for _ in range(reps):
+                      s=time.perf_counter(); model(input_ids=x,attention_mask=am,labels=lab); ts.append(time.perf_counter()-s)
+              return sum(ts)/len(ts)
+          def gen(batch=2,src_len=32,new=16,reps=1):
+              x=torch.randint(2,vocab,(batch,src_len));am=torch.ones_like(x);ts=[]
+              with torch.inference_mode():
+                  for _ in range(reps):
+                      s=time.perf_counter(); model.generate(input_ids=x,attention_mask=am,max_new_tokens=new,num_beams=1,do_sample=False);ts.append(time.perf_counter()-s)
+              return sum(ts)/len(ts)
+          fwd_s=fwd(); gen16_s=gen()
+          # Planned C57 workload: BASE/FULL all 192; 5 controls x96; optional 7 causal x64.
+          fwd_cases_primary=192*2+96*5; fwd_cases_causal=64*7
+          fwd_batches_primary=(fwd_cases_primary+3)//4; fwd_batches_causal=(fwd_cases_causal+3)//4
+          # Generation BASE+FULL 64 cases each, batch2, conservatively 32 output tokens (~2x 16-token microbench).
+          gen_batches=(64*2+1)//2
+          est_primary=fwd_batches_primary*fwd_s + gen_batches*gen16_s*2
+          est_with_causal=est_primary+fwd_batches_causal*fwd_s
+          hard_timeout_s=50*60; green_limit=.70*hard_timeout_s
+          rec={'schema':'R22573_C57_WALLCLOCK_PREFLIGHT_V1','weights_downloaded':0,'model_outputs_from_source':0,'base_repo':BASE,'base_revision':REV,'config_seconds':config_s,'random_model_init_seconds':init_s,'lora_inject_seconds':lora_s,'forward_batch4_src32_tgt24_seconds':fwd_s,'generate_batch2_16tokens_seconds':gen16_s,'planned_primary_seconds':est_primary,'planned_with_conditional_causal_seconds':est_with_causal,'hard_timeout_seconds':hard_timeout_s,'green_limit_seconds':green_limit,'primary_green':est_primary<=green_limit,'with_causal_green':est_with_causal<=green_limit,'max_rss_kb':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'architecture':{'d_model':getattr(cfg,'d_model',None),'d_ff':getattr(cfg,'d_ff',None),'num_layers':getattr(cfg,'num_layers',None),'num_decoder_layers':getattr(cfg,'num_decoder_layers',None),'num_heads':getattr(cfg,'num_heads',None),'vocab_size':getattr(cfg,'vocab_size',None)}}
+          pathlib.Path('out/C57_WALLCLOCK_PREFLIGHT.json').write_text(json.dumps(rec,indent=2));print(json.dumps(rec,indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-small-gec-discovery
+          name: r22573-c57-wallclock-preflight
           path: out/
           retention-days: 1
           if-no-files-found: error
