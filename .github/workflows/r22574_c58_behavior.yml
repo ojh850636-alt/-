@@ -1,14 +1,227 @@
-name: R22574 C58 PorTAL RTE behavior causal (manual after metadata amendment)
+name: R22574 C58 PorTAL RTE behavior causal
 on:
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
   actions: write
 jobs:
-  guarded:
+  behavior_causal:
     runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      PYTHONDONTWRITEBYTECODE: "1"
+      MALLOC_ARENA_MAX: "2"
+      OMP_NUM_THREADS: "4"
+      MKL_NUM_THREADS: "4"
+      DERIVATIVE_ARTIFACT_ID: "9327063037"
     steps:
-      - run: |
-          echo 'Behavior campaign temporarily gated pending exact Base metadata amendment.'
-          echo 'Do not dispatch until r22574/C58_BASE_METADATA_PREINGRESS_AMENDMENT.json is bound.'
-          exit 1
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify pre-Base amendment authority
+        run: |
+          python - <<'PY'
+          import json, pathlib
+          a=json.loads(pathlib.Path('r22574/C58_BASE_METADATA_PREINGRESS_AMENDMENT.json').read_text())
+          assert a['bound_before_base_weight_ingress'] is True
+          assert a['base_weight_bytes_consumed_before_amendment']==0
+          assert a['model_outputs_observed_before_amendment']==0
+          assert a['metadata_authority']['run_id']==32146915148
+          assert a['metadata_authority']['files']['model-00002-of-00002.safetensors']['bytes']==622329984
+          assert a['metadata_authority']['files']['model-00002-of-00002.safetensors']['sha256']=='912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9'
+          assert a['scientific_candidate_unchanged'] and a['procedural_suite_unchanged'] and a['positive_and_failure_thresholds_unchanged']
+          print('pre-Base amendment authority PASS')
+          PY
+      - name: Restore bound C58 runtime scripts
+        run: |
+          mkdir -p /tmp/c58_scripts
+          base64 -d r22574/c58_runtime_bundle.b64 | tar -xzf - -C /tmp/c58_scripts
+          python -B -m py_compile /tmp/c58_scripts/c58_prepare_source.py /tmp/c58_scripts/c58_behavior_causal.py
+          grep -q '622329984' /tmp/c58_scripts/c58_prepare_source.py
+      - name: Install released PorTAL training runtime
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'portallib[training]==0.2.0'
+          python -m pip freeze | sort > C58_BEHAVIOR_RUNTIME_FREEZE.txt
+          python - <<'PY'
+          import importlib.metadata as m, json, pathlib
+          names=['portallib','torch','transformers','peft','huggingface-hub','safetensors','numpy','accelerate','tokenizers','datasets']
+          out={n:m.version(n) for n in names}
+          pathlib.Path('C58_BEHAVIOR_RUNTIME.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          for n in ('portallib','torch','transformers','peft','huggingface-hub','safetensors'): assert out[n]
+          PY
+      - name: Reproduce sealed procedural suite
+        run: |
+          python -B r22574/build_c58_procedural_rte.py --out C58_PROCEDURAL_RTE_256.jsonl
+          python - <<'PY'
+          import hashlib, json, pathlib
+          seal=json.loads(pathlib.Path('r22574/C58_BEHAVIOR_CAUSAL_SEAL.json').read_text())
+          got=hashlib.sha256(pathlib.Path('C58_PROCEDURAL_RTE_256.jsonl').read_bytes()).hexdigest()
+          assert got==seal['behavior']['procedural_suite_sha256'], (got,seal['behavior']['procedural_suite_sha256'])
+          print(got)
+          PY
+      - name: Recover one-use derivative RTE/COPA escrow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p C58_DERIVATIVE_ESCROW
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${DERIVATIVE_ARTIFACT_ID}/zip" > /tmp/c58_derivative.zip
+          unzip -q /tmp/c58_derivative.zip -d C58_DERIVATIVE_ESCROW
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('C58_DERIVATIVE_ESCROW')
+          m=json.loads((root/'ESCROW_MANIFEST.json').read_text())
+          expected={
+            'rte/adapter_model.safetensors':'b8a49f7ac09348b421f4be2a5ac044dd4290e1ec0fd434ec6bc00d1412147d47',
+            'copa/adapter_model.safetensors':'6938c784de4d533df16d59e39fcf9f051de71a593d92327aaf04415dd58c68b0',
+          }
+          def sha(p):
+            h=hashlib.sha256(); h.update(p.read_bytes()); return h.hexdigest()
+          for p,d in expected.items(): assert sha(root/p)==d,(p,sha(root/p),d)
+          assert m['native_portal_source_included'] is False and m['base_included'] is False
+          print('derivative escrow PASS')
+          PY
+      - name: Exact Base metadata ABI source preflight and one-use ingress
+        run: |
+          rm -rf C58_BASE C58_META C58_SOURCE_ESCROW C58_NATURAL_RTE.json
+          python -B /tmp/c58_scripts/c58_prepare_source.py \
+            --adapter-escrow C58_DERIVATIVE_ESCROW \
+            --base-dir C58_BASE \
+            --meta-dir C58_META \
+            --natural-out C58_NATURAL_RTE.json \
+            --source-escrow C58_SOURCE_ESCROW \
+            --receipt C58_SOURCE_PREFLIGHT.json \
+            --chunk-bytes 450000000
+          python - <<'PY'
+          import json,pathlib
+          r=json.loads(pathlib.Path('C58_SOURCE_PREFLIGHT.json').read_text())
+          assert r['model_outputs_observed']==0
+          assert r['trust_remote_code'] is False and r['pickle_loaded'] is False
+          assert r['base_metadata']['resolved_revision']=='70d244cc86ccca08cf5af4e1e306ecf908b1ad5e'
+          assert r['base_metadata']['weights']['model-00002-of-00002.safetensors']['bytes']==622329984
+          assert r['preweight_abi']['target_count']==56 and r['preweight_abi']['target_paths_all_linear']
+          assert r['natural_locked']['raw_text_export_forbidden'] is True
+          PY
+      - name: Upload full exact source escrow before model load
+        id: source_escrow_upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-full-source-escrow
+          path: C58_SOURCE_ESCROW
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+      - name: Bind recovery escrow authority and retire smaller derivative duplicate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_ARTIFACT_ID: ${{ steps.source_escrow_upload.outputs.artifact-id }}
+          SOURCE_ARTIFACT_DIGEST: ${{ steps.source_escrow_upload.outputs.artifact-digest }}
+        run: |
+          python - <<'PY'
+          import json,os,pathlib
+          pathlib.Path('C58_SOURCE_ESCROW_REMOTE_RECEIPT.json').write_text(json.dumps({
+            'schema':'R22574_C58_SOURCE_ESCROW_REMOTE_RECEIPT_V1',
+            'artifact_id':int(os.environ['SOURCE_ARTIFACT_ID']),
+            'artifact_digest':os.environ['SOURCE_ARTIFACT_DIGEST'],
+            'retention_days':1,'created_before_model_load':True,
+            'native_portal_redownload_required':False,'base_hf_redownload_required_for_recovery':False,
+          },indent=2,sort_keys=True)+'\n')
+          PY
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${DERIVATIVE_ARTIFACT_ID}"
+      - name: Canonical Base controls and bidirectional causal assay
+        run: |
+          python -B /tmp/c58_scripts/c58_behavior_causal.py \
+            --base-dir C58_BASE \
+            --adapter-escrow C58_DERIVATIVE_ESCROW \
+            --procedural C58_PROCEDURAL_RTE_256.jsonl \
+            --natural-json C58_NATURAL_RTE.json \
+            --out C58_BEHAVIOR_OUT \
+            --batch 16
+      - name: Verify raw-free scientific result and decide source replay
+        id: decide
+        run: |
+          python - <<'PY'
+          import json,pathlib
+          r=json.loads(pathlib.Path('C58_BEHAVIOR_OUT/C58_BEHAVIOR_CAUSAL_RAWFREE.json').read_text())
+          assert r['raw_contract']=={'raw_logits':False,'raw_activations':False,'hidden_states':False,'natural_text':False,'adapter_AB_values':False,'deltaW':False}
+          status=r['causal']['status']
+          keep=status.startswith('E3_FINE_LAYER_LOCALIZATION')
+          pathlib.Path('C58_DECISION.json').write_text(json.dumps({
+            'schema':'R22574_C58_POST_BEHAVIOR_DECISION_V1',
+            'reproduction_green':r['behavior']['reproduction_green'],
+            'failure_reproduction_green':r['behavior']['failure_reproduction_green'],
+            'safety_green':r['behavior']['safety_green'],
+            'causal_lane':r['causal'].get('lane'),'causal_status':status,
+            'keep_remote_source_for_projection_subspace_fresh_replay':keep,
+          },indent=2,sort_keys=True)+'\n')
+          pathlib.Path('C58_GITHUB_OUTPUT').write_text('keep_source='+('true' if keep else 'false')+'\n')
+          print(json.dumps({'status':status,'keep_source':keep},sort_keys=True))
+          PY
+          cat C58_GITHUB_OUTPUT >> "$GITHUB_OUTPUT"
+      - name: Upload provisional raw-free behavior evidence before cleanup
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-behavior-rawfree-predelete
+          path: |
+            C58_BEHAVIOR_OUT/C58_BEHAVIOR_CAUSAL_RAWFREE.json
+            C58_SOURCE_PREFLIGHT.json
+            C58_SOURCE_ESCROW_REMOTE_RECEIPT.json
+            C58_DECISION.json
+            C58_BEHAVIOR_RUNTIME.json
+            C58_BEHAVIOR_RUNTIME_FREEZE.txt
+            C58_PROCEDURAL_RTE_256.jsonl
+          if-no-files-found: error
+          retention-days: 1
+      - name: Delete all local raw source and caches
+        run: |
+          BEFORE=$(du -sb C58_BASE C58_META C58_SOURCE_ESCROW C58_DERIVATIVE_ESCROW C58_NATURAL_RTE.json /tmp/c58_derivative.zip 2>/dev/null | awk '{s+=$1} END{print s+0}')
+          rm -rf C58_BASE C58_META C58_SOURCE_ESCROW C58_DERIVATIVE_ESCROW C58_NATURAL_RTE.json /tmp/c58_derivative.zip /tmp/c58_scripts
+          rm -rf ~/.cache/huggingface ~/.cache/torch ~/.cache/pip
+          python - <<PY
+          import json,pathlib
+          paths=['C58_BASE','C58_META','C58_SOURCE_ESCROW','C58_DERIVATIVE_ESCROW','C58_NATURAL_RTE.json','/tmp/c58_derivative.zip','/tmp/c58_scripts']
+          remaining=[p for p in paths if pathlib.Path(p).exists()]
+          pathlib.Path('C58_LOCAL_DELETION_RECEIPT.json').write_text(json.dumps({'schema':'R22574_C58_LOCAL_DELETION_V1','bytes_targeted':int('$BEFORE'),'remaining':remaining,'pass':not remaining},indent=2,sort_keys=True)+'\n')
+          assert not remaining
+          PY
+      - name: Delete remote full source escrow if no deeper replay is justified
+        if: steps.decide.outputs.keep_source != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_ARTIFACT_ID: ${{ steps.source_escrow_upload.outputs.artifact-id }}
+        run: |
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/${SOURCE_ARTIFACT_ID}"
+          python - <<'PY'
+          import json,pathlib
+          pathlib.Path('C58_REMOTE_SOURCE_DISPOSITION.json').write_text(json.dumps({'schema':'R22574_C58_REMOTE_SOURCE_DISPOSITION_V1','deleted':True,'reason':'no fine causal survivor requiring source replay'},indent=2)+'\n')
+          PY
+      - name: Record retained remote source if deeper replay is justified
+        if: steps.decide.outputs.keep_source == 'true'
+        env:
+          SOURCE_ARTIFACT_ID: ${{ steps.source_escrow_upload.outputs.artifact-id }}
+          SOURCE_ARTIFACT_DIGEST: ${{ steps.source_escrow_upload.outputs.artifact-digest }}
+        run: |
+          python - <<'PY'
+          import json,os,pathlib
+          pathlib.Path('C58_REMOTE_SOURCE_DISPOSITION.json').write_text(json.dumps({'schema':'R22574_C58_REMOTE_SOURCE_DISPOSITION_V1','deleted':False,'retained_temporarily':True,'artifact_id':int(os.environ['SOURCE_ARTIFACT_ID']),'artifact_digest':os.environ['SOURCE_ARTIFACT_DIGEST'],'reason':'fine causal survivor requires projection/subspace/fresh replay'},indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Upload post-cleanup raw-free evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-behavior-rawfree-postdelete
+          path: |
+            C58_BEHAVIOR_OUT/C58_BEHAVIOR_CAUSAL_RAWFREE.json
+            C58_SOURCE_PREFLIGHT.json
+            C58_SOURCE_ESCROW_REMOTE_RECEIPT.json
+            C58_DECISION.json
+            C58_LOCAL_DELETION_RECEIPT.json
+            C58_REMOTE_SOURCE_DISPOSITION.json
+            C58_BEHAVIOR_RUNTIME.json
+            C58_PROCEDURAL_RTE_256.jsonl
+          if-no-files-found: error
+          retention-days: 1
