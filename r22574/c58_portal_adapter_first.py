@@ -16,6 +16,7 @@ EXPECTED_BASE='Qwen/Qwen3-1.7B'
 EXPECTED_BASE_REV='70d244cc86ccca08cf5af4e1e306ecf908b1ad5e'
 EXPECTED_TASKS=['truthfulqa','rte','cb','copa','wic','wsc','boolq','arc_easy','arc_challenge','hellaswag','openbookqa','winogrande','commonsense_qa','sciq']
 OUT=Path(os.environ.get('C58_OUT','c58_out'))
+ESCROW=Path(os.environ.get('C58_ESCROW','c58_escrow'))
 OUT.mkdir(parents=True,exist_ok=True)
 
 def sha256_file(p:Path):
@@ -122,6 +123,22 @@ def operator_cosine(summaries):
         out[a]=row
     return out
 
+def escrow_exports(exports:Path, viable:bool):
+    if ESCROW.exists(): shutil.rmtree(ESCROW)
+    manifest={'schema':'R22574_C58_DERIVATIVE_ESCROW_V1','created':False,'files':[],'native_portal_source_included':False,'base_included':False}
+    if not viable:
+        return manifest
+    ESCROW.mkdir(parents=True,exist_ok=True)
+    for task in ('rte','copa'):
+        src=exports/task; dst=ESCROW/task
+        shutil.copytree(src,dst)
+    for p in sorted(x for x in ESCROW.rglob('*') if x.is_file()):
+        manifest['files'].append({'path':p.relative_to(ESCROW).as_posix(),'bytes':p.stat().st_size,'sha256':sha256_file(p)})
+    manifest['created']=True
+    manifest['total_bytes']=sum(x['bytes'] for x in manifest['files'])
+    (ESCROW/'ESCROW_MANIFEST.json').write_text(json.dumps(manifest,indent=2,sort_keys=True)+'\n')
+    return manifest
+
 def main():
     api=HfApi(); info=api.model_info(REPO, revision=TAG, files_metadata=True)
     resolved=info.sha
@@ -163,17 +180,19 @@ def main():
         clean_summaries={task:{k:v for k,v in s.items() if k!='_pairs'} for task,s in summaries.items()}
         rte=clean_summaries['rte']
         viable=(export_deterministic and rte['pair_count']==56 and rte['zero_effective_pairs']==0 and rte['nonfinite_pairs']==0 and rte['effective_rank_min']==8 and rte['effective_rank_max']==8 and not rte['extra_tensor_keys'] and not rte['incomplete_pair_keys'])
+        escrow=escrow_exports(exports,viable)
         report={
-          'schema':'R22574_C58_PORTAL_ADAPTER_FIRST_RAWFREE_V1',
+          'schema':'R22574_C58_PORTAL_ADAPTER_FIRST_RAWFREE_V2',
           'source':{'repo':REPO,'tag':TAG,'resolved_commit':resolved,'native_sha256':EXPECTED_SHA,'base':base_id,'base_revision':base_rev,'tasks':tasks},
           'native':{'tensor_count':len(native),'task_latent_key':latent_key,'task_latent_shape':list(latent.shape),'task_latent_cosine':latcos,'groups':group_summary},
           'exports':clean_summaries,'operator_cosine':opcos,'rte_export_repeat_state_digest':repeat['state_digest'],'export_deterministic':export_deterministic,
           'base_ingress_authorized':viable,
           'verdict':'PASS_ADAPTER_FIRST_VIABLE_AUTHORIZE_BASE' if viable else 'CLOSED_E1_OPERATOR_DEGENERATE_BASE_BYTES_ZERO',
-          'raw_export_contract':{'native_weights_in_artifact':False,'exported_lora_weights_in_artifact':False,'A_B_values_exported':False,'reconstructable_deltaW_exported':False}
+          'derivative_escrow':{k:v for k,v in escrow.items() if k!='files'} | {'file_manifest_digest':hashlib.sha256(json.dumps(escrow.get('files',[]),sort_keys=True,separators=(',',':')).encode()).hexdigest()},
+          'raw_export_contract':{'native_weights_in_rawfree_artifact':False,'exported_lora_weights_in_rawfree_artifact':False,'A_B_values_exported_in_rawfree_artifact':False,'reconstructable_deltaW_exported':False,'temporary_derivative_escrow_separate':bool(escrow.get('created'))}
         }
         (OUT/'C58_PORTAL_ADAPTER_FIRST_RAWFREE.json').write_text(json.dumps(report,indent=2,sort_keys=True)+'\n')
         shutil.rmtree(src,ignore_errors=True); shutil.rmtree(exports,ignore_errors=True)
-        (OUT/'C58_ADAPTER_FIRST_CLEANUP.json').write_text(json.dumps({'source_removed':not src.exists(),'exports_removed':not exports.exists(),'base_downloaded':False},indent=2)+'\n')
+        (OUT/'C58_ADAPTER_FIRST_CLEANUP.json').write_text(json.dumps({'native_source_removed':not src.exists(),'temporary_export_tree_removed':not exports.exists(),'derivative_escrow_created':bool(escrow.get('created')),'base_downloaded':False},indent=2)+'\n')
         print(report['verdict'])
 if __name__=='__main__': main()
