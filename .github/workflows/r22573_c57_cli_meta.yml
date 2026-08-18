@@ -16,7 +16,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$(git hash-object .github/scripts/r22573_c57_runner.py)" = '255d1e96dc71b761533f91066433d3c8432a2682'
+          test "$(git hash-object .github/scripts/r22573_c57_runner.py)" = '2bb3d53f616946401a1e43ea1d43bd8351e28f16'
           PYTHONDONTWRITEBYTECODE=1 python -B -m py_compile .github/scripts/r22573_c57_runner.py
           find . -name '__pycache__' -type d -prune -exec rm -rf {} +
       - name: Source-free preoutput seal and AST verifier mutations
@@ -28,14 +28,15 @@ jobs:
           python - <<'PY'
           import json
           s=json.load(open('rawfree/C57_PREOUTPUT_SEAL.json'))
+          assert s['schema']=='R22573_C57_PREOUTPUT_SEAL_V2'
           assert s['weights_present']==0 and s['model_outputs_observed']==0 and s['training_rows_used']==0
-          assert s['suite_n']==64 and s['paired_n']==32 and s['generation_n']==16
+          assert s['suite_n']==64 and s['paired_n']==12 and s['generation_n']==8
           assert s['suite_sha256']=='b1ead8e4e0993728c96f9b6042583a229b34b0f0e83f4c03e614788390bf1c31'
           assert s['verifier_smoke']['perfect']['semantic']==1.0
           assert s['verifier_smoke']['perfect']['exact']==1.0
           assert s['verifier_smoke']['source_copy']['semantic']<0.2
           assert s['verifier_smoke']['mutation']['exact']==0.0
-          print('PRESEAL_PASS',s['suite_sha256'])
+          print('PRESEAL_V2_PASS',s['suite_sha256'])
           PY
       - name: Install bounded exact runtime before binary
         shell: bash
