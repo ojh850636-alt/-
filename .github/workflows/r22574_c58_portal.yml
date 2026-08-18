@@ -2,6 +2,8 @@ name: R22574 C58 PorTAL adapter-first
 on:
   push:
     branches: [r22574-c58-portal]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
