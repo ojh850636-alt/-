@@ -1,61 +1,13 @@
-name: R22574 C58 exact Base metadata only
+name: R22574 C58 exact Base metadata authority (closed)
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  metadata_only:
+  closed:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Query exact HF LFS metadata only
-        run: |
-          python -m pip install --quiet 'huggingface-hub==1.28.0'
-          python - <<'PY'
-          from huggingface_hub import HfApi
-          import json, pathlib
-          REPO='Qwen/Qwen3-1.7B'
-          REV='70d244cc86ccca08cf5af4e1e306ecf908b1ad5e'
-          api=HfApi()
-          info=api.model_info(REPO,revision=REV,files_metadata=True)
-          assert info.sha==REV,(info.sha,REV)
-          names={
-            'model-00001-of-00002.safetensors',
-            'model-00002-of-00002.safetensors',
-            'model.safetensors.index.json','config.json','generation_config.json',
-            'tokenizer.json','tokenizer_config.json','merges.txt','vocab.json'
-          }
-          rows=[]
-          for s in info.siblings:
-            if s.rfilename not in names: continue
-            lfs=getattr(s,'lfs',None)
-            rows.append({
-              'name':s.rfilename,
-              'size':getattr(s,'size',None),
-              'blob_id':getattr(s,'blob_id',None),
-              'lfs_sha256':getattr(lfs,'sha256',None) if lfs else None,
-              'lfs_size':getattr(lfs,'size',None) if lfs else None,
-            })
-          got={r['name'] for r in rows}
-          assert {'model-00001-of-00002.safetensors','model-00002-of-00002.safetensors','model.safetensors.index.json','config.json','tokenizer.json','tokenizer_config.json'}.issubset(got),got
-          out={
-            'schema':'R22574_C58_BASE_METADATA_ONLY_V1',
-            'repo':REPO,'revision':REV,'resolved_revision':info.sha,
-            'model_outputs_observed':0,'weight_files_downloaded':0,
-            'files':sorted(rows,key=lambda x:x['name'])
-          }
-          pathlib.Path('C58_BASE_METADATA_ONLY.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
-          print(json.dumps(out,indent=2,sort_keys=True))
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: r22574-c58-base-metadata-only
-          path: C58_BASE_METADATA_ONLY.json
-          if-no-files-found: error
-          retention-days: 1
+      - run: |
+          echo 'Exact Base metadata authority is already bound by run 32146915148.'
+          echo 'Use r22574/C58_BASE_METADATA_PREINGRESS_AMENDMENT.json; do not re-query for scientific credit.'
+          exit 1
