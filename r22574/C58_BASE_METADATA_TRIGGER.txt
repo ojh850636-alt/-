@@ -1,0 +1,1 @@
+Source-zero metadata authority trigger after run 32146394800 failed before Base weight ingress/model output due stale shard2 expected size. Scientific candidate, suites, controls and thresholds are unchanged.
