@@ -1,52 +1,55 @@
-name: R22573 C57 135M Temporal Adapter Discovery
+name: R22573 C57 135M Novel Control Metadata Audit
 on:
   pull_request:
     branches: [main]
   workflow_dispatch:
 jobs:
-  discover:
+  meta:
     runs-on: ubuntu-latest
     steps:
-      - name: Query 135M adapter trees without weights
+      - name: Audit EOT and other novel 135M adapters without weights
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p out
           python - <<'PY'
-          import json,urllib.request,urllib.parse,pathlib,hashlib
-          bases=['HuggingFaceTB/SmolLM-135M','HuggingFaceTB/SmolLM2-135M','HuggingFaceTB/SmolLM2-135M-Instruct']
-          terms=['calendar','event','date','schedule','temporal','extraction','json']
+          import json,re,urllib.request,urllib.parse,pathlib,hashlib
+          repos=['Vurtnec/eot-detector-smollm2','latishab/turnsense','Predixus/SmolLM2-135M-qlora-finetune-fault-parse','SoAnVa/lora_poker_model']
           def jget(u):
-            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-135m/1.0'})
+            req=urllib.request.Request(u,headers={'User-Agent':'LAA-R22573-meta3/1.0'})
             with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
-          rec=[];seen=set()
-          for base in bases:
-            urls=[
-              'https://huggingface.co/api/models?filter='+urllib.parse.quote('base_model:adapter:'+base,safe=':/')+'&limit=200&full=true',
-              'https://huggingface.co/api/models?search='+urllib.parse.quote(base.split('/')[-1])+'&limit=200&full=true']
-            for u in urls:
-              try:rows=jget(u)
-              except Exception:continue
-              for m in rows:
-                rid=m.get('id') or m.get('modelId');
-                if not rid or rid in seen:continue
-                seen.add(rid);txt=(rid+' '+str(m.get('tags'))+' '+str(m.get('cardData'))).lower()
-                if not any(t in txt for t in terms):continue
-                try:
-                  d=jget('https://huggingface.co/api/models/'+urllib.parse.quote(rid,safe='/')+'?blobs=true');sha=d.get('sha');card=d.get('cardData') or {};sib=d.get('siblings') or [];names={x.get('rfilename') for x in sib}
-                  if 'adapter_config.json' not in names:continue
-                  req=urllib.request.Request(f'https://huggingface.co/{rid}/resolve/{sha}/adapter_config.json',headers={'User-Agent':'LAA-R22573-135m/1.0'});cfg=json.loads(urllib.request.urlopen(req,timeout=20).read())
-                  saf=[]
-                  for x in sib:
-                    if x.get('rfilename')=='adapter_model.safetensors':
-                      l=x.get('lfs') or {};saf.append({'size':x.get('size') or l.get('size'),'sha256':l.get('sha256')})
-                  rec.append({'repo':rid,'revision':sha,'license':card.get('license') or d.get('license'),'base':cfg.get('base_model_name_or_path'),'r':cfg.get('r'),'targets':cfg.get('target_modules'),'safetensors':saf,'tags':d.get('tags')})
-                except Exception:continue
-          out={'schema':'R22573_C57_135M_DISCOVERY_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':rec};p=pathlib.Path('out/R22573_C57_135M_DISCOVERY.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps(rec,indent=2))
+          def tget(repo,sha,path,limit=120000):
+            req=urllib.request.Request(f'https://huggingface.co/{repo}/resolve/{sha}/{path}',headers={'User-Agent':'LAA-R22573-meta3/1.0'})
+            try:
+              with urllib.request.urlopen(req,timeout=30) as r:return r.read(limit+1).decode('utf-8','replace')[:limit]
+            except Exception:return None
+          recs=[]
+          for repo in repos:
+            try:
+              m=jget('https://huggingface.co/api/models/'+urllib.parse.quote(repo,safe='/')+'?blobs=true');sha=m.get('sha');card=m.get('cardData') or {};sib=m.get('siblings') or [];files=[]
+              for x in sib:
+                l=x.get('lfs') or {};files.append({'name':x.get('rfilename'),'size':x.get('size') or l.get('size'),'lfs_sha256':l.get('sha256')})
+              names={f['name'] for f in files};cfg=None
+              if 'adapter_config.json' in names:
+                s=tget(repo,sha,'adapter_config.json',50000)
+                try:cfg=json.loads(s) if s else None
+                except Exception:cfg={'_parse_error':True,'sha256':hashlib.sha256((s or '').encode()).hexdigest()}
+              readme=tget(repo,sha,'README.md') if 'README.md' in names else None
+              scripts={}
+              for p in ['finetune_livekit_eot.py','compare_eot_models.py','eval_finetuned_livekit.py','train.py','training.py']:
+                if p in names:
+                  s=tget(repo,sha,p,50000);scripts[p]={'sha256':hashlib.sha256((s or '').encode()).hexdigest(),'excerpt':(s or '')[:12000]}
+              lic={}
+              for p in ['LICENSE','LICENSE.txt','LICENSE.md','COPYING']:
+                if p in names:
+                  s=tget(repo,sha,p,30000);lic[p]={'sha256':hashlib.sha256((s or '').encode()).hexdigest(),'text':s}
+              recs.append({'repo':repo,'exact_revision':sha,'card_license':card.get('license') or m.get('license'),'base_model_card':card.get('base_model'),'datasets':card.get('datasets'),'pipeline_tag':m.get('pipeline_tag'),'library_name':m.get('library_name'),'adapter_config':cfg,'files':files,'license_docs':lic,'scripts':scripts,'readme':readme,'safe_weight_files':[f for f in files if (f['name'] or '').endswith('.safetensors')],'pickle_risk_files':[f for f in files if re.search(r'\.(bin|pt|pth|pkl|pickle)$',f['name'] or '',re.I)]})
+            except Exception as e:recs.append({'repo':repo,'error':repr(e)})
+          out={'schema':'R22573_C57_135M_NOVEL_CONTROL_AUDIT_V1','weight_bytes_downloaded':0,'model_outputs_observed':0,'candidates':recs};p=pathlib.Path('out/R22573_C57_135M_NOVEL_CONTROL_AUDIT.json');p.write_text(json.dumps(out,ensure_ascii=False,indent=2));pathlib.Path('out/SHA256SUMS.txt').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  '+p.name+'\n');print(json.dumps([{k:r.get(k) for k in ['repo','exact_revision','card_license','base_model_card']} for r in recs],indent=2))
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22573-c57-135m-discovery
+          name: r22573-c57-135m-control-meta
           path: out/
           retention-days: 1
           if-no-files-found: error
