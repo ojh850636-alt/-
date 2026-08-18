@@ -1,1 +1,1 @@
-R22574 C58 pre-output adapter-first execution trigger. No model output or raw weights are committed.
+R22574 C58 adapter-first execution trigger v2. The first attempt failed before source ingress at setup-python cache discovery. This retry preserves the same scientific preseal; no model output or raw weights were observed in attempt 1.
