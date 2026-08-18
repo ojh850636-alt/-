@@ -1,1 +1,1 @@
-R22574 C58 adapter-first execution trigger v2. The first attempt failed before source ingress at setup-python cache discovery. This retry preserves the same scientific preseal; no model output or raw weights were observed in attempt 1.
+R22574 C58 adapter-first execution trigger v3. Attempts 1-2 both failed before source ingress/model output; the same scientific preseal is retained. Runtime dependency resolution now follows portallib==0.2.0's released dependency contract and records the exact resolved environment.
