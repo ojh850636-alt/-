@@ -1,0 +1,50 @@
+name: r22574-c58-behavior
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22574-c58-preseal
+          path: preseal
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ojh850636-alt/-
+          run-id: '32203853216'
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22574-c58-source-escrow
+          path: source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ojh850636-alt/-
+          run-id: '32204144257'
+      - name: Verify locked source
+        run: |
+          test "$(sha256sum source/base/model.safetensors | cut -d' ' -f1)" = '700b710a9a99c295ed546647aa81cacf9f81f4c573ea2be613a0e2517a44afab'
+          test "$(sha256sum source/adapter/adapter_model.safetensors | cut -d' ' -f1)" = '25e64fc0b48e47238ada87591b1eaa7a6c87e6ff8640b6a9aca88070009ef7b5'
+          test "$(sha256sum preseal/C58_PRESEAL_SUITE.jsonl | cut -d' ' -f1)" = 'a4c9b2475a3fd50115e6d773c847255803cf6f3c2428ac80ff0b7e308bb69159'
+      - name: Install runtime
+        run: python -m pip install --quiet 'transformers==4.57.1' 'peft==0.19.1' 'accelerate==1.14.0' 'safetensors==0.7.0' 'huggingface_hub==0.36.2' sentencepiece protobuf
+      - name: Run locked behavior
+        env:
+          TOKENIZERS_PARALLELISM: 'false'
+          PYTHONUNBUFFERED: '1'
+        run: |
+          mkdir -p evidence private
+          python tools/r22574_c58_behavior.py source preseal contracts/C58_PREOUTPUT_AMENDMENT_V1.json private evidence R22574_C58_RUNTIME_CLOSURE
+      - name: Prepare raw-free evidence
+        run: rm -rf source private
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-behavior-rawfree
+          path: evidence
+          retention-days: 1
+          if-no-files-found: error
