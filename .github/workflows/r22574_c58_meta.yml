@@ -33,19 +33,23 @@ jobs:
             row={'repo':repo}
             try:
               info=api.model_info(repo, files_metadata=True)
+              cd=getattr(info,'card_data',None)
+              if cd is None: card={}
+              elif hasattr(cd,'to_dict'): card=cd.to_dict()
+              else: card={'repr':repr(cd)}
               row.update({
                 'sha':info.sha,'gated':info.gated,'private':info.private,
                 'pipeline_tag':info.pipeline_tag,'library_name':info.library_name,
-                'tags':list(info.tags or []),'cardData':dict(info.card_data or {}),
+                'tags':list(info.tags or []),'cardData':card,
                 'siblings':[]})
               for f in info.siblings or []:
                 lfs=getattr(f,'lfs',None)
                 row['siblings'].append({
                   'name':f.rfilename,'size':getattr(f,'size',None),
                   'blob_id':getattr(f,'blob_id',None),
-                  'lfs':dict(lfs) if lfs else None})
+                  'lfs':dict(lfs) if isinstance(lfs,dict) else (repr(lfs) if lfs else None)})
             except Exception as e:
-              row['error']=repr(e)
+              row['error']=type(e).__name__+': '+str(e)
             out.append(row)
           open('out/C58_CANDIDATE_METADATA.json','w').write(json.dumps(out,ensure_ascii=False,indent=2,default=str))
           print(json.dumps(out,ensure_ascii=False,indent=2,default=str))
