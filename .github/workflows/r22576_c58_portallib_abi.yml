@@ -13,35 +13,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download package wheel only and inspect private scorer signature
+      - name: Download package wheel only and inspect evaluator object contracts
         run: |
           set -euo pipefail
+          rm -rf wheel unpack
           mkdir -p wheel unpack
           python -m pip download --no-deps 'portallib==0.2.0' -d wheel
           python - <<'PY'
-          import glob,zipfile,pathlib,ast,json,re
+          import glob,zipfile,pathlib,ast,json
           whl=glob.glob('wheel/portallib-0.2.0-*.whl')[0]
           with zipfile.ZipFile(whl) as z:z.extractall('unpack')
-          matches=[]
-          for p in pathlib.Path('unpack').rglob('*.py'):
+          wanted_classes={'PortalBase','ChoiceExample','PortalEvaluator'}
+          wanted_funcs={'__init__','evaluate','_score_rows','_evaluate_choice','_load_base'}
+          found=[]
+          imports=[]
+          for p in pathlib.Path('unpack/portallib').rglob('*.py'):
               txt=p.read_text()
-              if '_score_rows' not in txt: continue
               tree=ast.parse(txt)
-              for n in ast.walk(tree):
-                  if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name=='_score_rows':
-                      args=[a.arg for a in n.args.args]
-                      defaults=len(n.args.defaults)
-                      kw=[a.arg for a in n.args.kwonlyargs]
+              for n in tree.body:
+                  if isinstance(n,(ast.Import,ast.ImportFrom)):
                       seg=ast.get_source_segment(txt,n)
-                      matches.append({'path':str(p),'args':args,'kwonly':kw,'defaults':defaults,'source_head':'\n'.join((seg or '').splitlines()[:40])})
-          out={'schema':'R22576_C58_PORTALLIB_ABI_V1','package':'portallib==0.2.0','scientific_credit':0,'model_downloads':0,'matches':matches}
-          pathlib.Path('C58_PORTALLIB_ABI.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+                      if seg and any(x in seg for x in ('PortalBase','ChoiceExample','evaluation','model')):
+                          imports.append({'path':str(p),'source':seg})
+                  if isinstance(n,ast.ClassDef) and n.name in wanted_classes:
+                      cls={'path':str(p),'class':n.name,'source_head':'\n'.join((ast.get_source_segment(txt,n) or '').splitlines()[:180]),'methods':[]}
+                      for m in n.body:
+                          if isinstance(m,(ast.FunctionDef,ast.AsyncFunctionDef)) and m.name in wanted_funcs:
+                              cls['methods'].append({'name':m.name,'args':[a.arg for a in m.args.args],'kwonly':[a.arg for a in m.args.kwonlyargs],'defaults':len(m.args.defaults),'source_head':'\n'.join((ast.get_source_segment(txt,m) or '').splitlines()[:120])})
+                      found.append(cls)
+          out={'schema':'R22576_C58_PORTALLIB_OBJECT_ABI_V2','package':'portallib==0.2.0','scientific_credit':0,'model_downloads':0,'classes':found,'imports':imports}
+          pathlib.Path('C58_PORTALLIB_OBJECT_ABI.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
           print(json.dumps(out,indent=2,sort_keys=True))
-          assert matches
+          names={x['class'] for x in found}
+          assert {'PortalBase','ChoiceExample','PortalEvaluator'} <= names, names
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22576-c58-portallib-abi
-          path: C58_PORTALLIB_ABI.json
+          name: r22576-c58-portallib-object-abi
+          path: C58_PORTALLIB_OBJECT_ABI.json
           retention-days: 1
           if-no-files-found: error
