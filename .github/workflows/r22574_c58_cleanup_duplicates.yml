@@ -1,0 +1,55 @@
+name: r22574-c58-cleanup-duplicate-raw
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: write
+jobs:
+  cleanup-duplicates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete duplicate raw escrows only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in 9348566555 9348593504; do
+            code=$(curl -sS -o /tmp/delete-$id.txt -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$id")
+            echo "$id DELETE_HTTP=$code"
+            test "$code" = '204' -o "$code" = '404'
+          done
+      - name: Verify duplicate raw artifacts absent and authoritative escrows still present
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in 9348566555 9348593504; do
+            code=$(curl -sS -o /tmp/get-$id.json -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$id")
+            echo "$id GET_HTTP=$code"; test "$code" = '404'
+          done
+          for id in 9348492049 9348562181; do
+            code=$(curl -sS -o /tmp/get-$id.json -w '%{http_code}' \
+              -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/$GH_REPO/actions/artifacts/$id")
+            echo "$id AUTHORITATIVE_GET_HTTP=$code"; test "$code" = '200'
+          done
+          cat > DUPLICATE_RAW_CLEANUP_RECEIPT.json <<'JSON'
+          {"schema":"LAA.R22574.C58DuplicateRawCleanup.v1","duplicate_raw_artifact_ids":[9348566555,9348593504],"authoritative_raw_artifact_ids_preserved":[9348492049,9348562181],"scientific_credit_from_duplicates":0,"verdict":"PASS"}
+          JSON
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-duplicate-cleanup-rawfree
+          path: DUPLICATE_RAW_CLEANUP_RECEIPT.json
+          retention-days: 1
