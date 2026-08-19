@@ -2,6 +2,8 @@ name: r22574-c58-metadata-only
 on:
   push:
     branches: [lucia-aa-r22574-c58-meta]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
