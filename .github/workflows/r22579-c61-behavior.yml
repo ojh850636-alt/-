@@ -1,0 +1,107 @@
+name: R22579 C61 Receipt Ledger Behavior and Bounded Causal
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  behavior:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+      actions: read
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+      C61_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r22579-c61-receipt-ledger
+
+      - name: Rebuild exact sealed suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence source/adapter source/base
+          python -B tmp_r22579/c61_suite_builder.py --out evidence/C61_FRESH_SUITE.jsonl
+          test "$(sha256sum evidence/C61_FRESH_SUITE.jsonl | awk '{print $1}')" = "22592968b52e19a1a68249d09c58e553632899ca3301ddd76d1cab5758a529ad"
+          test "$(sha256sum tmp_r22579/C61_PREOUTPUT_SEAL.json | awk '{print $1}')" = "9c72165c47f4200874ac799d38299925a270956a03bfd85ce8967651e70ce20c"
+
+      - name: Install pinned ML runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check --no-cache-dir \
+            torch==2.10.0 transformers==4.57.1 peft==0.19.1 accelerate==1.14.0 \
+            huggingface_hub==0.36.0 safetensors==0.7.0
+          python - <<'PY' > evidence/C61_RUNTIME_PACKAGES.json
+          import json,sys,torch,transformers,peft,accelerate,huggingface_hub,safetensors
+          print(json.dumps({'python':sys.version,'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'accelerate':accelerate.__version__,'huggingface_hub':huggingface_hub.__version__,'safetensors':safetensors.__version__},indent=2,sort_keys=True))
+          PY
+
+      - name: Recover exact one-use Adapter escrow without HF redownload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api repos/${{ github.repository }}/actions/artifacts/9366929855/zip > /tmp/c61-adapter.zip
+          unzip -q /tmp/c61-adapter.zip -d source/adapter
+          test "$(sha256sum source/adapter/adapter_model.safetensors | awk '{print $1}')" = "f2cae681c0e17974108c46422a291d3b1f7ffc26960a99b5b9513b8d0a690820"
+          printf '%s\n' '{"schema":"R22579_C61_ESCROW_REUSE_V1","artifact_id":9366929855,"adapter_hf_redownload_count":0,"expected_adapter_revision":"804fa33114143abac0df50c9ec140ce5ce628318","adapter_sha256":"f2cae681c0e17974108c46422a291d3b1f7ffc26960a99b5b9513b8d0a690820"}' > evidence/C61_ESCROW_REUSE.json
+
+      - name: Reacquire known exact Base object with zero new-source credit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from huggingface_hub import snapshot_download
+          snapshot_download(repo_id='Qwen/Qwen2.5-0.5B-Instruct',revision='7ae557604adf67be50417f59c2c2f167def9a775',local_dir='source/base',allow_patterns=['model.safetensors','config.json','generation_config.json','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt','special_tokens_map.json','chat_template.jinja'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py'])
+          PY
+          test "$(stat -c%s source/base/model.safetensors)" = "988097824"
+          test "$(sha256sum source/base/model.safetensors | awk '{print $1}')" = "fdf756fa7fcbe7404d5c60e26bff1a0c8b8aa1f72ced49e7dd0210fe288fb7fe"
+          printf '%s\n' 'KNOWN_BASE_REACQUISITION_NO_NEW_SOURCE_CREDIT' > evidence/C61_BASE_REACQUISITION_BOUNDARY.txt
+
+      - name: Canonical behavior and bounded causal analysis
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p evidence/run
+          set +e
+          python -B tmp_r22579/c61_behavior.py --base source/base --adapter source/adapter --suite evidence/C61_FRESH_SUITE.jsonl --out evidence/run 2>&1 | tee evidence/C61_BEHAVIOR_RUN.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          printf '{"schema":"R22579_C61_BEHAVIOR_EXIT_V1","exit_code":%s}\n' "$rc" > evidence/C61_BEHAVIOR_EXIT.json
+          exit "$rc"
+
+      - name: Raw-free cleanup and index
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf source /tmp/c61-adapter.zip ~/.cache/huggingface
+          test ! -e source
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          rows=[]
+          for p in sorted(Path('evidence').rglob('*')):
+              if p.is_file():
+                  b=p.read_bytes(); rows.append({'path':p.as_posix(),'size':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          Path('R22579_C61_EVIDENCE_INDEX.json').write_text(json.dumps({'schema':'R22579_C61_EVIDENCE_INDEX_V1','files':rows},indent=2,sort_keys=True))
+          Path('R22579_C61_LOCAL_RAW_DELETION.json').write_text(json.dumps({'schema':'R22579_C61_LOCAL_RAW_DELETION_V1','local_runner_raw_remaining':0,'adapter_hf_redownload_count':0,'base_credit':'KNOWN_BASE_REACQUISITION_NO_NEW_SOURCE_CREDIT','raw_committed_to_git':False,'remote_adapter_escrow_still_present':True},indent=2,sort_keys=True))
+          PY
+
+      - name: Upload raw-free behavior evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22579-c61-rawfree-behavior
+          path: |
+            evidence/**
+            R22579_C61_EVIDENCE_INDEX.json
+            R22579_C61_LOCAL_RAW_DELETION.json
+          retention-days: 1
+          if-no-files-found: error
