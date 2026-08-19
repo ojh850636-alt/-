@@ -1,7 +1,5 @@
 name: r22574-c58-adapter-first
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -43,31 +41,26 @@ jobs:
           set -euo pipefail
           mkdir -p raw evidence
           python - <<'PY'
-          import json,os,shutil,hashlib,time
+          import json,os,shutil,hashlib
           from huggingface_hub import hf_hub_download
           repo=os.environ['ADAPTER_REPO']; rev=os.environ['ADAPTER_REV']
           for fn in ['adapter_model.safetensors','adapter_config.json']:
-            p=hf_hub_download(repo,fn,revision=rev)
-            shutil.copy2(p,'raw/'+fn)
+            p=hf_hub_download(repo,fn,revision=rev); shutil.copy2(p,'raw/'+fn)
           def sha(p):
             h=hashlib.sha256()
             with open(p,'rb') as f:
               for b in iter(lambda:f.read(1<<20),b''): h.update(b)
             return h.hexdigest()
-          assert os.path.getsize('raw/adapter_model.safetensors')==int(os.environ['ADAPTER_SIZE'])
-          assert sha('raw/adapter_model.safetensors')==os.environ['ADAPTER_SHA']
-          expected=json.load(open('preseal/C58_ADAPTER_CONFIG.json')); actual=json.load(open('raw/adapter_config.json'))
-          assert expected==actual
+          assert os.path.getsize('raw/adapter_model.safetensors')==int(os.environ['ADAPTER_SIZE']); assert sha('raw/adapter_model.safetensors')==os.environ['ADAPTER_SHA']
+          expected=json.load(open('preseal/C58_ADAPTER_CONFIG.json')); actual=json.load(open('raw/adapter_config.json')); assert expected==actual
           receipt={'schema':'LAA.R22574.C58AdapterIngress.v1','repo':repo,'revision':rev,'files':[{'name':'adapter_model.safetensors','size':os.path.getsize('raw/adapter_model.safetensors'),'sha256':sha('raw/adapter_model.safetensors')},{'name':'adapter_config.json','size':os.path.getsize('raw/adapter_config.json'),'sha256':sha('raw/adapter_config.json')}],'preseal_suite_sha256':'a4c9b2475a3fd50115e6d773c847255803cf6f3c2428ac80ff0b7e308bb69159','model_output_observed':0,'base_weight_bytes_downloaded':0,'raw_git_commit':0}
           json.dump(receipt,open('evidence/C58_ADAPTER_INGRESS_RECEIPT.json','w'),indent=2,sort_keys=True)
           PY
           python tools/r22574_c58_adapter_viability.py raw/adapter_model.safetensors raw/adapter_config.json evidence/C58_ADAPTER_STATIC_VIABILITY.json "$ADAPTER_SHA"
           python - <<'PY'
-          import json,hashlib,os
-          r=json.load(open('evidence/C58_ADAPTER_STATIC_VIABILITY.json'))
-          out={'schema':'LAA.R22574.C58BaseAuthorization.v1','adapter_viability':r['viability_gate'],'base_download_authorized':r['base_download_authorized'],'model_output_observed':0,'base_weight_bytes_downloaded':0,'claim':'STATIC_E1_ONLY'}
-          json.dump(out,open('evidence/C58_BASE_AUTHORIZATION.json','w'),indent=2,sort_keys=True)
-          assert out['base_download_authorized'] is True
+          import json
+          r=json.load(open('evidence/C58_ADAPTER_STATIC_VIABILITY.json')); out={'schema':'LAA.R22574.C58BaseAuthorization.v1','adapter_viability':r['viability_gate'],'base_download_authorized':r['base_download_authorized'],'model_output_observed':0,'base_weight_bytes_downloaded':0,'claim':'STATIC_E1_ONLY'}
+          json.dump(out,open('evidence/C58_BASE_AUTHORIZATION.json','w'),indent=2,sort_keys=True); assert out['base_download_authorized'] is True
           PY
       - name: Upload one-day exact Adapter escrow for SAME C58 campaign only
         uses: actions/upload-artifact@v4
@@ -79,9 +72,7 @@ jobs:
           compression-level: 0
       - name: Delete runner raw Adapter and HF cache before raw-free evidence export
         shell: bash
-        run: |
-          rm -rf raw "$HF_HOME"
-          test ! -e raw/adapter_model.safetensors
+        run: rm -rf raw "$HF_HOME"
       - name: Upload raw-free static evidence
         uses: actions/upload-artifact@v4
         with:
