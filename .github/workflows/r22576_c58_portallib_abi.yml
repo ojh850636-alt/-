@@ -1,0 +1,47 @@
+name: R22576 C58 PorTAL evaluator ABI source-zero
+on:
+  push:
+    branches: [r22574-c58-behavior]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download package wheel only and inspect private scorer signature
+        run: |
+          set -euo pipefail
+          mkdir -p wheel unpack
+          python -m pip download --no-deps 'portallib==0.2.0' -d wheel
+          python - <<'PY'
+          import glob,zipfile,pathlib,ast,json,re
+          whl=glob.glob('wheel/portallib-0.2.0-*.whl')[0]
+          with zipfile.ZipFile(whl) as z:z.extractall('unpack')
+          matches=[]
+          for p in pathlib.Path('unpack').rglob('*.py'):
+              txt=p.read_text()
+              if '_score_rows' not in txt: continue
+              tree=ast.parse(txt)
+              for n in ast.walk(tree):
+                  if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name=='_score_rows':
+                      args=[a.arg for a in n.args.args]
+                      defaults=len(n.args.defaults)
+                      kw=[a.arg for a in n.args.kwonlyargs]
+                      seg=ast.get_source_segment(txt,n)
+                      matches.append({'path':str(p),'args':args,'kwonly':kw,'defaults':defaults,'source_head':'\n'.join((seg or '').splitlines()[:40])})
+          out={'schema':'R22576_C58_PORTALLIB_ABI_V1','package':'portallib==0.2.0','scientific_credit':0,'model_downloads':0,'matches':matches}
+          pathlib.Path('C58_PORTALLIB_ABI.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          assert matches
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portallib-abi
+          path: C58_PORTALLIB_ABI.json
+          retention-days: 1
+          if-no-files-found: error
