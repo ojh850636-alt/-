@@ -1,13 +1,158 @@
-name: R22574 C58 behavior causal (transport repair gate)
+name: R22574 C58 PorTAL canonical behavior causal recovery
 on:
+  push:
+    branches: [r22574-c58-behavior]
   workflow_dispatch:
 permissions:
   contents: read
+  actions: write
 jobs:
-  guarded:
+  behavior_causal:
     runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      HF_HOME: /tmp/r22574-c58-hf
+      TOKENIZERS_PARALLELISM: "false"
+      PYTHONUNBUFFERED: "1"
+      DERIVATIVE_RUN_ID: "32143923154"
+      DERIVATIVE_ARTIFACT_ID: "9327063037"
+      EXPECTED_PROCEDURAL_SHA: "299480cbdd677a481f0ec545cd60bffe9e25e193829b0e8da063a8ffe2e6459f"
     steps:
-      - run: |
-          echo 'Behavior retry is gated while the exact runtime transport is rebuilt from verified chunks.'
-          echo 'No Base bytes/model output were consumed by run 32147568921.'
-          exit 1
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install released PorTAL/runtime dependency contract
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'portallib[training]==0.2.0' 'safetensors>=0.4' 'datasets<5'
+          python - <<'PY'
+          import importlib.metadata as m, json, pathlib
+          names=['portallib','torch','transformers','peft','huggingface-hub','safetensors','numpy','accelerate','tokenizers','datasets']
+          out={}
+          for n in names:
+              try: out[n]=m.version(n)
+              except Exception: out[n]='NOT_INSTALLED'
+          pathlib.Path('C58_RUNTIME_FREEZE.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,sort_keys=True))
+          PY
+
+      - name: Recover exact one-use derivative RTE/COPA escrow without native PorTAL redownload
+        uses: actions/download-artifact@v4
+        with:
+          name: r22574-c58-rte-copa-derivative-escrow
+          path: derivative
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ojh850636-alt/-
+          run-id: '32143923154'
+
+      - name: Verify derivative escrow and reproduce unchanged presealed procedural suite
+        run: |
+          python - <<'PY'
+          import json,hashlib,pathlib
+          root=pathlib.Path('derivative')
+          man=json.loads((root/'ESCROW_MANIFEST.json').read_text())
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+              return h.hexdigest()
+          for x in man['files']:
+              p=root/x['path']
+              assert p.is_file() and p.stat().st_size==x['bytes'] and sha(p)==x['sha256'],x
+          assert sha(root/'rte/adapter_model.safetensors')=='b8a49f7ac09348b421f4be2a5ac044dd4290e1ec0fd434ec6bc00d1412147d47'
+          assert sha(root/'copa/adapter_model.safetensors')=='6938c784de4d533df16d59e39fcf9f051de71a593d92327aaf04415dd58c68b0'
+          print('DERIVATIVE_ESCROW_PASS')
+          PY
+          python -B r22574/build_c58_procedural_rte.py --out C58_PROCEDURAL_RTE_256.jsonl
+          test "$(sha256sum C58_PROCEDURAL_RTE_256.jsonl | cut -d' ' -f1)" = "$EXPECTED_PROCEDURAL_SHA"
+
+      - name: Exact Base metadata ABI then one-use weight ingress and recovery escrow construction
+        run: |
+          mkdir -p evidence base meta source_escrow
+          python -B r22574/runtime_source/c58_prepare_source.py \
+            --adapter-escrow derivative \
+            --base-dir base \
+            --meta-dir meta \
+            --natural-out C58_NATURAL_RTE_PRIVATE.json \
+            --source-escrow source_escrow \
+            --receipt evidence/C58_SOURCE_PREFLIGHT.json \
+            --chunk-bytes 450000000
+          python - <<'PY'
+          import json
+          r=json.load(open('evidence/C58_SOURCE_PREFLIGHT.json'))
+          assert r['base_metadata']['resolved_revision']=='70d244cc86ccca08cf5af4e1e306ecf908b1ad5e'
+          assert r['model_outputs_observed']==0 and not r['pickle_loaded'] and not r['trust_remote_code']
+          assert r['preweight_abi']['target_paths_all_linear'] is True
+          print('SOURCE_PREFLIGHT_PASS',r['natural_locked']['rows'])
+          PY
+
+      - name: Upload exact source recovery escrow before first model load
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-source-escrow
+          path: source_escrow
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload raw-free premodel receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-premodel-rawfree
+          path: |
+            evidence/C58_SOURCE_PREFLIGHT.json
+            C58_RUNTIME_FREEZE.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Run unchanged canonical behavior controls and precommitted causal lane
+        run: |
+          mkdir -p evidence/behavior
+          python -B r22574/runtime_source/c58_behavior_causal.py \
+            --base-dir base \
+            --adapter-escrow derivative \
+            --procedural C58_PROCEDURAL_RTE_256.jsonl \
+            --natural-json C58_NATURAL_RTE_PRIVATE.json \
+            --out evidence/behavior \
+            --batch 16
+          python - <<'PY'
+          import json
+          p='evidence/behavior/C58_BEHAVIOR_CAUSAL_RAWFREE.json'
+          r=json.load(open(p))
+          assert r['raw_contract']=={'raw_logits':False,'raw_activations':False,'hidden_states':False,'natural_text':False,'adapter_AB_values':False,'deltaW':False}
+          print(json.dumps({'reproduction':r['behavior']['reproduction_green'],'failure':r['behavior']['failure_reproduction_green'],'safety':r['behavior']['safety_green'],'causal':r['causal']['status']},sort_keys=True))
+          PY
+
+      - name: Upload authoritative raw-free C58 behavior causal evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-behavior-causal-rawfree
+          path: |
+            evidence/**/*.json
+            C58_RUNTIME_FREEZE.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Destructive cleanup only after raw-free evidence exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf base meta derivative source_escrow C58_NATURAL_RTE_PRIVATE.json "$HF_HOME"
+          ids=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts" --jq '.artifacts[] | select(.name=="r22576-c58-portal-source-escrow") | .id')
+          for id in $ids; do gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id"; done
+          code=$(gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$DERIVATIVE_ARTIFACT_ID" >/dev/null 2>&1; echo $?)
+          cat > C58_REMOTE_RAW_CLEANUP.json <<JSON
+          {"schema":"R22576_C58_PORTAL_REMOTE_RAW_CLEANUP_V1","current_run_source_escrow_deleted":true,"derivative_artifact_id":$DERIVATIVE_ARTIFACT_ID,"derivative_delete_command_exit":$code,"local_raw_deleted":true,"native_portal_redownload":0,"verdict":"PASS"}
+          JSON
+
+      - name: Upload raw cleanup receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-cleanup-rawfree
+          path: C58_REMOTE_RAW_CLEANUP.json
+          retention-days: 1
+          if-no-files-found: error
