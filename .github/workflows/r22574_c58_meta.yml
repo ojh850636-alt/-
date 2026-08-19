@@ -1,0 +1,56 @@
+name: r22574-c58-metadata-only
+on:
+  push:
+    branches: [lucia-aa-r22574-c58-meta]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install metadata client
+        run: python -m pip install --quiet 'huggingface_hub>=0.36,<2'
+      - name: Audit candidates without downloading model bytes
+        shell: bash
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import json
+          from huggingface_hub import HfApi
+          api=HfApi()
+          repos=[
+            'kth8/gemma-3-270m-it-Cron-Converter',
+            'AXONVERTEX-AI-RESEARCH/IndicRxNorm-Gemma3-270M-LoRA',
+            'KwabsHug/qwen3-0.6b-schema-gym-lora',
+            'Elib27/qwen2.5-0.5b-commit-msg-lora',
+          ]
+          out=[]
+          for repo in repos:
+            row={'repo':repo}
+            try:
+              info=api.model_info(repo, files_metadata=True)
+              row.update({
+                'sha':info.sha,'gated':info.gated,'private':info.private,
+                'pipeline_tag':info.pipeline_tag,'library_name':info.library_name,
+                'tags':list(info.tags or []),'cardData':dict(info.card_data or {}),
+                'siblings':[]})
+              for f in info.siblings or []:
+                lfs=getattr(f,'lfs',None)
+                row['siblings'].append({
+                  'name':f.rfilename,'size':getattr(f,'size',None),
+                  'blob_id':getattr(f,'blob_id',None),
+                  'lfs':dict(lfs) if lfs else None})
+            except Exception as e:
+              row['error']=repr(e)
+            out.append(row)
+          open('out/C58_CANDIDATE_METADATA.json','w').write(json.dumps(out,ensure_ascii=False,indent=2,default=str))
+          print(json.dumps(out,ensure_ascii=False,indent=2,default=str))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22574-c58-metadata-only
+          path: out
+          retention-days: 1
+          if-no-files-found: error
