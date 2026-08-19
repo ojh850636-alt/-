@@ -1,0 +1,178 @@
+name: R22580 C62 Task Planner One-Use Archaeology
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  preingress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r22580-c62-task-planner
+      - name: Restore source-zero bundle
+        shell: bash
+        run: |
+          cat tmp_r22580/c62_bundle.b64.part* | base64 -d > /tmp/c62_bundle.zip
+          unzip -q /tmp/c62_bundle.zip -d tmp_r22580
+          test -f tmp_r22580/root/scripts/r22580_c62/c62_task_planner_runner.py
+      - name: Install verifier and Adapter-ingress dependencies
+        run: python -m pip install --disable-pip-version-check --no-cache-dir huggingface_hub==0.36.0 safetensors==0.7.0 numpy==2.3.5 requests==2.32.5
+      - name: Verifier first, immutable Adapter one-use ingress, Base coherence gate
+        shell: bash
+        run: |
+          set +e
+          mkdir -p evidence/ingress source/adapter
+          python -B tmp_r22580/root/scripts/r22580_c62/c62_task_planner_runner.py preingress \
+            --root tmp_r22580/root --out evidence/ingress --escrow source/adapter
+          rc=$?
+          echo "$rc" > evidence/ingress/PREINGRESS_EXIT_CODE.txt
+          exit $rc
+      - name: Upload raw-free preingress evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22580-c62-rawfree-preingress
+          path: evidence/ingress/**
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload exact short-lived Adapter escrow only after all preingress gates pass
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22580-c62-adapter-escrow
+          path: source/adapter/**
+          retention-days: 1
+          if-no-files-found: error
+      - name: Remove local raw source
+        if: always()
+        run: rm -rf source ~/.cache/huggingface
+
+  behavior:
+    needs: preingress
+    if: ${{ needs.preingress.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: r22580-c62-task-planner
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22580-c62-rawfree-preingress
+          path: prior
+      - uses: actions/download-artifact@v4
+        with:
+          name: r22580-c62-adapter-escrow
+          path: source/adapter
+      - name: Restore source-zero bundle
+        shell: bash
+        run: |
+          cat tmp_r22580/c62_bundle.b64.part* | base64 -d > /tmp/c62_bundle.zip
+          unzip -q /tmp/c62_bundle.zip -d tmp_r22580
+          test -f tmp_r22580/root/scripts/r22580_c62/c62_task_planner_runner.py
+      - name: Install ML runtime only after verifier, coherence, and viability PASS
+        run: python -m pip install --disable-pip-version-check --no-cache-dir torch==2.10.0 transformers==4.57.1 peft==0.18.1 safetensors==0.7.0 huggingface_hub==0.36.0 accelerate==1.14.0 tokenizers==0.22.1 numpy==2.3.5 requests==2.32.5
+      - name: Resolve and acquire coherent Base only now
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source/base evidence/behavior
+          python - <<'PY'
+          import hashlib,json,requests
+          from pathlib import Path
+          from huggingface_hub import snapshot_download
+          ingress=json.loads(Path('prior/C62_ADAPTER_ONLY_INGRESS.json').read_text())
+          assert ingress['base_identity_coherent'] is True
+          repo=ingress['adapter_config_base_model']
+          meta=requests.get(f'https://huggingface.co/api/models/{repo}',timeout=30); meta.raise_for_status(); meta=meta.json()
+          rev=meta['sha']
+          snapshot_download(repo_id=repo,revision=rev,local_dir='source/base',allow_patterns=['model.safetensors','model-*.safetensors','model.safetensors.index.json','config.json','generation_config.json','tokenizer.json','tokenizer_config.json','vocab.json','merges.txt','special_tokens_map.json'],ignore_patterns=['*.bin','*.pt','*.pth','*.pkl','*.pickle','*.h5','*.msgpack','*.py'])
+          models=sorted(Path('source/base').glob('*.safetensors'))
+          if not models: raise RuntimeError('no safe model file')
+          files=[]
+          for p in models:
+              b=p.read_bytes(); files.append({'name':p.name,'size':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          known_sha='f47f71177f32bcd101b7573ec9171e6a57f4f4d31148d38e382306f42996874b'
+          content_reused=(len(files)==1 and files[0]['sha256']==known_sha)
+          receipt={'schema':'R22580_C62_BASE_INGRESS_V1','repo':repo,'resolved_revision':rev,'files':files,'training_time_exact_revision_proven':False,'known_c22_qwen3_sha':known_sha,'content_reused_from_c22':content_reused,'source_credit':'KNOWN_BASE_CONTENT_REUSE_NO_NEW_SOURCE_CREDIT' if content_reused else 'NEW_BASE_CONTENT_OBJECT_SUPPORT_ONLY'}
+          Path('evidence/behavior/C62_BASE_INGRESS.json').write_text(json.dumps(receipt,indent=2,sort_keys=True))
+          PY
+      - name: Canonical behavior, controls, and bounded causal only if presealed positive gate opens
+        shell: bash
+        run: |
+          set +e
+          python -B tmp_r22580/root/scripts/r22580_c62/c62_task_planner_runner.py behavior \
+            --root tmp_r22580/root --out evidence/behavior --adapter source/adapter --base source/base --tmp source/variants
+          rc=$?
+          echo "$rc" > evidence/behavior/BEHAVIOR_EXIT_CODE.txt
+          exit $rc
+      - name: Raw-free local cleanup and index
+        if: always()
+        shell: bash
+        run: |
+          rm -rf source ~/.cache/huggingface
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          rows=[]
+          for p in sorted(Path('evidence').rglob('*')):
+              if p.is_file():
+                  b=p.read_bytes(); rows.append({'path':p.as_posix(),'size':len(b),'sha256':hashlib.sha256(b).hexdigest()})
+          Path('R22580_C62_EVIDENCE_INDEX.json').write_text(json.dumps({'schema':'R22580_C62_EVIDENCE_INDEX_V1','files':rows},indent=2,sort_keys=True))
+          Path('R22580_C62_LOCAL_RAW_DELETE.json').write_text(json.dumps({'local_raw_remaining':0,'adapter_hf_redownload':0,'raw_committed_to_git':False},indent=2,sort_keys=True))
+          PY
+      - name: Upload raw-free behavior evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22580-c62-rawfree-behavior
+          path: |
+            evidence/**
+            R22580_C62_EVIDENCE_INDEX.json
+            R22580_C62_LOCAL_RAW_DELETE.json
+          retention-days: 1
+          if-no-files-found: error
+
+  cleanup:
+    needs: [preingress, behavior]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Delete exact current-run Adapter escrow and prove absence
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_NAME: r22580-c62-adapter-escrow
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p cleanup
+          arts="$(gh api repos/${{ github.repository }}/actions/runs/${EXPECTED_RUN_ID}/artifacts)"
+          ART_ID="$(printf '%s' "$arts" | python -c 'import json,os,sys; a=json.load(sys.stdin)["artifacts"]; xs=[x for x in a if x["name"]==os.environ["EXPECTED_NAME"]]; print(xs[0]["id"] if len(xs)==1 else "")')"
+          if [ -z "$ART_ID" ]; then
+            printf '%s\n' '{"schema":"R22580_C62_EXACT_ESCROW_DELETE_V1","artifact_id":null,"reason":"no unique current-run escrow; preingress likely stopped before escrow publication"}' > cleanup/R22580_C62_EXACT_ESCROW_DELETE.json
+            exit 0
+          fi
+          meta="$(gh api repos/${{ github.repository }}/actions/artifacts/$ART_ID)"
+          name="$(printf '%s' "$meta" | python -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+          run_id="$(printf '%s' "$meta" | python -c 'import json,sys; print(json.load(sys.stdin)["workflow_run"]["id"])')"
+          head_sha="$(printf '%s' "$meta" | python -c 'import json,sys; print(json.load(sys.stdin)["workflow_run"]["head_sha"])')"
+          test "$name" = "$EXPECTED_NAME"; test "$run_id" = "$EXPECTED_RUN_ID"; test "$head_sha" = "$EXPECTED_HEAD_SHA"
+          code="$(curl -sS -o /tmp/del.out -w '%{http_code}' -X DELETE -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ART_ID")"
+          lookup="$(curl -sS -o /tmp/lookup.out -w '%{http_code}' -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ART_ID")"
+          after="$(gh api repos/${{ github.repository }}/actions/runs/${EXPECTED_RUN_ID}/artifacts --jq --arg n "$EXPECTED_NAME" '[.artifacts[] | select(.name==$n)] | length')"
+          printf '{"schema":"R22580_C62_EXACT_ESCROW_DELETE_V1","artifact_id":%s,"expected_name":"%s","expected_run_id":%s,"expected_head_sha":"%s","identity_predelete_verified":true,"delete_http":%s,"lookup_after_delete_http":%s,"current_run_name_count_after":%s}\n' "$ART_ID" "$EXPECTED_NAME" "$EXPECTED_RUN_ID" "$EXPECTED_HEAD_SHA" "$code" "$lookup" "$after" > cleanup/R22580_C62_EXACT_ESCROW_DELETE.json
+          test "$code" = 204; test "$lookup" = 404; test "$after" = 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22580-c62-rawfree-cleanup
+          path: cleanup/**
+          retention-days: 1
+          if-no-files-found: error
