@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from portallib import ChoiceExample
 from portallib.evaluation import PortalEvaluator
 
 SEED=42
@@ -102,13 +103,25 @@ def score_condition(model,tok,rows,batch=16):
     return out
 
 
+class _PortalParityBase:
+    """Minimal source-compatible wrapper for portallib 0.2.0 private scorer parity only."""
+    def __init__(self,model,tok):
+        self.model=model
+        self.tokenizer=tok
+    @property
+    def device(self):
+        return next(self.model.parameters()).device
+
+
 def parity_smoke(model,tok,natural):
-    ev=PortalEvaluator(); sample=natural[:4]
-    portal=[{"task":"rte","prompt":r['prompt'],"choices":r['choices'],"gold_idx":r['gold_idx']} for r in sample]
-    ref=ev._score_rows(portal,model,tok,torch.device('cpu'),batch_size=2,metric_name='acc_norm',row_indexes=list(range(len(portal))))
+    sample=natural[:4]
+    rows=[ChoiceExample.from_dict({"task":"rte","prompt":r['prompt'],"choices":r['choices'],"gold_idx":r['gold_idx']}) for r in sample]
+    ev=PortalEvaluator(max_prompt=768,batch_size=2)
+    scores,_gold_nll,_gold_tokens=ev._score_rows(_PortalParityBase(model,tok),rows)
+    portal_acc=sum(max(range(len(s)),key=s.__getitem__)==row.gold_idx for row,s in zip(rows,scores,strict=True))/len(rows)
     ours=score_condition(model,tok,sample,batch=2)
     acc=sum(x['correct'] for x in ours)/len(ours)
-    return {"portal_acc":float(ref.value),"ours_acc":acc,"abs_diff":abs(float(ref.value)-acc),"pass":abs(float(ref.value)-acc)<1e-12}
+    return {"portal_acc":float(portal_acc),"ours_acc":acc,"abs_diff":abs(float(portal_acc)-acc),"pass":abs(float(portal_acc)-acc)<1e-12,"abi":"portallib==0.2.0:_score_rows(base,rows)"}
 
 
 def metric(rows):
