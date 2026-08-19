@@ -1,23 +1,23 @@
-name: r22574-c58-cleanup-duplicate-raw
+name: R22576 C58 orphan RxNorm terminal raw cleanup
 on:
-  pull_request:
-    branches: [main]
+  push:
+    branches: [lucia-aa-r22574-c58-source]
   workflow_dispatch:
 permissions:
   contents: read
   actions: write
 jobs:
-  cleanup-duplicates:
+  cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete duplicate raw escrows only
+      - name: Delete all known RxNorm C58 raw escrows and verify raw-free evidence remains
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        shell: bash
         run: |
           set -euo pipefail
-          for id in 9348566555 9348593504; do
+          RAW_IDS='9348492049 9348562181 9348566555 9348593504'
+          for id in $RAW_IDS; do
             code=$(curl -sS -o /tmp/delete-$id.txt -w '%{http_code}' -X DELETE \
               -H "Authorization: Bearer $GH_TOKEN" \
               -H 'Accept: application/vnd.github+json' \
@@ -26,30 +26,35 @@ jobs:
             echo "$id DELETE_HTTP=$code"
             test "$code" = '204' -o "$code" = '404'
           done
-      - name: Verify duplicate raw artifacts absent and authoritative escrows still present
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          for id in 9348566555 9348593504; do
+          for id in $RAW_IDS; do
             code=$(curl -sS -o /tmp/get-$id.json -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
               "https://api.github.com/repos/$GH_REPO/actions/artifacts/$id")
-            echo "$id GET_HTTP=$code"; test "$code" = '404'
+            echo "$id GET_HTTP=$code"
+            test "$code" = '404'
           done
-          for id in 9348492049 9348562181; do
+          # These two are raw-free static/source receipts and must remain available.
+          for id in 9348492428 9348565742; do
             code=$(curl -sS -o /tmp/get-$id.json -w '%{http_code}' \
               -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' \
               "https://api.github.com/repos/$GH_REPO/actions/artifacts/$id")
-            echo "$id AUTHORITATIVE_GET_HTTP=$code"; test "$code" = '200'
+            echo "$id RAWFREE_GET_HTTP=$code"
+            test "$code" = '200'
           done
-          cat > DUPLICATE_RAW_CLEANUP_RECEIPT.json <<'JSON'
-          {"schema":"LAA.R22574.C58DuplicateRawCleanup.v1","duplicate_raw_artifact_ids":[9348566555,9348593504],"authoritative_raw_artifact_ids_preserved":[9348492049,9348562181],"scientific_credit_from_duplicates":0,"verdict":"PASS"}
+          cat > C58_RXNORM_ORPHAN_RAW_CLEANUP.json <<'JSON'
+          {
+            "schema":"R22576_C58_RXNORM_ORPHAN_RAW_CLEANUP_V1",
+            "fork_status":"ORPHAN_FORK_SOURCE_CONSUMED_NO_PRIMARY_C58_CREDIT",
+            "raw_artifact_ids_deleted":[9348492049,9348562181,9348566555,9348593504],
+            "rawfree_artifact_ids_preserved":[9348492428,9348565742],
+            "behavior_reexecution":0,
+            "scientific_credit":0,
+            "verdict":"PASS"
+          }
           JSON
       - uses: actions/upload-artifact@v4
         with:
-          name: r22574-c58-duplicate-cleanup-rawfree
-          path: DUPLICATE_RAW_CLEANUP_RECEIPT.json
+          name: r22576-c58-rxnorm-orphan-cleanup-rawfree
+          path: C58_RXNORM_ORPHAN_RAW_CLEANUP.json
           retention-days: 1
+          if-no-files-found: error
