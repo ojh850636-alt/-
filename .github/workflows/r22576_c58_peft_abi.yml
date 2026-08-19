@@ -1,0 +1,46 @@
+name: R22576 C58 PEFT adapter-state ABI source-zero
+on:
+  push:
+    branches: [r22574-c58-behavior]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  abi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Inspect exact peft wheel without model source
+        run: |
+          set -euo pipefail
+          mkdir -p wheel unpack
+          python -m pip download --no-deps 'peft==0.20.0' -d wheel
+          python - <<'PY'
+          import glob,zipfile,pathlib,ast,json
+          whl=glob.glob('wheel/peft-0.20.0-*.whl')[0]
+          with zipfile.ZipFile(whl) as z:z.extractall('unpack')
+          wanted={'add_adapter','set_adapter','delete_adapter','disable_adapter_layers','enable_adapter_layers','get_adapter_state_dict','load_adapter_state_dict','load_adapter'}
+          hits={k:[] for k in wanted}
+          for p in pathlib.Path('unpack/peft').rglob('*.py'):
+            txt=p.read_text(errors='replace')
+            if not any(k in txt for k in wanted): continue
+            try: tree=ast.parse(txt)
+            except: continue
+            for n in ast.walk(tree):
+              if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef)) and n.name in wanted:
+                hits[n.name].append({'path':str(p),'args':[a.arg for a in n.args.args],'kwonly':[a.arg for a in n.args.kwonlyargs],'defaults':len(n.args.defaults),'source_head':'\n'.join((ast.get_source_segment(txt,n) or '').splitlines()[:50])})
+          out={'schema':'R22576_C58_PEFT_ABI_V1','package':'peft==0.20.0','model_downloads':0,'scientific_credit':0,'methods':hits}
+          pathlib.Path('C58_PEFT_ABI.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({k:len(v) for k,v in hits.items()},sort_keys=True))
+          for must in ['add_adapter','set_adapter','delete_adapter','load_adapter']:
+            assert hits[must],must
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-peft-abi
+          path: C58_PEFT_ABI.json
+          retention-days: 1
+          if-no-files-found: error
