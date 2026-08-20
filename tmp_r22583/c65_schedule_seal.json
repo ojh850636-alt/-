@@ -1,0 +1,29 @@
+{
+  "case_count": 24,
+  "cases_sha256": "c54fd56f94e05528b26406117e3d5ac9977c40be043f2112abc2b5ee30758ae2",
+  "causal_groups": ["Q_PROJ", "V_PROJ", "MLP_ALL", "EARLY", "MIDDLE", "LATE"],
+  "conditions": ["BASE", "FULL", "RANDOM_RANK_MATCHED", "LAYER_SHUFFLED", "DOSE_0_5", "DOSE_1_5"],
+  "counterfactual_pair_count": 12,
+  "deferral_case_count": 5,
+  "failure_gate_rule": "failure if any degradation threshold is met; positive and failure are independently reported",
+  "failure_thresholds": {
+    "full_minus_base_deferral_exact_max_for_degradation": -0.25,
+    "full_minus_base_exact_max_for_degradation": -0.15,
+    "full_minus_base_valid_max_for_degradation": -0.15
+  },
+  "fingerprint": "DAILY_SCHEDULE_CONSTRAINT_SATISFACTION_MINIMAL_DEFERRAL",
+  "gate_rule": "causal only if every threshold passes; exact six-condition output identity is terminal null",
+  "raw_prompts_exported": false,
+  "schema": "R22583_C65_PREOUTPUT_SEAL_V1",
+  "selected_repo": "sumitsrv/qwen3-0.6b-task-planner",
+  "source_reported_metrics_credit": 0,
+  "thresholds": {
+    "full_deferral_precision_min": 0.7,
+    "full_exact_optimal_min": 0.55,
+    "full_minus_base_exact_min": 0.15,
+    "full_minus_random_exact_min": 0.15,
+    "full_minus_shuffle_exact_min": 0.15,
+    "full_pair_exact_min": 0.45,
+    "full_valid_min": 0.8
+  }
+}
