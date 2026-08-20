@@ -14,7 +14,8 @@ jobs:
         with:
           ref: r22583-c65-schedule
       - name: Compile sealed courier before network
-        run: python -m py_compile tmp_r22583/c65_schedule_generator.py tmp_r22583/c65_schedule_runner.py
+        run: |
+          python -m py_compile tmp_r22583/c65_schedule_generator.py tmp_r22583/c65_schedule_runner.py tmp_r22583/c65_schedule_capture_wrapper.py
       - name: Install metadata capture dependencies
         run: python -m pip install --disable-pip-version-check --no-cache-dir huggingface_hub==0.36.0 requests==2.32.5
       - name: Metadata, Base coherence, exact Adapter one-use capture
@@ -22,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence/capture source/adapter
-          python -B tmp_r22583/c65_schedule_runner.py capture --out evidence/capture --escrow source/adapter --seal tmp_r22583/c65_schedule_seal.json
+          python -B tmp_r22583/c65_schedule_capture_wrapper.py capture --out evidence/capture --escrow source/adapter --seal tmp_r22583/c65_schedule_seal.json
       - name: Upload raw-free capture evidence
         uses: actions/upload-artifact@v4
         with:
