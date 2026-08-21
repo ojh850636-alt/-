@@ -1,0 +1,61 @@
+name: R22588 C69 Nix version-family one-shot
+on:
+  pull_request:
+    types: [opened]
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  archaeology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify readable runner and dependency before source
+        run: |
+          set -euo pipefail
+          test "$(sha256sum .github/r22588/c69_nix_family_runner.py | awk '{print $1}')" = "23f2238ee269c6a82a2772965b49901303fb6bc283c758a0e9186c4bbbf71c06"
+          python -m py_compile .github/r22588/c69_nix_family_runner.py
+          python -m pip install --disable-pip-version-check 'numpy==2.3.5'
+          python - <<'PY'
+          import numpy as np
+          a=np.array([[1.,2.],[3.,4.]])
+          assert np.linalg.matrix_rank(a)==2 and np.isfinite(a).all()
+          print('PRE_SOURCE_DEPENDENCY_PASS')
+          PY
+      - name: One-use family archaeology
+        run: |
+          set -euo pipefail
+          python .github/r22588/c69_nix_family_runner.py
+      - name: Upload raw-free evidence
+        if: always()
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22588-c69-nix-version-family-rawfree
+          path: work/out/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Publish observable raw-free receipt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          ARTIFACT_ID: ${{ steps.upload.outputs.artifact-id }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          python - <<'PY'
+          import json,os,pathlib,urllib.request
+          p=pathlib.Path('work/out/PR_COMMENT_FALLBACK.txt')
+          fallback=p.read_text().strip() if p.exists() else 'MISSING'
+          body={'body':f"R22588_C69_RUN_ID={os.environ['RUN_ID']} ARTIFACT_ID={os.environ.get('ARTIFACT_ID','')} RAWFREE_SUMMARY_GZIP_B64={fallback}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/{os.environ['PR_NUMBER']}/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          try: print(urllib.request.urlopen(req,timeout=30).read().decode())
+          except Exception as e: print('comment failed',e)
+          PY
