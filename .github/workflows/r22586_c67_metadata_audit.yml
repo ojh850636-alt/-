@@ -1,0 +1,113 @@
+name: R22586 C67 metadata audit
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Metadata-only candidate audit and verifier reachability
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python -m pip install --disable-pip-version-check z3-solver
+          python - <<'PY'
+          import urllib.request,json,pathlib,re,hashlib,subprocess,sys,importlib.metadata
+          CANDS=[
+            ('C67-A','smjain/z3-api-reasoning-ppo','SMT_CONSTRAINT_TO_EXECUTABLE_Z3_API_SEMANTIC_CORRECTNESS'),
+            ('C67-B','orca99/auto-mininet-qwen','NL_NETWORK_TO_EXECUTABLE_MININET_TOPOLOGY_SEMANTICS'),
+            ('C67-C','Tejas86/iac-coder-1.5b','NL_INFRA_REQUIREMENT_TO_TERRAFORM_HCL_STATIC_AND_PLAN_SEMANTICS'),
+          ]
+          def get(url,limit=4_000_000):
+            req=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22586-metadata-audit'})
+            with urllib.request.urlopen(req,timeout=60) as r:
+              b=r.read(limit+1)
+              if len(b)>limit: raise RuntimeError('response too large '+url)
+              return b,dict(r.headers)
+          def text(url):
+            try: return get(url)[0].decode('utf-8','replace')
+            except Exception as e: return None
+          rows=[]
+          for slot,repo,q in CANDS:
+            api_b,_=get('https://huggingface.co/api/models/'+repo)
+            info=json.loads(api_b)
+            sha=info.get('sha')
+            card=info.get('cardData') or {}
+            tags=info.get('tags') or []
+            siblings=[x.get('rfilename') for x in info.get('siblings',[]) if isinstance(x,dict)]
+            cfg_txt=text(f'https://huggingface.co/{repo}/raw/{sha}/adapter_config.json') if sha else None
+            readme=text(f'https://huggingface.co/{repo}/raw/{sha}/README.md') if sha else None
+            ptr=text(f'https://huggingface.co/{repo}/raw/{sha}/adapter_model.safetensors') if sha else None
+            cfg=None
+            try: cfg=json.loads(cfg_txt) if cfg_txt else None
+            except: pass
+            oid=None; size=None
+            if ptr:
+              m=re.search(r'(?:oid sha256:|xet-hash:|SHA256:\s*)([0-9a-f]{64})',ptr,re.I)
+              if m: oid=m.group(1).lower()
+              m=re.search(r'(?:^|\n)size\s+(\d+)',ptr)
+              if m: size=int(m.group(1))
+            declared=[]
+            for v in [card.get('base_model'), cfg.get('base_model_name_or_path') if cfg else None]:
+              if isinstance(v,list): declared += [str(x) for x in v]
+              elif v: declared.append(str(v))
+            if readme:
+              for pat in [r'Base [Mm]odel\s*[:|]\s*`?([^`\n|]+)',r'built on\s+`?([^`\n]+)',r'fine-tuned from\s+`?([^`\n]+)']:
+                m=re.search(pat,readme,re.I)
+                if m: declared.append(m.group(1).strip())
+            norm=[]
+            for x in declared:
+              x=re.sub(r'\s+',' ',x).strip(' `*')
+              if x and x not in norm: norm.append(x)
+            row={
+              'slot':slot,'repo':repo,'scientific_question':q,'immutable_revision':sha,
+              'license':card.get('license'),'tags':tags,'siblings':siblings,
+              'adapter_config_present':cfg is not None,'adapter_config':cfg,
+              'adapter_pointer_sha256':oid,'adapter_pointer_size':size,
+              'declared_base_strings':norm,
+              'base_revision':cfg.get('revision') if cfg else None,
+              'peft_type':cfg.get('peft_type') if cfg else None,
+              'r':cfg.get('r') if cfg else None,'lora_alpha':cfg.get('lora_alpha') if cfg else None,
+              'target_modules':sorted(cfg.get('target_modules') or []) if cfg else [],
+              'modules_to_save':cfg.get('modules_to_save') if cfg else None,
+              'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest(),
+              'readme_excerpt':(readme or '')[:5000],
+              'binary_downloaded':False
+            }
+            rows.append(row)
+          import z3
+          x=z3.Int('x'); s=z3.Solver(); s.add(x>2,x<4); z3_ok=(s.check()==z3.sat and s.model()[x].as_long()==3)
+          verifier={'z3_solver_import_and_execution':z3_ok,'z3_solver_version':importlib.metadata.version('z3-solver')}
+          out={'schema':'R22586_C67_METADATA_ONLY_AUDIT_V1','binary_bytes':0,'candidates':rows,'source_free_verifier_smoke':verifier}
+          pathlib.Path('out/R22586_C67_METADATA_ONLY_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'candidate_count':len(rows),'z3_ok':z3_ok,'binary_bytes':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22586-c67-metadata-audit
+          path: out/
+          compression-level: 0
+          retention-days: 1
+      - name: Publish run id to PR 97
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          body={'body':f"R22586_C67_METADATA_RUN_ID={os.environ['RUN_ID']} SHA={os.environ['SHA']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/97/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          try: print(urllib.request.urlopen(req,timeout=30).read().decode())
+          except Exception as e: print('comment failed',e)
+          PY
