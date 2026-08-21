@@ -1,0 +1,149 @@
+name: R22586 C67 Mininet adapter-only one-shot archaeology
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+jobs:
+  archaeology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Dependency preflight before source ingress
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'numpy==2.3.5'
+          python - <<'PY'
+          import numpy as np, struct, json, hashlib, urllib.request
+          a=np.array([[1.,2.],[3.,4.]],dtype=np.float32)
+          assert np.isfinite(a).all() and np.linalg.matrix_rank(a)==2
+          print('DEPENDENCY_PREFLIGHT_PASS')
+          PY
+      - name: Exact one-use Adapter ingress, immediate escrow, raw-free static archaeology
+        run: |
+          set -euo pipefail
+          mkdir -p work/download work/escrow work/out
+          python - <<'PY'
+          import urllib.request,pathlib,hashlib,json,struct,re,math,collections,shutil
+          import numpy as np
+          REPO='orca99/auto-mininet-qwen'
+          REV='61181b965bacb7adc5f81e7a6ce5233e768afa50'
+          EXP_SHA='7769ac685d2a0fb7c88ef71b77060e16b445f64a5c0c733177ba69152d7b14b3'
+          EXP_SIZE=17462432
+          DL=pathlib.Path('work/download'); ESC=pathlib.Path('work/escrow'); OUT=pathlib.Path('work/out')
+          def dl(name):
+              p=DL/name; u=f'https://huggingface.co/{REPO}/resolve/{REV}/{name}?download=true'
+              req=urllib.request.Request(u,headers={'User-Agent':'LUCIA-AA-R22586-C67-one-use'})
+              with urllib.request.urlopen(req,timeout=120) as r,p.open('wb') as f:
+                  while True:
+                      b=r.read(1<<20)
+                      if not b: break
+                      f.write(b)
+              return p
+          cfgp=dl('adapter_config.json'); readmep=dl('README.md'); wp=dl('adapter_model.safetensors')
+          def sha(p):
+              h=hashlib.sha256()
+              with p.open('rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+              return h.hexdigest()
+          got_sha=sha(wp); got_size=wp.stat().st_size
+          if (got_sha,got_size)!=(EXP_SHA,EXP_SIZE): raise SystemExit(f'IDENTITY_FAIL {got_sha} {got_size}')
+          cfg=json.loads(cfgp.read_text('utf-8'))
+          if cfg.get('base_model_name_or_path')!='Qwen/Qwen2.5-Coder-1.5B': raise SystemExit('BASE_ID_DRIFT')
+          if cfg.get('revision','MISSING') is not None: raise SystemExit('TRAINING_BASE_REVISION_DRIFT')
+          if cfg.get('peft_type')!='LORA' or cfg.get('r')!=16 or cfg.get('lora_alpha')!=32: raise SystemExit('PEFT_CONFIG_DRIFT')
+          if sorted(cfg.get('target_modules') or [])!=['k_proj','o_proj','q_proj','v_proj']: raise SystemExit('TARGET_MODULE_DRIFT')
+          if cfg.get('modules_to_save') not in (None,[]): raise SystemExit('AUXILIARY_MODULE_DRIFT')
+          # Exact run-scoped recovery escrow BEFORE fallible deep static analysis.
+          escw=ESC/'adapter_model.safetensors'; shutil.copy2(wp,escw)
+          if sha(escw)!=EXP_SHA or escw.stat().st_size!=EXP_SIZE: raise SystemExit('ESCROW_IDENTITY_FAIL')
+          wp.unlink()  # original download copy removed; all remaining analysis uses exact escrow bytes.
+          if wp.exists(): raise SystemExit('DOWNLOAD_COPY_DELETE_FAIL')
+          # Header + values from escrow. No pickle, no Base, no remote code.
+          with escw.open('rb') as f:
+              hl=struct.unpack('<Q',f.read(8))[0]; header=json.loads(f.read(hl).decode('utf-8').rstrip())
+          start=8+hl; specs={k:v for k,v in header.items() if k!='__metadata__'}; mm=np.memmap(escw,mode='r',dtype=np.uint8)
+          def arr(s):
+              a,b=s['data_offsets']; buf=mm[start+a:start+b]; dt=s['dtype']; sh=tuple(s['shape'])
+              if dt=='BF16':
+                  u=np.frombuffer(buf,dtype='<u2').astype(np.uint32); x=(u<<16).view(np.float32)
+              elif dt=='F16': x=np.frombuffer(buf,dtype='<f2').astype(np.float32)
+              elif dt=='F32': x=np.frombuffer(buf,dtype='<f4')
+              else: raise RuntimeError(f'UNSUPPORTED_DTYPE:{dt}')
+              return x.reshape(sh)
+          def pk(n):
+              for p in ('.lora_A.default.weight','.lora_B.default.weight','.lora_A.weight','.lora_B.weight'):
+                  if n.endswith(p): return n[:-len(p)]
+          A={};B={};other=[]
+          for n,s in specs.items():
+              k=pk(n)
+              if k is None: other.append((n,s))
+              elif '.lora_A' in n: A[k]=(n,s)
+              else: B[k]=(n,s)
+          keys=sorted(set(A)|set(B)); incomplete=[k for k in keys if k not in A or k not in B]
+          if incomplete: raise SystemExit(f'INCOMPLETE_PAIRS:{len(incomplete)}')
+          scale=float(cfg['lora_alpha'])/float(cfg['r'])
+          bymod=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0,'zero_pairs':0,'rank_min':999999,'rank_max':0})
+          bylayer=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0,'modules':set()})
+          rows=[]; total=0.0; zero=0; finite_all=True; dtypes=collections.Counter()
+          for k in keys:
+              _,sa=A[k]; _,sb=B[k]; av=arr(sa); bv=arr(sb)
+              dtypes[sa['dtype']]+=1; dtypes[sb['dtype']]+=1
+              finite=bool(np.isfinite(av).all() and np.isfinite(bv).all()); finite_all &= finite
+              z=bool(np.count_nonzero(av)==0 or np.count_nonzero(bv)==0); zero+=int(z)
+              ra=int(np.linalg.matrix_rank(av.astype(np.float64))); rb=int(np.linalg.matrix_rank(bv.astype(np.float64))); er=min(ra,rb)
+              proxy=float((scale*np.linalg.norm(av.astype(np.float64))*np.linalg.norm(bv.astype(np.float64)))**2); total+=proxy
+              mod=k.split('.')[-1]; m=bymod[mod]; m['pairs']+=1;m['proxy']+=proxy;m['zero_pairs']+=int(z);m['rank_min']=min(m['rank_min'],er);m['rank_max']=max(m['rank_max'],er)
+              lm=re.search(r'\.layers\.(\d+)\.',k); layer=int(lm.group(1)) if lm else -1; bylayer[layer]['pairs']+=1;bylayer[layer]['proxy']+=proxy;bylayer[layer]['modules'].add(mod)
+              rows.append({'component_id':k,'layer':layer,'module':mod,'a_shape':sa['shape'],'b_shape':sb['shape'],'effective_rank_upper_bound':er,'zero_pair':z,'finite':finite})
+          for v in bymod.values(): v['energy_ratio']=v.pop('proxy')/total if total else 0.0
+          for v in bylayer.values(): v['energy_ratio']=v.pop('proxy')/total if total else 0.0; v['modules']=sorted(v['modules'])
+          actual=sorted(bymod); advertised=sorted(cfg.get('target_modules') or [])
+          lora_elems=sum(math.prod(A[k][1]['shape'])+math.prod(B[k][1]['shape']) for k in keys); other_elems=sum(math.prod(s['shape']) for _,s in other)
+          layer_ids=sorted(x for x in bylayer if x>=0)
+          report={
+            'schema':'R22586_C67_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY_V1',
+            'scientific_question':'NL_NETWORK_TO_EXECUTABLE_MININET_TOPOLOGY_SEMANTICS_WITH_ATTRIBUTE_PRESERVATION_AND_NO_PHANTOM_NODES',
+            'source':{'repo':REPO,'immutable_revision':REV,'license':'mit','adapter_sha256':got_sha,'adapter_size_bytes':got_size,'base_declared':cfg['base_model_name_or_path'],'training_time_base_revision':cfg.get('revision')},
+            'config':{'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'lora_dropout':cfg.get('lora_dropout'),'target_modules':advertised,'modules_to_save':cfg.get('modules_to_save'),'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora')},
+            'operator':{'tensor_count':len(specs),'complete_pairs':len(keys),'alive_pairs':len(keys)-zero,'zero_pairs':zero,'all_finite':finite_all,'factor_dtypes':dict(dtypes),'lora_parameter_elements':lora_elems,'auxiliary_non_lora_tensor_count':len(other),'auxiliary_non_lora_parameter_elements':other_elems,'actual_modules':actual,'advertised_targets':advertised,'advertised_but_unmaterialized_targets':sorted(set(advertised)-set(actual)),'materialized_but_unadvertised_targets':sorted(set(actual)-set(advertised)),'layer_count':len(layer_ids),'layers':layer_ids,'energy_proxy_definition':'(alpha/r * ||A||F * ||B||F)^2; ranking proxy only, NOT Delta-W norm or causal importance','by_module':dict(sorted(bymod.items())),'by_layer':{str(k):v for k,v in sorted(bylayer.items())},'pair_shape_rank_inventory':rows},
+            'claim_boundary':{'evidence_grade':'E1_ADAPTER_ONLY_OPERATOR_FORENSICS_TRAINING_BASE_REVISION_NULL','base_downloaded':False,'behavior_executed':False,'causal_executed':False,'scientific_increment':0,'reason':'Adapter is structurally mapped but immutable adapter_config records revision=null; Base and behavior remain blocked.'},
+            'raw_free':{'lora_values':False,'delta_w':False,'activation':False,'model_output':False}
+          }
+          (OUT/'R22586_C67_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          receipt={'schema':'R22586_C67_SOURCE_ESCROW_AND_DELETION_RECEIPT_V1','repo':REPO,'revision':REV,'identity_pass':True,'adapter_sha256':got_sha,'adapter_size_bytes':got_size,'one_use_network_ingress_count':1,'escrow_identity_pass':True,'download_copy_deleted_before_deep_static':True,'base_bytes':0,'model_forward_count':0,'raw_exported':False}
+          del mm
+          escw.unlink(); cfgp.unlink(); readmep.unlink()
+          receipt['post_delete_absent']=all(not p.exists() for p in (escw,cfgp,readmep,wp))
+          if not receipt['post_delete_absent']: raise SystemExit('RAW_DELETE_FAIL')
+          (OUT/'R22586_C67_SOURCE_ESCROW_AND_DELETION_RECEIPT.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          banned=['adapter_model.safetensors','model.safetensors','.bin','.pt','.pkl','.pickle']; outfiles=[str(p) for p in OUT.rglob('*') if p.is_file()]
+          if any(any(b in f for b in banned) for f in outfiles): raise SystemExit('RAWFREE_ARTIFACT_FAIL')
+          print(json.dumps({'PASS':True,'pairs':len(keys),'alive':len(keys)-zero,'layers':len(layer_ids),'base_bytes':0,'post_delete_absent':receipt['post_delete_absent']},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22586-c67-mininet-rawfree-static
+          path: work/out/
+          compression-level: 0
+          retention-days: 1
+      - name: Publish run receipt to PR 98
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          body={'body':f"R22586_C67_MININET_RUN_ID={os.environ['RUN_ID']} SHA={os.environ['SHA']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/98/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          try: print(urllib.request.urlopen(req,timeout=30).read().decode())
+          except Exception as e: print('comment failed',e)
+          PY
