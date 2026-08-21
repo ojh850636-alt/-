@@ -1,0 +1,100 @@
+name: R22587 C68 metadata-only candidate audit
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: API-only metadata audit with no weight-path GET
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request,json,pathlib,re,hashlib
+          CANDS=[
+            {'slot':'C68-A','repo':'Hak5/qwen2.5-coder-1.5b-ml-engineer','question':'POINT_IN_TIME_ASOF_JOIN_WITH_ENTITY_SCOPING_STALENESS_AND_FUTURE_LEAKAGE_PREVENTION','verifier':'sandboxed Python hidden-fixture execution'},
+            {'slot':'C68-B','repo':'OpenxAILabs/nix-reviewer-1.5b','question':'NIX_CONFIGURATION_ERROR_LOCALIZATION_WITH_LINE_SEVERITY_AND_OPTION_EXISTENCE','verifier':'nix eval + JSON review contract'},
+            {'slot':'C68-C','repo':'ma7di/dockerQwen_CommendLine','question':'NL_DOCKER_INTENT_TO_CLI_FLAG_AND_RESOURCE_SEMANTICS','verifier':'static CLI AST + docker command parser where available'},
+          ]
+          UA={'User-Agent':'LUCIA-AA-R22587-metadata-api-only'}
+          def get_json(url):
+              req=urllib.request.Request(url,headers=UA)
+              with urllib.request.urlopen(req,timeout=60) as r: return json.loads(r.read().decode())
+          def get_text(repo,sha,name,limit=2500000):
+              url=f'https://huggingface.co/{repo}/raw/{sha}/{name}'
+              req=urllib.request.Request(url,headers=UA)
+              try:
+                  with urllib.request.urlopen(req,timeout=60) as r:
+                      b=r.read(limit+1)
+                      if len(b)>limit: return None
+                      return b.decode('utf-8','replace')
+              except Exception: return None
+          rows=[]
+          for c in CANDS:
+              info=get_json('https://huggingface.co/api/models/'+c['repo']+'?blobs=true')
+              sha=info.get('sha'); card=info.get('cardData') or {}; sibs=info.get('siblings') or []
+              byname={x.get('rfilename'):x for x in sibs if isinstance(x,dict) and x.get('rfilename')}
+              ws=byname.get('adapter_model.safetensors') or {}
+              lfs=ws.get('lfs') or {}
+              cfg_txt=get_text(c['repo'],sha,'adapter_config.json') if sha else None
+              readme=get_text(c['repo'],sha,'README.md') if sha else None
+              metrics=get_text(c['repo'],sha,'metrics.json') if sha and 'metrics.json' in byname else None
+              cfg=None
+              try: cfg=json.loads(cfg_txt) if cfg_txt else None
+              except Exception: pass
+              exact=[]
+              if readme:
+                  for pat in [r'Qwen/Qwen2\.5-Coder-1\.5B-Instruct`?\s*@\s*`?([0-9a-f]{40})',r'revision=["\']([0-9a-f]{40})["\']']:
+                      exact += re.findall(pat,readme,re.I)
+              row={
+                **c,'discovery_revision':sha,'license':card.get('license'),'tags':info.get('tags') or [],
+                'adapter_config_present':cfg is not None,'peft_type':cfg.get('peft_type') if cfg else None,
+                'base_model_name_or_path':cfg.get('base_model_name_or_path') if cfg else None,
+                'adapter_config_revision':cfg.get('revision') if cfg else None,
+                'r':cfg.get('r') if cfg else None,'lora_alpha':cfg.get('lora_alpha') if cfg else None,
+                'target_modules':sorted(cfg.get('target_modules') or []) if cfg else [],
+                'modules_to_save':cfg.get('modules_to_save') if cfg else None,
+                'adapter_lfs_sha256':lfs.get('sha256') or lfs.get('oid'),
+                'adapter_lfs_size':lfs.get('size') or ws.get('size'),
+                'exact_training_base_revisions_from_readme':sorted(set(exact)),
+                'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest(),
+                'metrics_present':metrics is not None,
+                'metrics_sha256':hashlib.sha256((metrics or '').encode()).hexdigest() if metrics is not None else None,
+                'weight_path_get_count':0,'binary_bytes_downloaded':0,
+                'api_blob_metadata_available':bool(lfs or ws.get('size')),
+                'readme_excerpt':(readme or '')[:12000]
+              }
+              rows.append(row)
+          out={'schema':'R22587_C68_API_ONLY_METADATA_AUDIT_V1','binary_bytes_downloaded':0,'weight_path_get_count':0,'candidate_count':len(rows),'candidates':rows}
+          pathlib.Path('out/R22587_C68_API_ONLY_METADATA_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'candidate_count':len(rows),'binary_bytes':0,'weight_path_get_count':0,'revisions':{r['slot']:r['discovery_revision'] for r in rows}},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22587-c68-api-only-metadata
+          path: out/
+          compression-level: 0
+          retention-days: 1
+      - name: Publish run id
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          body={'body':f"R22587_C68_METADATA_RUN_ID={os.environ['RUN_ID']} SHA={os.environ['SHA']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/99/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          try: print(urllib.request.urlopen(req,timeout=30).read().decode())
+          except Exception as e: print('comment failed',e)
+          PY
