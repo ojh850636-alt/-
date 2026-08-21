@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: read
+  issues: write
+  pull-requests: write
 
 jobs:
   archaeology:
@@ -21,7 +23,7 @@ jobs:
           set -euo pipefail
           mkdir -p work/raw work/out
           python - <<'PY'
-          import urllib.request, pathlib, hashlib, json, struct, re, os, math, collections
+          import urllib.request, pathlib, hashlib, json, struct, re, math, collections
           import numpy as np
 
           repo = 'raspbfox/cad-qw35-2b-0.1'
@@ -39,152 +41,73 @@ jobs:
                       b=r.read(1024*1024)
                       if not b: break
                       f.write(b)
-              return p, url
+              return p
 
-          cfgp, cfg_url = dl('adapter_config.json')
-          readmep, readme_url = dl('README.md')
-          wp, weight_url = dl('adapter_model.safetensors')
-
-          wb=wp.read_bytes()
-          sha=hashlib.sha256(wb).hexdigest()
-          size=len(wb)
-          if sha != expected_sha or size != expected_size:
-              raise SystemExit(f'IDENTITY_FAIL sha={sha} size={size}')
-
+          cfgp=dl('adapter_config.json')
+          readmep=dl('README.md')
+          wp=dl('adapter_model.safetensors')
+          sha=hashlib.sha256(wp.read_bytes()).hexdigest(); size=wp.stat().st_size
+          if sha != expected_sha or size != expected_size: raise SystemExit(f'IDENTITY_FAIL sha={sha} size={size}')
           cfg=json.loads(cfgp.read_text('utf-8'))
-          if cfg.get('base_model_name_or_path') != 'Qwen/Qwen3.5-2B':
-              raise SystemExit('BASE_ID_DRIFT')
-          if cfg.get('revision', 'MISSING') is not None:
-              raise SystemExit('UNEXPECTED_TRAINING_BASE_REVISION_PRESENT_OR_DRIFT')
-          if cfg.get('peft_type') != 'LORA' or cfg.get('r') != 32 or cfg.get('lora_alpha') != 64:
-              raise SystemExit('LORA_CONFIG_DRIFT')
+          if cfg.get('base_model_name_or_path') != 'Qwen/Qwen3.5-2B': raise SystemExit('BASE_ID_DRIFT')
+          if cfg.get('revision','MISSING') is not None: raise SystemExit('TRAINING_BASE_REVISION_DRIFT')
+          if cfg.get('peft_type')!='LORA' or cfg.get('r')!=32 or cfg.get('lora_alpha')!=64: raise SystemExit('LORA_CONFIG_DRIFT')
 
-          # Parse safetensors with numpy only; no pickle, no remote code.
           with wp.open('rb') as f:
-              header_len=struct.unpack('<Q', f.read(8))[0]
+              header_len=struct.unpack('<Q',f.read(8))[0]
               header=json.loads(f.read(header_len).decode('utf-8').rstrip())
           data_start=8+header_len
-          meta=header.get('__metadata__', {})
           tensors={k:v for k,v in header.items() if k!='__metadata__'}
-          mm=np.memmap(wp, mode='r', dtype=np.uint8)
-
+          mm=np.memmap(wp,mode='r',dtype=np.uint8)
           def arr_of(spec):
-              a,b=spec['data_offsets']
-              buf=mm[data_start+a:data_start+b]
-              dt=spec['dtype']
-              shape=tuple(spec['shape'])
+              a,b=spec['data_offsets']; buf=mm[data_start+a:data_start+b]; dt=spec['dtype']; shape=tuple(spec['shape'])
               if dt=='BF16':
-                  u=np.frombuffer(buf, dtype='<u2').astype(np.uint32)
-                  x=(u << 16).view(np.float32)
-              elif dt=='F16': x=np.frombuffer(buf, dtype='<f2').astype(np.float32)
-              elif dt=='F32': x=np.frombuffer(buf, dtype='<f4')
+                  u=np.frombuffer(buf,dtype='<u2').astype(np.uint32); x=(u<<16).view(np.float32)
+              elif dt=='F16': x=np.frombuffer(buf,dtype='<f2').astype(np.float32)
+              elif dt=='F32': x=np.frombuffer(buf,dtype='<f4')
               else: raise RuntimeError(f'unsupported dtype {dt}')
               return x.reshape(shape)
-
           def pair_key(name):
               for pat in ('.lora_A.default.weight','.lora_B.default.weight','.lora_A.weight','.lora_B.weight'):
                   if name.endswith(pat): return name[:-len(pat)]
               return None
-          A={}; B={}; other=[]
+          A={};B={};other=[]
           for n,s in tensors.items():
               k=pair_key(n)
               if k is None: other.append((n,s)); continue
-              if '.lora_A' in n: A[k]=(n,s)
-              elif '.lora_B' in n: B[k]=(n,s)
-          keys=sorted(set(A)|set(B))
-          complete=[k for k in keys if k in A and k in B]
-          incomplete=[k for k in keys if not (k in A and k in B)]
-          if incomplete:
-              raise SystemExit('INCOMPLETE_LORA_PAIR')
-
+              if '.lora_A' in n:A[k]=(n,s)
+              elif '.lora_B' in n:B[k]=(n,s)
+          keys=sorted(set(A)|set(B)); complete=[k for k in keys if k in A and k in B]; incomplete=[k for k in keys if not(k in A and k in B)]
+          if incomplete: raise SystemExit('INCOMPLETE_LORA_PAIR')
           target_cfg=sorted(cfg.get('target_modules') or [])
           by_module=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0,'zero_pairs':0,'effective_rank_min':10**9,'effective_rank_max':0})
           by_layer=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0})
-          dtypes=collections.Counter()
-          pair_rows=[]
-          total_proxy=0.0
-          all_finite=True
-          zero_pairs=0
+          dtypes=collections.Counter(); pair_rows=[]; total_proxy=0.0; all_finite=True; zero_pairs=0
           for k in complete:
-              an,aspec=A[k]; bn,bspec=B[k]
-              av=arr_of(aspec); bv=arr_of(bspec)
+              _,aspec=A[k]; _,bspec=B[k]; av=arr_of(aspec); bv=arr_of(bspec)
               dtypes[aspec['dtype']]+=1; dtypes[bspec['dtype']]+=1
-              finite=bool(np.isfinite(av).all() and np.isfinite(bv).all())
-              all_finite &= finite
-              za=bool(np.count_nonzero(av)==0); zb=bool(np.count_nonzero(bv)==0)
-              zero=za or zb
-              zero_pairs += int(zero)
-              # Effective rank of factors; no Delta-W reconstruction.
-              ra=int(np.linalg.matrix_rank(av.astype(np.float64)))
-              rb=int(np.linalg.matrix_rank(bv.astype(np.float64)))
-              er=min(ra,rb)
-              na=float(np.linalg.norm(av.astype(np.float64)))
-              nb=float(np.linalg.norm(bv.astype(np.float64)))
-              scale=float(cfg['lora_alpha'])/float(cfg['r'])
-              proxy=(scale*na*nb)**2
-              total_proxy += proxy
-              mod=k.split('.')[-1]
-              m=by_module[mod]; m['pairs']+=1; m['proxy']+=proxy; m['zero_pairs']+=int(zero); m['effective_rank_min']=min(m['effective_rank_min'],er); m['effective_rank_max']=max(m['effective_rank_max'],er)
-              lm=re.search(r'\.layers\.(\d+)\.',k)
-              layer=lm.group(1) if lm else 'NON_LAYER'
-              by_layer[layer]['pairs']+=1; by_layer[layer]['proxy']+=proxy
+              finite=bool(np.isfinite(av).all() and np.isfinite(bv).all()); all_finite &= finite
+              zero=bool(np.count_nonzero(av)==0 or np.count_nonzero(bv)==0); zero_pairs+=int(zero)
+              ra=int(np.linalg.matrix_rank(av.astype(np.float64))); rb=int(np.linalg.matrix_rank(bv.astype(np.float64))); er=min(ra,rb)
+              na=float(np.linalg.norm(av.astype(np.float64))); nb=float(np.linalg.norm(bv.astype(np.float64))); scale=float(cfg['lora_alpha'])/float(cfg['r']); proxy=(scale*na*nb)**2; total_proxy+=proxy
+              mod=k.split('.')[-1]; m=by_module[mod]; m['pairs']+=1;m['proxy']+=proxy;m['zero_pairs']+=int(zero);m['effective_rank_min']=min(m['effective_rank_min'],er);m['effective_rank_max']=max(m['effective_rank_max'],er)
+              lm=re.search(r'\.layers\.(\d+)\.',k); layer=lm.group(1) if lm else 'NON_LAYER'; by_layer[layer]['pairs']+=1;by_layer[layer]['proxy']+=proxy
               pair_rows.append({'component_id':k,'a_shape':aspec['shape'],'b_shape':bspec['shape'],'factor_dtype_a':aspec['dtype'],'factor_dtype_b':bspec['dtype'],'effective_rank_upper_bound':er,'zero_pair':zero,'finite':finite})
-
-          actual_modules=sorted(by_module)
-          target_missing=sorted(set(target_cfg)-set(actual_modules))
-          actual_unadvertised=sorted(set(actual_modules)-set(target_cfg))
+          actual_modules=sorted(by_module); target_missing=sorted(set(target_cfg)-set(actual_modules)); actual_unadvertised=sorted(set(actual_modules)-set(target_cfg))
           for d in (by_module,by_layer):
               for v in d.values():
-                  v['energy_ratio']=0.0 if total_proxy==0 else v['proxy']/total_proxy
-                  del v['proxy']
-                  if 'effective_rank_min' in v and v['effective_rank_min']==10**9: v['effective_rank_min']=None
-
-          # Auxiliary tensor summary only; never export values.
-          other_elems=sum(math.prod(s['shape']) for _,s in other)
-          lora_elems=sum(math.prod(A[k][1]['shape'])+math.prod(B[k][1]['shape']) for k in complete)
-          report={
-            'schema':'R22585_C66_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY_V1',
-            'scientific_question':'EXECUTABLE_PARAMETRIC_CAD_GEOMETRY_SEMANTICS_AND_CONSTRAINT_PRESERVATION',
-            'source':{
-              'repo':repo,'immutable_revision':revision,'license':'apache-2.0','adapter_sha256':sha,'adapter_size_bytes':size,
-              'expected_lfs_sha256':expected_sha,'expected_lfs_size_bytes':expected_size,
-              'base_declared':cfg.get('base_model_name_or_path'),'training_time_base_revision':cfg.get('revision'),
-              'transport_urls_redacted_to_repo_revision':True
-            },
-            'config':{'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'lora_dropout':cfg.get('lora_dropout'),'modules_to_save':cfg.get('modules_to_save'),'target_modules':target_cfg,'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora')},
-            'operator':{
-              'tensor_count':len(tensors),'lora_a_tensors':len(A),'lora_b_tensors':len(B),'complete_pairs':len(complete),'incomplete_pairs':len(incomplete),
-              'zero_pairs':zero_pairs,'alive_pairs':len(complete)-zero_pairs,'all_finite':all_finite,'factor_dtypes':dict(dtypes),
-              'lora_parameter_elements':lora_elems,'auxiliary_non_lora_tensor_count':len(other),'auxiliary_non_lora_parameter_elements':other_elems,
-              'actual_modules':actual_modules,'advertised_but_unmaterialized_targets':target_missing,'materialized_but_unadvertised_targets':actual_unadvertised,
-              'energy_proxy_definition':'(alpha/r * ||A||_F * ||B||_F)^2; non-reconstructive ranking proxy, NOT Delta-W norm and NOT causal importance',
-              'by_module':dict(sorted(by_module.items())),
-              'by_layer':dict(sorted(by_layer.items(), key=lambda kv:(kv[0]=='NON_LAYER', int(kv[0]) if kv[0].isdigit() else 10**9))),
-              'pair_shape_rank_inventory':pair_rows
-            },
-            'claim_boundary':{
-              'evidence_grade':'E1_ADAPTER_ONLY_OPERATOR_FORENSICS_BASE_PROVENANCE_HOLD',
-              'behavior_executed':False,'base_downloaded':False,'causal_executed':False,'positive_e4_e5_increment':0,'algorithm_increment':0,'student_increment':0,'promotion_increment':0,
-              'reason':'Adapter is live and structurally mapped, but adapter_config revision is null; training-time exact Base is not proven, so Base/behavior/E5 admission remains blocked.'
-            },
-            'raw_free':{'contains_lora_values':False,'contains_reconstructable_delta_w':False,'contains_raw_activation':False,'contains_model_output':False}
-          }
+                  v['energy_ratio']=0.0 if total_proxy==0 else v['proxy']/total_proxy; del v['proxy']
+                  if 'effective_rank_min' in v and v['effective_rank_min']==10**9:v['effective_rank_min']=None
+          other_elems=sum(math.prod(s['shape']) for _,s in other); lora_elems=sum(math.prod(A[k][1]['shape'])+math.prod(B[k][1]['shape']) for k in complete)
+          report={'schema':'R22585_C66_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY_V1','scientific_question':'EXECUTABLE_PARAMETRIC_CAD_GEOMETRY_SEMANTICS_AND_CONSTRAINT_PRESERVATION','source':{'repo':repo,'immutable_revision':revision,'license':'apache-2.0','adapter_sha256':sha,'adapter_size_bytes':size,'expected_lfs_sha256':expected_sha,'expected_lfs_size_bytes':expected_size,'base_declared':cfg.get('base_model_name_or_path'),'training_time_base_revision':cfg.get('revision')},'config':{'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'lora_dropout':cfg.get('lora_dropout'),'modules_to_save':cfg.get('modules_to_save'),'target_modules':target_cfg,'use_dora':cfg.get('use_dora'),'use_rslora':cfg.get('use_rslora')},'operator':{'tensor_count':len(tensors),'lora_a_tensors':len(A),'lora_b_tensors':len(B),'complete_pairs':len(complete),'incomplete_pairs':0,'zero_pairs':zero_pairs,'alive_pairs':len(complete)-zero_pairs,'all_finite':all_finite,'factor_dtypes':dict(dtypes),'lora_parameter_elements':lora_elems,'auxiliary_non_lora_tensor_count':len(other),'auxiliary_non_lora_parameter_elements':other_elems,'actual_modules':actual_modules,'advertised_but_unmaterialized_targets':target_missing,'materialized_but_unadvertised_targets':actual_unadvertised,'energy_proxy_definition':'(alpha/r * ||A||_F * ||B||_F)^2; non-reconstructive ranking proxy, NOT Delta-W norm and NOT causal importance','by_module':dict(sorted(by_module.items())),'by_layer':dict(sorted(by_layer.items(),key=lambda kv:(kv[0]=='NON_LAYER',int(kv[0]) if kv[0].isdigit() else 10**9))),'pair_shape_rank_inventory':pair_rows},'claim_boundary':{'evidence_grade':'E1_ADAPTER_ONLY_OPERATOR_FORENSICS_BASE_PROVENANCE_HOLD','behavior_executed':False,'base_downloaded':False,'causal_executed':False,'positive_e4_e5_increment':0,'algorithm_increment':0,'student_increment':0,'promotion_increment':0,'reason':'Adapter is live and structurally mapped, but adapter_config revision is null; training-time exact Base is not proven, so Base/behavior/E5 admission remains blocked.'},'raw_free':{'contains_lora_values':False,'contains_reconstructable_delta_w':False,'contains_raw_activation':False,'contains_model_output':False}}
           (out/'R22585_C66_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8')
-          receipt={
-             'schema':'R22585_C66_SOURCE_AND_DELETION_RECEIPT_V1','repo':repo,'revision':revision,'adapter_sha256':sha,'adapter_size_bytes':size,
-             'identity_pass':True,'base_bytes':0,'model_forward_count':0,'downloaded_files':['adapter_config.json','README.md','adapter_model.safetensors'],
-             'raw_exported_to_artifact':False
-          }
-          # Delete all source bytes before artifact upload.
-          for p in [wp,cfgp,readmep]:
-              p.unlink()
+          receipt={'schema':'R22585_C66_SOURCE_AND_DELETION_RECEIPT_V1','repo':repo,'revision':revision,'adapter_sha256':sha,'adapter_size_bytes':size,'identity_pass':True,'base_bytes':0,'model_forward_count':0,'downloaded_files':['adapter_config.json','README.md','adapter_model.safetensors'],'raw_exported_to_artifact':False}
+          for p in [wp,cfgp,readmep]:p.unlink()
           receipt['post_delete_absent']=all(not p.exists() for p in [wp,cfgp,readmep])
-          if not receipt['post_delete_absent']: raise SystemExit('RAW_DELETE_FAIL')
+          if not receipt['post_delete_absent']:raise SystemExit('RAW_DELETE_FAIL')
           (out/'R22585_C66_SOURCE_AND_DELETION_RECEIPT.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2,sort_keys=True)+'\n',encoding='utf-8')
-          # Ensure artifact contains no raw source extensions/names.
-          banned=['adapter_model.safetensors','tokenizer.json','model.safetensors','.bin','.pt','.pkl']
-          files=[str(p) for p in out.rglob('*') if p.is_file()]
-          if any(any(b in f for b in banned) for f in files): raise SystemExit('RAWFREE_ARTIFACT_FAIL')
+          banned=['adapter_model.safetensors','tokenizer.json','model.safetensors','.bin','.pt','.pkl']; files=[str(p) for p in out.rglob('*') if p.is_file()]
+          if any(any(b in f for b in banned) for f in files):raise SystemExit('RAWFREE_ARTIFACT_FAIL')
           print(json.dumps({'status':'PASS','complete_pairs':len(complete),'alive_pairs':len(complete)-zero_pairs,'base_bytes':0,'artifact_files':files},indent=2))
           PY
       - name: Upload raw-free archaeology evidence only
@@ -194,3 +117,19 @@ jobs:
           path: work/out/
           if-no-files-found: error
           retention-days: 1
+      - name: Publish observable run receipt to PR 96
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          body={'body':f"R22585_C66_COURIER_RUN_ID={os.environ['RUN_ID']} ATTEMPT={os.environ['RUN_ATTEMPT']} SHA={os.environ['SHA']}"}
+          u=f"https://api.github.com/repos/{os.environ['REPO']}/issues/96/comments"
+          req=urllib.request.Request(u,data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          print(urllib.request.urlopen(req,timeout=30).read().decode())
+          PY
