@@ -1,0 +1,108 @@
+name: R22585 C66 CAD one-shot main courier
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+jobs:
+  archaeology:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Exact adapter-only ingress and raw-free operator archaeology
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'numpy==2.3.5'
+          mkdir -p work/raw work/out
+          python - <<'PY'
+          import urllib.request,pathlib,hashlib,json,struct,re,math,collections
+          import numpy as np
+          REPO='raspbfox/cad-qw35-2b-0.1'; REV='4640e1980d599ee902fefd39083ba72feefff86f'
+          EXP_SHA='55ef0834794fd98222e952cc63392379fe197a22990e5099e897d1845d3fbdce'; EXP_SIZE=134604152
+          raw=pathlib.Path('work/raw'); out=pathlib.Path('work/out')
+          def dl(name):
+              p=raw/name; u=f'https://huggingface.co/{REPO}/resolve/{REV}/{name}?download=true'
+              with urllib.request.urlopen(u,timeout=120) as r,p.open('wb') as f:
+                  while True:
+                      b=r.read(1<<20)
+                      if not b: break
+                      f.write(b)
+              return p
+          cfgp=dl('adapter_config.json'); readmep=dl('README.md'); wp=dl('adapter_model.safetensors')
+          sha=hashlib.sha256(wp.read_bytes()).hexdigest(); size=wp.stat().st_size
+          if (sha,size)!=(EXP_SHA,EXP_SIZE): raise SystemExit(f'IDENTITY_FAIL {sha} {size}')
+          cfg=json.loads(cfgp.read_text('utf-8'))
+          if cfg.get('base_model_name_or_path')!='Qwen/Qwen3.5-2B' or cfg.get('revision','X') is not None: raise SystemExit('BASE_PROVENANCE_CONFIG_DRIFT')
+          if cfg.get('peft_type')!='LORA' or cfg.get('r')!=32 or cfg.get('lora_alpha')!=64 or cfg.get('modules_to_save') not in (None,[]): raise SystemExit('PEFT_CONFIG_DRIFT')
+          with wp.open('rb') as f:
+              hl=struct.unpack('<Q',f.read(8))[0]; header=json.loads(f.read(hl).decode('utf-8').rstrip())
+          start=8+hl; specs={k:v for k,v in header.items() if k!='__metadata__'}; mm=np.memmap(wp,mode='r',dtype=np.uint8)
+          def arr(s):
+              a,b=s['data_offsets']; buf=mm[start+a:start+b]; dt=s['dtype']; sh=tuple(s['shape'])
+              if dt=='BF16':
+                  u=np.frombuffer(buf,dtype='<u2').astype(np.uint32); x=(u<<16).view(np.float32)
+              elif dt=='F16': x=np.frombuffer(buf,dtype='<f2').astype(np.float32)
+              elif dt=='F32': x=np.frombuffer(buf,dtype='<f4')
+              else: raise RuntimeError(dt)
+              return x.reshape(sh)
+          def pk(n):
+              for p in ('.lora_A.default.weight','.lora_B.default.weight','.lora_A.weight','.lora_B.weight'):
+                  if n.endswith(p): return n[:-len(p)]
+          A={};B={};other=[]
+          for n,s in specs.items():
+              k=pk(n)
+              if k is None: other.append((n,s))
+              elif '.lora_A' in n: A[k]=(n,s)
+              else: B[k]=(n,s)
+          keys=sorted(set(A)|set(B)); incomplete=[k for k in keys if k not in A or k not in B]
+          if incomplete: raise SystemExit('INCOMPLETE_PAIRS')
+          bymod=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0,'zero_pairs':0,'rank_min':9999,'rank_max':0}); bylayer=collections.defaultdict(lambda:{'pairs':0,'proxy':0.0})
+          rows=[]; total=0.0; zero=0; finite_all=True; dtypes=collections.Counter(); scale=cfg['lora_alpha']/cfg['r']
+          for k in keys:
+              _,sa=A[k]; _,sb=B[k]; av=arr(sa); bv=arr(sb); dtypes[sa['dtype']]+=1; dtypes[sb['dtype']]+=1
+              finite=bool(np.isfinite(av).all() and np.isfinite(bv).all()); finite_all &= finite
+              z=bool(np.count_nonzero(av)==0 or np.count_nonzero(bv)==0); zero+=int(z)
+              ra=int(np.linalg.matrix_rank(av.astype(np.float64))); rb=int(np.linalg.matrix_rank(bv.astype(np.float64))); er=min(ra,rb)
+              proxy=float((scale*np.linalg.norm(av.astype(np.float64))*np.linalg.norm(bv.astype(np.float64)))**2); total+=proxy
+              mod=k.split('.')[-1]; m=bymod[mod]; m['pairs']+=1;m['proxy']+=proxy;m['zero_pairs']+=int(z);m['rank_min']=min(m['rank_min'],er);m['rank_max']=max(m['rank_max'],er)
+              lm=re.search(r'\.layers\.(\d+)\.',k); layer=lm.group(1) if lm else 'NON_LAYER'; bylayer[layer]['pairs']+=1;bylayer[layer]['proxy']+=proxy
+              rows.append({'component_id':k,'a_shape':sa['shape'],'b_shape':sb['shape'],'effective_rank_upper_bound':er,'zero_pair':z,'finite':finite})
+          for d in (bymod,bylayer):
+              for v in d.values(): v['energy_ratio']=v.pop('proxy')/total if total else 0.0
+          actual=sorted(bymod); advertised=sorted(cfg.get('target_modules') or [])
+          lora_elems=sum(math.prod(A[k][1]['shape'])+math.prod(B[k][1]['shape']) for k in keys); other_elems=sum(math.prod(s['shape']) for _,s in other)
+          report={'schema':'R22585_C66_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY_V1','scientific_question':'EXECUTABLE_PARAMETRIC_CAD_GEOMETRY_SEMANTICS_AND_CONSTRAINT_PRESERVATION','source':{'repo':REPO,'immutable_revision':REV,'license':'apache-2.0','adapter_sha256':sha,'adapter_size_bytes':size,'base_declared':cfg['base_model_name_or_path'],'training_time_base_revision':cfg.get('revision')},'operator':{'tensor_count':len(specs),'complete_pairs':len(keys),'alive_pairs':len(keys)-zero,'zero_pairs':zero,'all_finite':finite_all,'lora_parameter_elements':lora_elems,'auxiliary_non_lora_tensor_count':len(other),'auxiliary_non_lora_parameter_elements':other_elems,'actual_modules':actual,'advertised_targets':advertised,'advertised_but_unmaterialized_targets':sorted(set(advertised)-set(actual)),'materialized_but_unadvertised_targets':sorted(set(actual)-set(advertised)),'factor_dtypes':dict(dtypes),'energy_proxy_definition':'(alpha/r * ||A||F * ||B||F)^2; ranking only, not Delta-W norm or causal importance','by_module':dict(sorted(bymod.items())),'by_layer':dict(sorted(bylayer.items())),'pair_shape_rank_inventory':rows},'claim_boundary':{'evidence_grade':'E1_ADAPTER_ONLY_OPERATOR_FORENSICS_BASE_PROVENANCE_HOLD','base_downloaded':False,'behavior_executed':False,'causal_executed':False,'scientific_increment':0,'reason':'adapter_config revision is null; exact training-time Base revision is unproven'},'raw_free':{'lora_values':False,'delta_w':False,'activation':False,'model_output':False}}
+          (out/'R22585_C66_ADAPTER_ONLY_OPERATOR_ARCHAEOLOGY.json').write_text(json.dumps(report,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          receipt={'schema':'R22585_C66_SOURCE_AND_DELETION_RECEIPT_V1','repo':REPO,'revision':REV,'identity_pass':True,'adapter_sha256':sha,'adapter_size_bytes':size,'base_bytes':0,'model_forward_count':0,'raw_exported':False}
+          del mm
+          for p in (wp,cfgp,readmep): p.unlink()
+          receipt['post_delete_absent']=all(not p.exists() for p in (wp,cfgp,readmep))
+          if not receipt['post_delete_absent']: raise SystemExit('RAW_DELETE_FAIL')
+          (out/'R22585_C66_SOURCE_AND_DELETION_RECEIPT.json').write_text(json.dumps(receipt,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'PASS':True,'pairs':len(keys),'alive':len(keys)-zero,'base_bytes':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22585-c66-cad-rawfree-static
+          path: work/out/
+          compression-level: 0
+          retention-days: 1
+      - name: Comment run id
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request
+          body={'body':f"R22585_C66_COURIER_RUN_ID={os.environ['RUN_ID']} SHA={os.environ['SHA']}"}
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/issues/96/comments",data=json.dumps(body).encode(),headers={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','Content-Type':'application/json'},method='POST')
+          print(urllib.request.urlopen(req,timeout=30).read().decode())
+          PY
