@@ -1,0 +1,16 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:af5c9dd6fb77c4279320b6b4e54fef3a4fcc51e52b37fced7707750ee3561af1",
+      "expired": false,
+      "id": 9477277830,
+      "name": "r22594-c75-mermaid-adapter-only-rawfree",
+      "size_in_bytes": 67811
+    }
+  ],
+  "generated_at_utc": "2026-08-22T14:31:29.958887+00:00",
+  "head_sha": "f9b5986ea32a5188738dd1668e160583da20ceef",
+  "run_id": 32578939067,
+  "schema": "R22594_C75_SOURCE_RUN_RECEIPT_V1",
+  "source_step_outcome": "success"
+}
