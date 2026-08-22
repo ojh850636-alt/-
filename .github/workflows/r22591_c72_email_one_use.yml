@@ -17,7 +17,7 @@ jobs:
       - name: Verify reviewed runner and install pinned runtime before source
         run: |
           set -euo pipefail
-          test "$(git hash-object .github/r22591/c72_email_runner.py)" = "a8fc792f057d4a3f9dcb0d45ca7af277d29bc54f"
+          test "$(git hash-object .github/r22591/c72_email_runner.py)" = "132ef07cdabccee8d5c2f636c5d48f9a82a44f81"
           python -m py_compile .github/r22591/c72_email_runner.py
           python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.12.0'
           python -m pip install --disable-pip-version-check 'transformers==4.57.6' 'peft==0.20.0' 'accelerate==1.14.0' 'safetensors==0.7.0' 'huggingface_hub==0.36.0' 'numpy==2.3.5' 'psutil==7.0.0'
