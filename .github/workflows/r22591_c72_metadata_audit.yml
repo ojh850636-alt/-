@@ -1,0 +1,111 @@
+name: R22591 C72 metadata-only candidate audit
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: API-only immutable candidate audit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUT_BRANCH: r22591-c72-metadata-receipt
+        run: |
+          set -euo pipefail
+          mkdir -p work/out
+          python - <<'PY'
+          import urllib.request,json,re,hashlib,datetime,os,base64
+          from pathlib import Path
+          UA={'User-Agent':'LUCIA-AA-R22591-C72-metadata-only'}
+          CANDS=[
+            {'id':'C72-A','repo':'rflores3113/qwen2.5-1.5b-email-extraction-lora','base':'Qwen/Qwen2.5-1.5B-Instruct','exact_base':'989aa7980e4cf806f80c7fef2b1adb7bc71aa306','question':'CUSTOMER_SUPPORT_EMAIL_TO_SIX_FIELD_TYPED_JSON_WITH_CLOSED_ENUMS_AND_LIST_EXTRACTION','verifier':'procedural_email_generator_plus_exact_json_schema_and_field_oracle','cost':'LOW_1_5B','novelty':'MULTIFIELD_SCHEMA_BOUND_EXTRACTION'},
+            {'id':'C72-B','repo':'n0rths7ar/bioevidence-qwen3-4b-extraction-lora-v2','base':'unsloth/Qwen3-4B-Instruct-2507-unsloth-bnb-4bit','exact_base':'7744afa8566e264af1a92a806d8d9aae00cc7c78','question':'QUERY_DOCUMENT_TO_TYPED_JSON_WITH_VERBATIM_EVIDENCE_SPAN_AND_SUPPORT_STATUS','verifier':'synthetic_document_oracle_plus_exact_span_membership_and_schema','cost':'MEDIUM_4B_QUANT','novelty':'VERBATIM_EVIDENCE_SPAN_GROUNDING'},
+            {'id':'C72-C','repo':'naoyasss/qwen3-4b-structured-output-lora_rev0.8','base':'Qwen/Qwen3-4B-Instruct-2507','exact_base':None,'question':'CROSS_FORMAT_STRUCTURED_DATA_SEMANTIC_CONVERSION_JSON_YAML_XML_TOML_CSV','verifier':'independent_format_parsers_to_canonical_data_tree','cost':'MEDIUM_4B','novelty':'CROSS_FORMAT_SEMANTIC_EQUIVALENCE'},
+            {'id':'C72-D','repo':'Ethosoft/Qwen3-1.7B-ResearchReasoning-JSON-RL','base':'Qwen/Qwen3-1.7B','exact_base':None,'question':'SOURCE_ID_CONSTRAINED_RESEARCH_STATE_JSON_WITH_CLAIM_STATUS_AND_EVIDENCE_REFERENCES','verifier':'json_schema_plus_source_id_subset_and_procedural_claim_fixtures','cost':'LOW_1_7B','novelty':'SOURCE_ID_CONSTRAINED_RESEARCH_STATE'}
+          ]
+          def get(url,limit=6_000_000):
+            req=urllib.request.Request(url,headers=UA)
+            with urllib.request.urlopen(req,timeout=60) as r:
+              b=r.read(limit+1)
+              if len(b)>limit: raise RuntimeError('META_TOO_LARGE:'+url)
+              return b
+          def getj(url): return json.loads(get(url).decode())
+          def text(repo,sha,name): return get(f'https://huggingface.co/{repo}/raw/{sha}/{name}').decode('utf-8','replace')
+          def sibling(info,name):
+            for x in info.get('siblings') or []:
+              if x.get('rfilename')==name:
+                l=x.get('lfs') or {}
+                return {'size':l.get('size') or x.get('size'),'sha256':l.get('sha256') or l.get('oid'),'blob_id':x.get('blobId')}
+            return {}
+          rows=[]
+          for c in CANDS:
+            info=getj('https://huggingface.co/api/models/'+c['repo']+'?blobs=true')
+            sha=info.get('sha'); card=info.get('cardData') or {}; lic=card.get('license')
+            if not re.fullmatch(r'[0-9a-f]{40}',str(sha)): raise RuntimeError('NO_IMMUTABLE_SHA:'+c['repo'])
+            cfg_txt=text(c['repo'],sha,'adapter_config.json'); readme=text(c['repo'],sha,'README.md'); cfg=json.loads(cfg_txt)
+            wm=sibling(info,'adapter_model.safetensors')
+            if not wm.get('size') or not wm.get('sha256'): raise RuntimeError('NO_LFS_IDENTITY:'+c['repo'])
+            exact=bool(c['exact_base'] and c['exact_base'] in readme)
+            base_api_ok=False
+            if exact:
+              bi=getj(f"https://huggingface.co/api/models/{c['base']}/revision/{c['exact_base']}")
+              base_api_ok=(bi.get('sha')==c['exact_base'])
+              exact=exact and base_api_ok
+            license_clear=bool(lic and str(lic).lower() not in {'other','unknown'})
+            aux=cfg.get('modules_to_save')
+            hard=[]
+            if not license_clear: hard.append('LICENSE_UNCLEAR')
+            if cfg.get('peft_type')!='LORA': hard.append('NOT_LORA')
+            if aux not in (None,[]): hard.append('AUX_MODULES_TO_SAVE')
+            size=int(wm['size'])
+            score=(30 if exact else 0)+(20 if license_clear else 0)+(20 if aux in (None,[]) else 0)+(20 if size<100_000_000 else (12 if size<200_000_000 else 4))+10
+            row={**c,'immutable_revision':sha,'license':lic,'license_clear':license_clear,'adapter_lfs':wm,'adapter_config_sha256':hashlib.sha256(cfg_txt.encode()).hexdigest(),'readme_sha256':hashlib.sha256(readme.encode()).hexdigest(),'base_model_name_or_path':cfg.get('base_model_name_or_path'),'adapter_config_revision':cfg.get('revision'),'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'target_modules':sorted(cfg.get('target_modules') or []),'modules_to_save':aux,'exact_training_base_revision_proven':exact,'exact_training_base_revision':c['exact_base'] if exact else None,'base_revision_api_verified':base_api_ok,'hard_reject_reasons':hard,'admission_score':score,'weight_path_get_count':0,'model_weight_bytes':0}
+            rows.append(row)
+          selection={'selected':'C72-A','reason':'Only C72-A combines exact immutable training Base provenance, clear license, no aux head, lowest feasible Base/runtime cost, and a deterministic source-free six-field oracle suitable for BASE/FULL plus controls. C72-B also has exact provenance but a 4B quantized runtime is materially costlier. C72-C/D lack exact training Base revision.','policy':'EXACT_BASE_PLUS_EXECUTABLE_VERIFIER_PLUS_FEASIBLE_COST_BEATS_SCORE_ONLY'}
+          out={'schema':'R22591_C72_METADATA_ONLY_CANDIDATE_AUDIT_V1','generated_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'weight_path_get_count':0,'model_weight_bytes':0,'candidates':rows,'selection':selection}
+          p=Path('work/out/R22591_C72_METADATA_ONLY_CANDIDATE_AUDIT.json');p.write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          # Persist exact audit bytes to the pre-created receipt branch; still no model-weight request.
+          H={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LUCIA-AA-R22591-receipt','Content-Type':'application/json'}
+          b=p.read_bytes(); payload=json.dumps({'message':'Persist R22591 C72 metadata audit','content':base64.b64encode(b).decode(),'branch':os.environ['OUT_BRANCH']}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/contents/recovery/R22591_C72_METADATA_ONLY_CANDIDATE_AUDIT.json",data=payload,headers=H,method='PUT')
+          with urllib.request.urlopen(req,timeout=30) as r:r.read()
+          print(json.dumps({'PASS':True,'selected':'C72-A','scores':{x['id']:x['admission_score'] for x in rows},'weight_path_get_count':0,'model_weight_bytes':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22591-c72-metadata-only
+          path: work/out/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+      - name: Persist run identity after artifact finalization
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUT_BRANCH: r22591-c72-metadata-receipt
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request,base64,time,datetime
+          H={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LUCIA-AA-R22591-run-receipt','Content-Type':'application/json'}
+          arts=[]
+          for _ in range(10):
+            req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/actions/runs/{os.environ['RUN_ID']}/artifacts?per_page=100",headers=H)
+            with urllib.request.urlopen(req,timeout=30) as r:d=json.loads(r.read().decode())
+            arts=d.get('artifacts',[])
+            if arts: break
+            time.sleep(2)
+          out={'schema':'R22591_C72_METADATA_RUN_RECEIPT_V1','generated_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'run_id':int(os.environ['RUN_ID']),'head_sha':os.environ['HEAD_SHA'],'huggingface_weight_path_get_count':0,'model_weight_bytes':0,'artifacts':[{'id':a.get('id'),'name':a.get('name'),'size_in_bytes':a.get('size_in_bytes'),'digest':a.get('digest'),'expired':a.get('expired')} for a in arts]}
+          b=(json.dumps(out,indent=2,sort_keys=True)+'\n').encode(); payload=json.dumps({'message':'Persist R22591 C72 metadata run receipt','content':base64.b64encode(b).decode(),'branch':os.environ['OUT_BRANCH']}).encode()
+          req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/contents/recovery/R22591_C72_METADATA_RUN_RECEIPT.json",data=payload,headers=H,method='PUT')
+          with urllib.request.urlopen(req,timeout=30) as r:r.read()
+          PY
