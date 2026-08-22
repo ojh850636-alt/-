@@ -1,0 +1,329 @@
+{
+  "candidates": [
+    {
+      "adapter_config_present": true,
+      "adapter_config_revision": null,
+      "adapter_lfs": {
+        "blob_id": "38e7a4e71958ad477435c6d8d9307141b929e8fc",
+        "name": "adapter_model.safetensors",
+        "sha256": "a9bd05a996e688e540426ca673ba697d3fba669338a3f7dfbb6bda43d501e5ef",
+        "size": 69527352
+      },
+      "admission_score": 11,
+      "anchor_groups": [
+        [
+          "cron"
+        ]
+      ],
+      "base_model_name_or_path": "unsloth/SmolLM2-360M-Instruct",
+      "cost": 28,
+      "declared_base": "unsloth/SmolLM2-360M-Instruct",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "DECLARATIVE_CRON_RECURRENCE_SET_DENOTATION",
+      "hard_new_admissible": false,
+      "hard_reject_reasons": [
+        "LICENSE_UNCLEAR",
+        "SEMANTIC_TASK_UNCLEAR_FROM_IMMUTABLE_TEXT"
+      ],
+      "id": "C75-A",
+      "immutable_revision": "335d28d31565179150891d541d56eea6aee3c8d2",
+      "license": null,
+      "license_clear": false,
+      "lora_alpha": 64,
+      "lora_dropout": 0.0,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 28,
+      "peft_type": "LORA",
+      "r": 32,
+      "repo": "leom21/cron-lora",
+      "semantic_anchor_matches": {
+        "0": []
+      },
+      "semantic_task_clear": false,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 30,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_config_revision": null,
+      "adapter_lfs": {
+        "blob_id": "cef8b9985d1b72b21940fcebbb0dbf6ccc56fcd7",
+        "name": "adapter_model.safetensors",
+        "sha256": "c922197747f3863054728514cc323c02c1d72abd981c4a4172a6091b78b78a34",
+        "size": 73911112
+      },
+      "admission_score": 128,
+      "anchor_groups": [
+        [
+          "mermaid"
+        ],
+        [
+          "diagram"
+        ]
+      ],
+      "base_model_name_or_path": "Qwen/Qwen2.5-1.5B-Instruct",
+      "cost": 26,
+      "declared_base": "Qwen/Qwen2.5-1.5B-Instruct",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "NATURAL_LANGUAGE_TO_MERMAID_GRAPH_AST_AND_DENOTATION",
+      "hard_new_admissible": true,
+      "hard_reject_reasons": [],
+      "id": "C75-B",
+      "immutable_revision": "87a0faf78acac3a7dcecf7e3cc8554261160c57a",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 27,
+      "peft_type": "LORA",
+      "r": 16,
+      "repo": "Petanque/flow-forge-mermaid-th",
+      "semantic_anchor_matches": {
+        "0": [
+          "mermaid"
+        ],
+        "1": [
+          "diagram"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 30,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_config_revision": null,
+      "adapter_lfs": {
+        "blob_id": "06e0c7b0a4f06bb771b79225ca3dbde01933a7c7",
+        "name": "adapter_model.safetensors",
+        "sha256": "130bcc7e1d91e49339e8954ac9d74b86c75be9ebe918a83675291da8b61e5a0e",
+        "size": 161533192
+      },
+      "admission_score": -9,
+      "anchor_groups": [
+        [
+          "datacenter",
+          "data center",
+          "dc-ops"
+        ],
+        [
+          "thermal",
+          "power",
+          "cooling"
+        ]
+      ],
+      "base_model_name_or_path": "unsloth/Qwen2.5-7B-Instruct",
+      "cost": 8,
+      "declared_base": "unsloth/Qwen2.5-7B-Instruct",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "DATACENTER_THERMAL_POWER_STATE_TO_PHYSICS_GROUNDED_OPERATOR_ACTION",
+      "hard_new_admissible": false,
+      "hard_reject_reasons": [
+        "LICENSE_UNCLEAR"
+      ],
+      "id": "C75-C",
+      "immutable_revision": "6a1ae8bce6dd35c8dd441ac78ae6f5b390b77a17",
+      "license": null,
+      "license_clear": false,
+      "lora_alpha": 32,
+      "lora_dropout": 0.0,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 30,
+      "peft_type": "LORA",
+      "r": 16,
+      "repo": "Melikshah/dc_ops_grpo_lora",
+      "semantic_anchor_matches": {
+        "0": [
+          "datacenter",
+          "dc-ops"
+        ],
+        "1": [
+          "thermal",
+          "power",
+          "cooling"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 35,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_config_revision": null,
+      "adapter_lfs": {
+        "blob_id": "a5102e90c4c590f56031077efe80434958441019",
+        "name": "adapter_model.safetensors",
+        "sha256": "6f8fd1941820df5bcfb04a517ae00e9a50a77f9cbf1be413db72be6c4e34e5ec",
+        "size": 161533192
+      },
+      "admission_score": 111,
+      "anchor_groups": [
+        [
+          "openapi"
+        ],
+        [
+          "blast radius"
+        ],
+        [
+          "consumer",
+          "downstream"
+        ]
+      ],
+      "base_model_name_or_path": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+      "cost": 8,
+      "declared_base": "unsloth/Qwen2.5-7B-Instruct-bnb-4bit",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "OPENAPI_BREAKING_CHANGE_TO_DOWNSTREAM_BLAST_RADIUS_AND_BACKWARD_COMPAT_FIX",
+      "hard_new_admissible": true,
+      "hard_reject_reasons": [],
+      "id": "C75-D",
+      "immutable_revision": "8ef0fd1f9c9423df9d285fbe8f209b84fd64668a",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.0,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 30,
+      "peft_type": "LORA",
+      "r": 16,
+      "repo": "pushpam14/api-contract-validator-grpo-7b",
+      "semantic_anchor_matches": {
+        "0": [
+          "openapi"
+        ],
+        "1": [
+          "blast radius"
+        ],
+        "2": [
+          "consumer",
+          "downstream"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 35,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_config_revision": null,
+      "adapter_lfs": {
+        "blob_id": "bc929055ca8e8808bf5667466eb284f6c8a300ad",
+        "name": "adapter_model.safetensors",
+        "sha256": "1b4dd16b399c2241cab909713be63926ef274a109c2257fe42f1698382039c2a",
+        "size": 167832240
+      },
+      "admission_score": 2,
+      "anchor_groups": [
+        [
+          "graphql"
+        ]
+      ],
+      "base_model_name_or_path": "unsloth/meta-llama-3.1-8b-instruct-bnb-4bit",
+      "cost": 5,
+      "declared_base": "unsloth/meta-llama-3.1-8b-instruct-bnb-4bit",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "NATURAL_LANGUAGE_TO_GRAPHQL_AST_AND_SCHEMA_EXECUTION_DENOTATION",
+      "hard_new_admissible": false,
+      "hard_reject_reasons": [
+        "SEMANTIC_TASK_UNCLEAR_FROM_IMMUTABLE_TEXT"
+      ],
+      "id": "C75-E",
+      "immutable_revision": "3e681b85e442a91c306eb7897435e7279a7b861b",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 16,
+      "lora_dropout": 0,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 29,
+      "peft_type": "LORA",
+      "r": 16,
+      "repo": "smjain/graphql",
+      "semantic_anchor_matches": {
+        "0": []
+      },
+      "semantic_task_clear": false,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 30,
+      "weight_path_get_count": 0
+    }
+  ],
+  "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+  "generated_at_utc": "2026-08-22T14:17:02.521304+00:00",
+  "hard_new_admissible_count": 2,
+  "minimum_hard_new_required": 3,
+  "model_weight_bytes": 0,
+  "schema": "R22594_C75_METADATA_ONLY_HARD_NEW_AUDIT_V1",
+  "selection": {
+    "lane": "NO_SOURCE_MINIMUM_3_HARD_NEW_NOT_MET",
+    "policy": "DEDUP and immutable semantic task proof first. Require >=3 hard-new admissible families before any source. Then exact training Base > verifier > novelty > source/runtime cost.",
+    "repo": null,
+    "selected": null
+  },
+  "source_authorized": false,
+  "weight_path_get_count": 0
+}
