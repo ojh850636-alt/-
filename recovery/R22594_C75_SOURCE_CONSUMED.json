@@ -1,0 +1,11 @@
+{
+  "consumed": true,
+  "created_at_utc": "2026-08-22T14:31:24.560688+00:00",
+  "head_sha": "f9b5986ea32a5188738dd1668e160583da20ceef",
+  "observed_sha256": "c922197747f3863054728514cc323c02c1d72abd981c4a4172a6091b78b78a34",
+  "observed_size": 73911112,
+  "repo": "Petanque/flow-forge-mermaid-th",
+  "revision": "87a0faf78acac3a7dcecf7e3cc8554261160c57a",
+  "run_id": 32578939067,
+  "schema": "R22594_C75_DURABLE_SOURCE_CONSUMED_GATE_V1"
+}
