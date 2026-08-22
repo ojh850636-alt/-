@@ -1,0 +1,15 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:372d2d0ae3a51ebe7a60e099927e983173da7ab7e15f40f11a7e92bbbef93a1e",
+      "expired": false,
+      "id": 9476623130,
+      "name": "r22593-c74-quant-recovery-adapter-only-rawfree",
+      "size_in_bytes": 80318
+    }
+  ],
+  "generated_at_utc": "2026-08-22T13:37:12.944237+00:00",
+  "head_sha": "4956623fa8eb43191a8429b95c6e7b406cad825a",
+  "run_id": 32576266101,
+  "schema": "R22593_C74_SOURCE_RUN_RECEIPT_V1"
+}
