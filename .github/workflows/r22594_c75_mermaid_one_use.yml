@@ -1,0 +1,85 @@
+name: R22594 C75 Mermaid adapter-only one-use archaeology
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: r22594-c75-mermaid-source-one-use
+  cancel-in-progress: false
+jobs:
+  c75:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with: {python-version: '3.13'}
+      - name: Durable consumed-gate precheck and dependency-free parser preflight
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUT_BRANCH: r22594-c75-source-receipt
+        run: |
+          set -euo pipefail
+          test "$(git hash-object .github/r22594/c75_mermaid_static_runner.py)" = "e51293ea47c62b5f93b53baa05c3a0f2e70f7a2b"
+          python - <<'PY'
+          import os,urllib.request,urllib.error
+          u=f"https://api.github.com/repos/{os.environ['REPO']}/contents/recovery/R22594_C75_SOURCE_CONSUMED.json?ref={os.environ['OUT_BRANCH']}"
+          H={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LUCIA-AA-R22594-C75-precheck'}
+          try:
+            urllib.request.urlopen(urllib.request.Request(u,headers=H),timeout=30).read()
+          except urllib.error.HTTPError as e:
+            if e.code==404: print('SOURCE_NOT_YET_CONSUMED'); raise SystemExit(0)
+            raise
+          raise SystemExit('SOURCE_ALREADY_CONSUMED_NO_RERUN')
+          PY
+          PYTHONDONTWRITEBYTECODE=1 python -B .github/r22594/c75_mermaid_static_runner.py --preflight
+      - name: Single authorized Adapter ingress and static archaeology
+        id: source
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SHA: ${{ github.sha }}
+          OUT_BRANCH: r22594-c75-source-receipt
+        run: |
+          set -euo pipefail
+          test "$(git hash-object .github/r22594/c75_mermaid_static_runner.py)" = "e51293ea47c62b5f93b53baa05c3a0f2e70f7a2b"
+          PYTHONDONTWRITEBYTECODE=1 python -B .github/r22594/c75_mermaid_static_runner.py
+      - name: Upload raw-free source evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: r22594-c75-mermaid-adapter-only-rawfree
+          path: work/out/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: warn
+      - name: Persist unique source run identity
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OUT_BRANCH: r22594-c75-source-receipt
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+          SOURCE_OUTCOME: ${{ steps.source.outcome }}
+        run: |
+          python - <<'PY'
+          import os,json,urllib.request,base64,time,datetime
+          H={'Authorization':f"Bearer {os.environ['GH_TOKEN']}",'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LUCIA-AA-R22594-C75-run','Content-Type':'application/json'};arts=[]
+          for _ in range(10):
+            req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/actions/runs/{os.environ['RUN_ID']}/artifacts?per_page=100",headers=H)
+            with urllib.request.urlopen(req,timeout=30) as r:d=json.loads(r.read().decode())
+            arts=d.get('artifacts',[])
+            if arts:break
+            time.sleep(2)
+          out={'schema':'R22594_C75_SOURCE_RUN_RECEIPT_V1','generated_at_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'run_id':int(os.environ['RUN_ID']),'head_sha':os.environ['HEAD_SHA'],'source_step_outcome':os.environ['SOURCE_OUTCOME'],'artifacts':[{'id':a.get('id'),'name':a.get('name'),'size_in_bytes':a.get('size_in_bytes'),'digest':a.get('digest'),'expired':a.get('expired')} for a in arts]}
+          b=(json.dumps(out,indent=2,sort_keys=True)+'\n').encode();path=f"recovery/R22594_C75_SOURCE_RUN_{os.environ['RUN_ID']}.json";payload=json.dumps({'message':'Persist R22594 C75 source run identity','content':base64.b64encode(b).decode(),'branch':os.environ['OUT_BRANCH']}).encode();req=urllib.request.Request(f"https://api.github.com/repos/{os.environ['REPO']}/contents/{path}",data=payload,headers=H,method='PUT');urllib.request.urlopen(req,timeout=30).read()
+          PY
+      - name: Fail workflow if source step failed
+        if: steps.source.outcome != 'success'
+        run: exit 1
