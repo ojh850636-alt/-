@@ -1,0 +1,104 @@
+name: R22589 C70 metadata-only executable-adapter audit
+on:
+  pull_request:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: API/text-only candidate audit and C69 family metadata recovery
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import urllib.request,urllib.parse,json,pathlib,re,hashlib,subprocess
+          UA={'User-Agent':'LUCIA-AA-R22589-C70-metadata-only'}
+          def get(url,limit=5_000_000):
+              req=urllib.request.Request(url,headers=UA)
+              with urllib.request.urlopen(req,timeout=60) as r:
+                  b=r.read(limit+1)
+                  if len(b)>limit: raise RuntimeError('TOO_LARGE:'+url)
+                  return b
+          def get_json(url): return json.loads(get(url).decode())
+          def info(repo,rev=None):
+              if rev:
+                  q=urllib.parse.quote(rev,safe='')
+                  urls=[f'https://huggingface.co/api/models/{repo}/revision/{q}?blobs=true',f'https://huggingface.co/api/models/{repo}?revision={q}&blobs=true']
+              else: urls=[f'https://huggingface.co/api/models/{repo}?blobs=true']
+              err=[]
+              for u in urls:
+                  try: return get_json(u)
+                  except Exception as e: err.append(str(e))
+              raise RuntimeError('MODEL_INFO_FAIL '+repo+' '+str(rev)+' '+repr(err))
+          def text(repo,sha,name,limit=4_000_000):
+              try: return get(f'https://huggingface.co/{repo}/raw/{sha}/{name}',limit).decode('utf-8','replace')
+              except Exception: return None
+          def sibling(info,name):
+              for x in info.get('siblings') or []:
+                  if x.get('rfilename')==name:
+                      l=x.get('lfs') or {}
+                      return {'size':l.get('size') or x.get('size'),'sha256':l.get('sha256') or l.get('oid'),'blob_id':x.get('blobId')}
+              return {}
+          # Recover C69 family config drift WITHOUT any model weight path GET.
+          nix_repo='OpenxAILabs/nix-reviewer-1.5b'; nix=[]
+          for tag in ['v0.1','v0.2','v0.2a']:
+              try:
+                  inf=info(nix_repo,tag); sha=inf.get('sha'); cfg_txt=text(nix_repo,sha,'adapter_config.json') if sha else None; cfg=json.loads(cfg_txt) if cfg_txt else None
+                  nix.append({'tag':tag,'immutable_revision':sha,'license':(inf.get('cardData') or {}).get('license'),'adapter_lfs':sibling(inf,'adapter_model.safetensors'),'config':cfg,'weight_path_get_count':0,'model_weight_bytes':0})
+              except Exception as e: nix.append({'tag':tag,'error':str(e),'weight_path_get_count':0,'model_weight_bytes':0})
+          CANDS=[
+            {'slot':'C70-A','repo':'digitable-lol/specgen-qwen3-1.7b','question':'RUSSIAN_NL_TO_EXECUTABLE_FTS_SPEC_WITH_COMPILER_THEOREM_CERTIFICATE_AND_INDEPENDENT_SEMANTIC_FIDELITY','verifier':'FTS compiler/typecheck/examples/proof certificate + independent task semantic reader'},
+            {'slot':'C70-B','repo':'Pablo-Flores-Mollinedo/verilog-qwen2.5-coder-7b-v4-1-seq-bit-fsm-lora','question':'NL_TO_VERILOG_RTL_COMPILE_AND_FUNCTIONAL_SIMULATION_SEMANTICS','verifier':'iverilog compile + vvp testbench simulation'},
+            {'slot':'C70-C','repo':'jhsu12/solidity-vuln-cls-unchecked-low-level-calls-v1','question':'SOLIDITY_UNCHECKED_LOW_LEVEL_CALL_VULNERABILITY_CLASSIFICATION_WITH_COMPILER_STATIC_ORACLE','verifier':'Solidity parser/static oracle + explicit negative mutations'}
+          ]
+          rows=[]
+          for c in CANDS:
+              inf=info(c['repo']); sha=inf.get('sha'); card=inf.get('cardData') or {}
+              cfg_txt=text(c['repo'],sha,'adapter_config.json') if sha else None
+              readme=text(c['repo'],sha,'README.md') if sha else None
+              train=text(c['repo'],sha,'train_summary.json') if sha else None
+              manifest=text(c['repo'],sha,'MANIFEST.json') if sha else None
+              cfg=None; train_obj=None
+              try: cfg=json.loads(cfg_txt) if cfg_txt else None
+              except Exception: pass
+              try: train_obj=json.loads(train) if train else None
+              except Exception: pass
+              exact=[]
+              hay='\n'.join(x for x in [readme or '',train or ''] if x)
+              for pat in [r'(?:base(?:_model)?(?:_revision)?|revision)[^0-9a-f]{0,40}([0-9a-f]{40})',r'Qwen[^\s`"\']+[@:]([0-9a-f]{40})']:
+                  exact+=re.findall(pat,hay,re.I)
+              rows.append({**c,
+                'immutable_revision':sha,'license':card.get('license'),'tags':inf.get('tags') or [],
+                'adapter_lfs':sibling(inf,'adapter_model.safetensors'),'adapter_config':cfg,
+                'base_model_name_or_path':cfg.get('base_model_name_or_path') if cfg else None,
+                'adapter_config_revision':cfg.get('revision') if cfg else None,
+                'peft_type':cfg.get('peft_type') if cfg else None,'r':cfg.get('r') if cfg else None,'lora_alpha':cfg.get('lora_alpha') if cfg else None,
+                'target_modules':sorted(cfg.get('target_modules') or []) if cfg else [],'modules_to_save':cfg.get('modules_to_save') if cfg else None,
+                'use_dora':cfg.get('use_dora') if cfg else None,'use_rslora':cfg.get('use_rslora') if cfg else None,
+                'train_summary':train_obj,'exact_40hex_revision_candidates':sorted(set(exact)),
+                'readme_sha256':hashlib.sha256((readme or '').encode()).hexdigest(),'train_summary_sha256':hashlib.sha256((train or '').encode()).hexdigest() if train else None,
+                'manifest_sha256':hashlib.sha256((manifest or '').encode()).hexdigest() if manifest else None,
+                'readme_excerpt':(readme or '')[:18000],
+                'weight_path_get_count':0,'model_weight_bytes':0})
+          npm={}
+          for pkg in ['@digitable-lol/fts','@digitable-lol/fts-gate']:
+              try:
+                  cp=subprocess.run(['npm','view',pkg,'version','license','dist.integrity','dist.shasum','--json'],capture_output=True,text=True,timeout=60,check=True)
+                  npm[pkg]=json.loads(cp.stdout)
+              except Exception as e: npm[pkg]={'error':str(e)}
+          out={'schema':'R22589_C70_METADATA_AUDIT_V1','model_weight_bytes':0,'weight_path_get_count':0,'c69_family_metadata_recovery':nix,'candidates':rows,'fts_npm_metadata':npm}
+          pathlib.Path('out/R22589_C70_METADATA_AUDIT.json').write_text(json.dumps(out,ensure_ascii=False,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'PASS':True,'candidate_count':len(rows),'nix_tags':len(nix),'model_weight_bytes':0,'weight_path_get_count':0,'candidate_revisions':{r['slot']:r['immutable_revision'] for r in rows}},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22589-c70-metadata-audit
+          path: out/
+          compression-level: 0
+          retention-days: 1
