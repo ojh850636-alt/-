@@ -16,7 +16,7 @@ jobs:
       - name: Verify reviewed runner and runtime before any model source
         run: |
           set -euo pipefail
-          test "$(sha256sum .github/r22589/c70_financial_qa_runner.py | awk '{print $1}')" = "bbec7a24f428d1f9b1adb1d682fabee3158ebf4cda2646b43f951d0bf3e4ccc4"
+          test "$(git hash-object .github/r22589/c70_financial_qa_runner.py)" = "4b83ceb57a4aa30461a3bbb591bd82c3449ef12f"
           python -m py_compile .github/r22589/c70_financial_qa_runner.py
           python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.12.0'
           python -m pip install --disable-pip-version-check 'transformers==4.57.6' 'peft==0.20.0' 'accelerate==1.14.0' 'safetensors==0.7.0' 'huggingface_hub==1.4.1' 'numpy==2.3.5' 'psutil==7.0.0'
