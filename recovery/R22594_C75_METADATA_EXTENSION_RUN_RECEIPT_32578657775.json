@@ -1,0 +1,17 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:5d91a15ae3315cf1b78c38617d3706aec7d41d2c9b5e9cbaad61f7572c9b64d2",
+      "expired": false,
+      "id": 9477207587,
+      "name": "r22594-c75-metadata-extension",
+      "size_in_bytes": 7095
+    }
+  ],
+  "generated_at_utc": "2026-08-22T14:25:35.191559+00:00",
+  "head_sha": "c7d54fbb860a93c6e4b4042f19f236b770bb9b0c",
+  "huggingface_weight_path_get_count": 0,
+  "model_weight_bytes": 0,
+  "run_id": 32578657775,
+  "schema": "R22594_C75_METADATA_EXTENSION_RUN_RECEIPT_V1"
+}
