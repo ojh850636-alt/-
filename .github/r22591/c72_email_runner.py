@@ -39,9 +39,11 @@ def render(e,i):
  op=[f'Hi support, my name is {name}.',f'Hello — {name} here.',f'Support team, this is {name} writing about my order.',f'I am {name}; I need assistance with {ph}.'][i%4]
  body={'refund':f'I noticed the same charge twice after buying {ph}.','troubleshoot':f'My {ph} keeps dropping its connection even after a restart.','reset_password':f'I cannot sign in to manage {ph} because my password no longer works.','cancel_subscription':f'I no longer need the subscription linked to {ph}.','replacement':f'The {ph} arrived defective and will not power on reliably.','invoice_explanation':f'My invoice for {ph} contains a charge I do not recognize.'}[q]
  a=[op,body,US[e['urgency']],SS[e['sentiment']],RM[q][2]]
- if i%4==1:a=[op,US[e['urgency']],body,RM[q][2],SS[e['sentiment']]]
- if i%4==2:a=[f'Subject: help with {ps[0]}',op,body,SS[e['sentiment']],US[e['urgency']],RM[q][2]]
- if i%4==3:a=[op,body,f'For reference, the products are {ph}.',RM[q][2],US[e['urgency']],SS[e['sentiment']]]
+ if 20<=i<28:
+  a=[f'CUSTOMER: {name}',f'ITEMS: {ph}',f'SITUATION: {body}',f'REQUEST: {RM[q][2]}',f'PRIORITY NOTE: {US[e["urgency"]]}',f'TONE NOTE: {SS[e["sentiment"]]}'] if i%2==0 else [f'Ticket from {name}',f'Affected product(s) -> {ph}',US[e['urgency']],f'Observed issue -> {body}',SS[e['sentiment']],f'Desired resolution -> {RM[q][2]}']
+ elif i%4==1:a=[op,US[e['urgency']],body,RM[q][2],SS[e['sentiment']]]
+ elif i%4==2:a=[f'Subject: help with {ps[0]}',op,body,SS[e['sentiment']],US[e['urgency']],RM[q][2]]
+ elif i%4==3:a=[op,body,f'For reference, the products are {ph}.',RM[q][2],US[e['urgency']],SS[e['sentiment']]]
  return '\n'.join(a)
 def cases(a,b):
  out=[]
@@ -152,10 +154,10 @@ def main():
   with m.disable_adapter():hb=ev(H)
   hf=ev(H);hr=[i for i,(a,b) in enumerate(zip(hb,hf)) if not a['pass'] and b['pass']];hh=[i for i,(a,b) in enumerate(zip(hb,hf)) if a['pass'] and not b['pass']];hg=len(hr)>len(hh) and bool(hr);B['holdout']={'status':'INSTANTIATED_AFTER_PRIMARY_CONTROL_GATE','BASE':agg(hb),'FULL':agg(hf),'rescue_indices':hr,'harm_indices':hh,'same_environment_replicated_gain':hg}
  if gain and sep and hg:
-  Z=cases(20,28);assert ch(Z)=='07a02168a3c84c01dd9baff253443252763d81e68977039cb7e8581c280581ff';access['ood_instantiated']=True;jw('R22591_C72_SPLIT_ACCESS_RECEIPT.json',access)
+  Z=cases(20,28);assert ch(Z)=='011072f91afff53c964d6967eb34234a01046078fecc7a536528db20d07572b1';access['ood_instantiated']=True;jw('R22591_C72_SPLIT_ACCESS_RECEIPT.json',access)
   with m.disable_adapter():ob=ev(Z)
   of=ev(Z);B['ood']={'status':'INSTANTIATED_AFTER_HOLDOUT_GATE','BASE':agg(ob),'FULL':agg(of)}
-  probe=primary[res[0]];C={'probe_id':probe['id'],'module_ablation':{},'module_sufficiency':{}}
+  probe=primary[res[0]];C={'probe_id':probe['id'],'module_ablation':{},'module_sufficiency':{},'layer_quartile_ablation':{}}
   def zero(pred):
    restore()
    with torch.no_grad():
@@ -168,6 +170,8 @@ def main():
     for n,p in np.items():
      if 'lora_B' in n and f'.{mod}.' not in n:p.zero_()
    C['module_sufficiency'][mod]=gen(probe)
+  lys=[int(k) for k in op['by_layer'] if int(k)>=0];mx=max(lys);qs=[(0,mx//4),(mx//4+1,mx//2),(mx//2+1,3*mx//4),(3*mx//4+1,mx)]
+  for lo,hi in qs:zero(lambda n,a=lo,b=hi:bool((mm:=re.search(r'\.layers\.(\d+)\.',n))) and a<=int(mm.group(1))<=b);C['layer_quartile_ablation'][f'{lo}_{hi}']=gen(probe)
   restore();B['causal']={'status':'E3_BOUNDED_SAME_ENVIRONMENT_ONLY','results':C,'not_e4_or_e5':True}
  else:
   if B['holdout']['status']=='LOCKED_UNINSTANTIATED':B['holdout']['status']='LOCKED_UNINSTANTIATED_PRIMARY_OR_CONTROL_GATE_FAIL'
