@@ -1,0 +1,253 @@
+{
+  "combined_hard_new_count": 5,
+  "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+  "extension_admitted_count": 3,
+  "extension_candidates": [
+    {
+      "adapter_config_present": true,
+      "adapter_lfs": {
+        "blob_id": "2294dc4a824b4e1a968cc76481a609bf0f27d708",
+        "name": "adapter_model.safetensors",
+        "sha256": "5a831a2b753802bbed5fe614e2e8f02545ce0fd7c882f38f382b320781271bfd",
+        "size": 323014168
+      },
+      "admission_score": 98,
+      "anchor_groups": [
+        [
+          "retrosynthesis",
+          "reactant prediction",
+          "predict_reactants"
+        ],
+        [
+          "product smiles",
+          "reactants_smiles"
+        ]
+      ],
+      "cost": 7,
+      "declared_base": "Qwen/Qwen2.5-7B-Instruct",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "TARGET_PRODUCT_SMILES_TO_PRECURSOR_MULTISET_WITH_FORWARD_REACTION_VALIDITY",
+      "hard_new_admissible": true,
+      "hard_reject_reasons": [],
+      "id": "C75-F",
+      "immutable_revision": "e55cd1d7c69fd7c75d1b562473f7b4bb887219d7",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 64,
+      "lora_dropout": 0.05,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 31,
+      "peft_type": "LORA",
+      "r": 32,
+      "repo": "oleh13/retro-reactants-qwen25-7b-lora",
+      "semantic_anchor_matches": {
+        "0": [
+          "retrosynthesis"
+        ],
+        "1": [
+          "product smiles"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "down_proj",
+        "gate_proj",
+        "k_proj",
+        "o_proj",
+        "q_proj",
+        "up_proj",
+        "v_proj"
+      ],
+      "verifier_quality": 35,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_lfs": {
+        "blob_id": "ac382c18f432ef3eb86a9fedfb9003a77852efd7",
+        "name": "adapter_model.safetensors",
+        "sha256": "d9ac9a789a889b96e693039353240169e350cdf6ea93c19ba7d9adfd9225cc7c",
+        "size": 66082184
+      },
+      "admission_score": 102,
+      "anchor_groups": [
+        [
+          "accompaniment"
+        ],
+        [
+          "midi"
+        ]
+      ],
+      "cost": 12,
+      "declared_base": "loubb/aria-medium-base",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "SYMBOLIC_MELODY_TO_MIDI_ACCOMPANIMENT_EVENT_STRUCTURE",
+      "hard_new_admissible": true,
+      "hard_reject_reasons": [],
+      "id": "C75-G",
+      "immutable_revision": "54aa5ab7a8064c05ff1a45582ad9383219568a5e",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 64,
+      "lora_dropout": 0.05,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 27,
+      "peft_type": "LORA",
+      "r": 32,
+      "repo": "xingjianll/aria-accompaniment",
+      "semantic_anchor_matches": {
+        "0": [
+          "accompaniment"
+        ],
+        "1": [
+          "midi"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "att_proj_linear",
+        "ff_down_proj",
+        "ff_gate_proj",
+        "ff_up_proj",
+        "mixed_qkv"
+      ],
+      "verifier_quality": 18,
+      "weight_path_get_count": 0
+    },
+    {
+      "adapter_config_present": true,
+      "adapter_lfs": {
+        "blob_id": "3ab5702e6acdf90bfd2950f6175c2a29e8a915ed",
+        "name": "adapter_model.safetensors",
+        "sha256": "5b5284cb3ca0d7edeb1402d194935ddd5885fd503e047076458e46004e383d91",
+        "size": 16796120
+      },
+      "admission_score": 95,
+      "anchor_groups": [
+        [
+          "mixassist",
+          "mixing"
+        ],
+        [
+          "audio"
+        ]
+      ],
+      "cost": 6,
+      "declared_base": "Qwen/Qwen2-Audio-7B-Instruct",
+      "dedup_preseal_sha256": "ffb7a0c01cd5a7da44953ac6dbf854ddebf831fa5d5f47b4cec65b02f4bfa44b",
+      "exact_training_base_revision": null,
+      "exact_training_base_revision_proofs": [],
+      "exact_training_base_revision_proven": false,
+      "family": "MULTITRACK_AUDIO_STATE_TO_MIX_CONTROL_ACTIONS",
+      "hard_new_admissible": true,
+      "hard_reject_reasons": [],
+      "id": "C75-H",
+      "immutable_revision": "fe1acc1c3d1e7b28ba90a2a9fc6002e93296db34",
+      "license": "apache-2.0",
+      "license_clear": true,
+      "lora_alpha": 32,
+      "lora_dropout": 0.05,
+      "model_weight_bytes": 0,
+      "modules_to_save": null,
+      "novelty": 28,
+      "peft_type": "LORA",
+      "r": 8,
+      "repo": "mclemcrew/Qwen2-Audio-MixAssist-LoRA",
+      "semantic_anchor_matches": {
+        "0": [
+          "mixassist",
+          "mixing"
+        ],
+        "1": [
+          "audio"
+        ]
+      },
+      "semantic_task_clear": true,
+      "target_modules": [
+        "$",
+        "(",
+        ")",
+        "*",
+        ".",
+        ".",
+        ".",
+        "\\",
+        "\\",
+        "^",
+        "_",
+        "_",
+        "_",
+        "a",
+        "a",
+        "d",
+        "e",
+        "e",
+        "g",
+        "g",
+        "j",
+        "j",
+        "l",
+        "l",
+        "m",
+        "n",
+        "o",
+        "o",
+        "o",
+        "p",
+        "p",
+        "q",
+        "r",
+        "r",
+        "u",
+        "v",
+        "|"
+      ],
+      "verifier_quality": 16,
+      "weight_path_get_count": 0
+    }
+  ],
+  "generated_at_utc": "2026-08-22T14:25:33.288159+00:00",
+  "minimum_required": 3,
+  "model_weight_bytes": 0,
+  "run1_admitted": [
+    {
+      "adapter_size": 73911112,
+      "exact_base": false,
+      "family": "NATURAL_LANGUAGE_TO_MERMAID_GRAPH_AST_AND_DENOTATION",
+      "id": "C75-B",
+      "repo": "Petanque/flow-forge-mermaid-th",
+      "score": 128
+    },
+    {
+      "adapter_size": 161533192,
+      "exact_base": false,
+      "family": "OPENAPI_BREAKING_CHANGE_TO_DOWNSTREAM_BLAST_RADIUS_AND_BACKWARD_COMPAT_FIX",
+      "id": "C75-D",
+      "repo": "pushpam14/api-contract-validator-grpo-7b",
+      "score": 111
+    }
+  ],
+  "schema": "R22594_C75_METADATA_EXTENSION_V1",
+  "selection": {
+    "lane": "ADAPTER_ONLY_E1_STATIC",
+    "policy": "combine frozen run1 admitted families with extension only; exact Base > score > lower adapter bytes",
+    "selected": {
+      "adapter_size": 73911112,
+      "exact_base": false,
+      "family": "NATURAL_LANGUAGE_TO_MERMAID_GRAPH_AST_AND_DENOTATION",
+      "id": "C75-B",
+      "repo": "Petanque/flow-forge-mermaid-th",
+      "score": 128
+    }
+  },
+  "source_authorized": true,
+  "weight_path_get_count": 0
+}
