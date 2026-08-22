@@ -19,7 +19,7 @@ jobs:
           test "$(git hash-object .github/r22589/c70_financial_qa_runner.py)" = "4b83ceb57a4aa30461a3bbb591bd82c3449ef12f"
           python -m py_compile .github/r22589/c70_financial_qa_runner.py
           python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.12.0'
-          python -m pip install --disable-pip-version-check 'transformers==4.57.6' 'peft==0.20.0' 'accelerate==1.14.0' 'safetensors==0.7.0' 'huggingface_hub==1.4.1' 'numpy==2.3.5' 'psutil==7.0.0'
+          python -m pip install --disable-pip-version-check 'transformers==4.57.6' 'peft==0.20.0' 'accelerate==1.14.0' 'safetensors==0.7.0' 'huggingface_hub==0.36.0' 'numpy==2.3.5' 'psutil==7.0.0'
           python - <<'PY'
           import shutil,psutil,torch
           from transformers import Qwen3Config,Qwen3ForCausalLM
