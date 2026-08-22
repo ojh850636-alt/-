@@ -1,0 +1,17 @@
+{
+  "artifacts": [
+    {
+      "digest": "sha256:8de5cdb85b21d516ce11364c4199693c3f164952e9ae48942b540baea851fcca",
+      "expired": false,
+      "id": 9477106055,
+      "name": "r22594-c75-metadata-only",
+      "size_in_bytes": 10100
+    }
+  ],
+  "generated_at_utc": "2026-08-22T14:17:05.135454+00:00",
+  "head_sha": "7a4eaec5b03a9ecf55ee1df1691df2706dbce0a9",
+  "huggingface_weight_path_get_count": 0,
+  "model_weight_bytes": 0,
+  "run_id": 32578236439,
+  "schema": "R22594_C75_METADATA_RUN_RECEIPT_V1"
+}
