@@ -1,0 +1,1 @@
+Metadata-only trigger. Adapter/Base weight bytes remain zero.
