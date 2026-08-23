@@ -1,0 +1,44 @@
+name: R22595 C76 metadata-only probe temporary
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Probe immutable Hugging Face metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, hashlib, urllib.request
+          def get_json(url):
+              with urllib.request.urlopen(url, timeout=30) as r: return json.load(r)
+          def get_bytes(url):
+              with urllib.request.urlopen(url, timeout=30) as r: return r.read()
+          repo='Chrisyichuan/wiki-screenshot-embedding-lora'
+          rev='f60bb16cdb83988845569dcfe93f07f3823b832c'
+          sub='lora_vit/ckpt200'
+          tree=get_json(f'https://huggingface.co/api/models/{repo}/tree/{rev}/{sub}?recursive=true&expand=true')
+          print('TREE_JSON='+json.dumps(tree,sort_keys=True,separators=(',',':')))
+          by={x.get('path','').split('/')[-1]:x for x in tree if isinstance(x,dict)}
+          for name in ('adapter_config.json','adapter_model.safetensors'):
+              x=by.get(name,{})
+              print(f'FILE {name} size={x.get("size")} lfs={json.dumps(x.get("lfs"),sort_keys=True)} xet={json.dumps(x.get("xetHash"),sort_keys=True)}')
+          cfg_bytes=get_bytes(f'https://huggingface.co/{repo}/resolve/{rev}/{sub}/adapter_config.json')
+          cfg=json.loads(cfg_bytes)
+          print('CONFIG_SHA256='+hashlib.sha256(cfg_bytes).hexdigest())
+          print('CONFIG_JSON='+json.dumps(cfg,sort_keys=True,separators=(',',':')))
+          base_path=str(cfg.get('base_model_name_or_path'))
+          print('BASE_MODEL_NAME_OR_PATH='+base_path)
+          print('BASE_SNAPSHOT_FROM_CONFIG='+(base_path.split('/snapshots/')[-1] if '/snapshots/' in base_path else ''))
+          for d in ('Chrisyichuan/screenshot-training-natural-filtered-v2','Chrisyichuan/screenshot-training','Chrisyichuan/text-qa-pair'):
+              meta=get_json('https://huggingface.co/api/datasets/'+d)
+              print('DATASET '+d+' sha='+str(meta.get('sha'))+' private='+str(meta.get('private'))+' gated='+str(meta.get('gated')))
+          bm=get_json('https://huggingface.co/api/models/Qwen/Qwen3-VL-Embedding-2B')
+          print('BASE_CURRENT_SHA='+str(bm.get('sha')))
+          print('DONE_METADATA_ONLY_NO_WEIGHT_DOWNLOAD')
+          PY
