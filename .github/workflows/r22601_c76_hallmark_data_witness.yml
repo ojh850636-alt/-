@@ -2,6 +2,8 @@ name: R22601 C76 Hallmark DATA witness probe
 on:
   push:
     branches: [r22601-c76-hallmark-data-witness]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
@@ -57,7 +59,6 @@ jobs:
                   if expected_rows is not None and rows != expected_rows:
                       raise SystemExit(f'FAIL_ROW_COUNT {name} {rows}!={expected_rows}')
 
-          # Model release manifest is small metadata only and binds the same run-specific data path.
           model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
           model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
           manifest=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/training_manifest.json')
