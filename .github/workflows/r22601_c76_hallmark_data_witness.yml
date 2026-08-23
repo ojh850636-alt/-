@@ -40,6 +40,12 @@ jobs:
           print('DATASET_PRIVATE='+str(meta.get('private')))
           print('DATASET_GATED='+str(meta.get('gated')))
 
+          commits=get_json(f'{api}/commits/main')
+          print('DATASET_COMMITS_JSON='+json.dumps(commits,sort_keys=True,separators=(',',':')))
+          ids=[str(c.get('id') or '') for c in commits if isinstance(c,dict)]
+          if rev not in ids:
+              raise SystemExit('FAIL_CURRENT_SHA_NOT_IN_COMMIT_HISTORY')
+
           tree=get_json(f'{api}/tree/{rev}?recursive=true&expand=true')
           by={x.get('path'):x for x in tree if isinstance(x,dict)}
           print('TREE_ENTRY_COUNT='+str(len(by)))
