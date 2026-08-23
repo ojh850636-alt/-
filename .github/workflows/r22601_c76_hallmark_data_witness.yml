@@ -41,8 +41,8 @@ jobs:
           print('DATASET_GATED='+str(meta.get('gated')))
 
           commits=get_json(f'{api}/commits/main')
-          print('DATASET_COMMITS_JSON='+json.dumps(commits,sort_keys=True,separators=(',',':')))
           ids=[str(c.get('id') or '') for c in commits if isinstance(c,dict)]
+          print('DATASET_COMMIT_HISTORY_IDS='+','.join(ids))
           if rev not in ids:
               raise SystemExit('FAIL_CURRENT_SHA_NOT_IN_COMMIT_HISTORY')
 
@@ -75,5 +75,71 @@ jobs:
           if '61460529b25c/train/prepared_dataset' not in str(mj.get('dataset_dir')):
               raise SystemExit('FAIL_MODEL_MANIFEST_RUN_DATA_PATH')
 
-          print('DONE_R22601_DATA_WITNESS_NO_ADAPTER_BASE_WEIGHT_DOWNLOAD')
+          print('DONE_R22601_PUBLIC_DATA_OBJECT_WITNESS_NO_ADAPTER_BASE_WEIGHT_DOWNLOAD')
           PY
+
+      - name: Regenerate exact run DATA from immutable Hallmark Git snapshot and compare bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          HALLMARK_COMMIT='fb2492313daaad9159cc7f38bddfc9f4e11686ec'
+          DATASET_COMMIT='d8b8359473e28278b1dc558b63ebc406974785f3'
+          EXPECT_TRAIN='cc97b4be14e81cfee5d3baa0fbbc4521efb20d236647f2544d5102ae782d7d61'
+          EXPECT_VALID='7c483d347185aecdaa5dcb9b712e0b78ceb76fb3f932cd3c600f504673e963b3'
+
+          git clone --quiet https://github.com/SebastianBoehler/hallmark-mlx.git /tmp/hallmark-mlx
+          cd /tmp/hallmark-mlx
+          git checkout --quiet "$HALLMARK_COMMIT"
+          test "$(git rev-parse HEAD)" = "$HALLMARK_COMMIT"
+          test -z "$(git status --porcelain)"
+
+          python -m pip install --disable-pip-version-check -q uv
+          uv sync --frozen --no-dev
+
+          rm -rf /tmp/r22601-prepared
+          mkdir -p /tmp/r22601-prepared
+          uv run python - <<'PY'
+          from pathlib import Path
+          from hallmark_mlx.training.dataset_loader import prepare_training_dataset
+          from hallmark_mlx.types import TrainingExampleFormat
+          prepare_training_dataset(
+              Path('data/processed'),
+              Path('/tmp/r22601-prepared'),
+              example_format=TrainingExampleFormat.TOOL_TRANSCRIPT_STEPS,
+          )
+          PY
+
+          python - <<'PY'
+          import hashlib, urllib.request
+          from pathlib import Path
+
+          dataset_repo='sebastianboehler/hallmark-mlx-reviewed-policy-traces'
+          dataset_commit='d8b8359473e28278b1dc558b63ebc406974785f3'
+          expected={
+              'train.jsonl':'cc97b4be14e81cfee5d3baa0fbbc4521efb20d236647f2544d5102ae782d7d61',
+              'valid.jsonl':'7c483d347185aecdaa5dcb9b712e0b78ceb76fb3f932cd3c600f504673e963b3',
+          }
+          for name in ('train.jsonl','valid.jsonl'):
+              regen=Path('/tmp/r22601-prepared')/name
+              rb=regen.read_bytes()
+              rsha=hashlib.sha256(rb).hexdigest()
+              req=urllib.request.Request(
+                  f'https://huggingface.co/datasets/{dataset_repo}/resolve/{dataset_commit}/{name}',
+                  headers={'User-Agent':'LAA-R22601-data-regen/1.0'},
+              )
+              with urllib.request.urlopen(req,timeout=45) as r:
+                  public=r.read()
+              psha=hashlib.sha256(public).hexdigest()
+              print(f'REGEN_FILE {name} size={len(rb)} sha256={rsha}')
+              print(f'PUBLIC_FILE {name} size={len(public)} sha256={psha}')
+              print(f'BYTE_IDENTICAL {name}={rb == public}')
+              if rsha != expected[name] or psha != expected[name] or rb != public:
+                  raise SystemExit('FAIL_REGEN_PUBLIC_MISMATCH '+name)
+          print('DONE_R22601_EXACT_GIT_REGEN_EQUALS_PUBLIC_RUN_DATA_BYTES')
+          PY
+
+          # Science-source ingress stays zero: remove all temporary external bytes.
+          rm -rf /tmp/hallmark-mlx /tmp/r22601-prepared
+          echo 'TEMP_EXTERNAL_BYTES_DELETED=true'
+          echo 'ADAPTER_WEIGHT_BYTES=0'
+          echo 'BASE_WEIGHT_BYTES=0'
