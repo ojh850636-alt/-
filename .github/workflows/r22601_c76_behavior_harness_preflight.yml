@@ -20,10 +20,9 @@ jobs:
             'mlx==0.31.1' 'mlx-lm==0.31.1' 'huggingface-hub==1.9.0' \
             'transformers==5.5.0' 'tokenizers==0.22.2' 'safetensors>=0.4'
           python - <<'PY'
-          import json, os, re, tempfile
+          import json, re, tempfile, shutil
           from pathlib import Path
           import mlx.core as mx
-          from mlx.utils import tree_flatten
           from huggingface_hub import snapshot_download
           from mlx_lm import generate
           from mlx_lm.models.qwen2 import Model, ModelArgs
@@ -34,69 +33,51 @@ jobs:
 
           base_repo='Qwen/Qwen2.5-1.5B-Instruct'
           base_rev='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
-          allow=[
-            'tokenizer.json','tokenizer_config.json','vocab.json','merges.txt',
-            'special_tokens_map.json','generation_config.json','chat_template.jinja','*.jinja'
-          ]
+          allow=['tokenizer.json','tokenizer_config.json','vocab.json','merges.txt','special_tokens_map.json','generation_config.json','chat_template.jinja','*.jinja']
           tok_path=Path(snapshot_download(base_repo,revision=base_rev,allow_patterns=allow))
-          forbidden=list(tok_path.glob('model*.safetensors'))
-          if forbidden: raise SystemExit('FAIL_BASE_WEIGHT_FILE_DOWNLOADED')
+          if list(tok_path.glob('model*.safetensors')): raise SystemExit('FAIL_BASE_WEIGHT_FILE_DOWNLOADED')
           tokenizer=load_tokenizer(tok_path)
 
           system='''You are a citation verification policy model.\nYour job is not to guess whether a citation is true from memory.\nYour job is to decide how to verify it.\nOperational rules:\n1. the first assistant turn must be a tool call,\n2. never emit a final decision before at least one tool result,\n3. do not emit free-form chain-of-thought.\nReturn only structured outputs that follow the transcript protocol.'''
           user='''Construct a verification trace for the following input.\nBegin with a tool call and verify before deciding.\n\n{"input_type":"raw_citation_string","raw_input":"Doe, J. Synthetic Evidence Study. Venue 2024. DOI: 10.9999/synthetic.1"}'''
-          tools=[{
-            'type':'function','function':{
-              'name':'crossref.resolve_doi','description':'Resolve one DOI against Crossref.',
-              'parameters':{'type':'object','properties':{'doi':{'type':'string'}},'required':['doi']}
-            }
-          }]
-          messages=[{'role':'system','content':system},{'role':'user','content':user}]
-          prompt=tokenizer.apply_chat_template(messages,tools=tools,tokenize=False,add_generation_prompt=True)
+          tools=[{'type':'function','function':{'name':'crossref.resolve_doi','description':'Resolve one DOI against Crossref.','parameters':{'type':'object','properties':{'doi':{'type':'string'}},'required':['doi']}}}]
+          prompt=tokenizer.apply_chat_template([{'role':'system','content':system},{'role':'user','content':user}],tools=tools,tokenize=False,add_generation_prompt=True)
           if not isinstance(prompt,str) or not prompt: raise SystemExit('FAIL_CHAT_TEMPLATE')
           print('CHAT_TEMPLATE_CHARS='+str(len(prompt)))
           print('TOKENIZER_NONWEIGHT_FILES='+json.dumps(sorted(p.name for p in tok_path.iterdir() if p.is_file()),separators=(',',':')))
 
-          args=ModelArgs(
-            model_type='qwen2',hidden_size=16,num_hidden_layers=28,intermediate_size=32,
-            num_attention_heads=4,num_key_value_heads=2,rms_norm_eps=1e-6,
-            vocab_size=151936,max_position_embeddings=2048,rope_theta=1000000.0,
-            tie_word_embeddings=True,
-          )
+          args=ModelArgs(model_type='qwen2',hidden_size=16,num_hidden_layers=28,intermediate_size=32,num_attention_heads=4,num_key_value_heads=2,rms_norm_eps=1e-6,vocab_size=151936,max_position_embeddings=2048,rope_theta=1000000.0,tie_word_embeddings=True)
           lora_params={'rank':8,'dropout':0.0,'scale':20.0}
           work=Path(tempfile.mkdtemp(prefix='laa-r22601-'))
 
-          # Build one synthetic adapter with the exact 14-layer x 7-module geometry.
           mx.random.seed(777)
           synth=Model(args)
           linear_to_lora_layers(synth,14,lora_params,use_dora=False)
-          modules=[]
+          modules=[]; weights={}
           for name,module in synth.named_modules():
             if isinstance(module,LoRALinear):
               module.lora_b = mx.random.normal(module.lora_b.shape) * 0.01
               modules.append(name)
-          if len(modules)!=98: raise SystemExit('FAIL_SYNTH_MODULES')
-          weights=dict(tree_flatten(synth.trainable_parameters()))
+              weights[name+'.lora_a']=module.lora_a
+              weights[name+'.lora_b']=module.lora_b
+          if len(modules)!=98: raise SystemExit('FAIL_SYNTH_MODULES '+str(len(modules)))
           if len(weights)!=196: raise SystemExit('FAIL_SYNTH_TENSORS '+str(len(weights)))
+          print('SYNTH_LORA_MODULES=98')
+          print('SYNTH_LORA_TENSORS=196')
 
           def write_adapter(name, wd):
             d=work/name; d.mkdir()
             mx.save_safetensors(str(d/'adapters.safetensors'),wd)
-            (d/'adapter_config.json').write_text(json.dumps({
-              'fine_tune_type':'lora','num_layers':14,'lora_parameters':lora_params
-            }),encoding='utf-8')
+            (d/'adapter_config.json').write_text(json.dumps({'fine_tune_type':'lora','num_layers':14,'lora_parameters':lora_params}),encoding='utf-8')
             return d
-
           full_dir=write_adapter('full',weights)
-          # random-norm matched
-          rnd={}
-          mx.random.seed(778)
+
+          rnd={}; mx.random.seed(778)
           for k,v in weights.items():
-            r=mx.random.normal(v.shape)
-            vn=float(mx.linalg.norm(v).item()); rn=float(mx.linalg.norm(r).item())
+            r=mx.random.normal(v.shape); vn=float(mx.linalg.norm(v).item()); rn=float(mx.linalg.norm(r).item())
             rnd[k]=r*(vn/rn) if rn else r
           random_dir=write_adapter('random_norm_matched',rnd)
-          # layer-shuffled cyclic rename, preserving module shapes
+
           shuffled={}
           for k,v in weights.items():
             m=re.search(r'model\.layers\.(\d+)\.',k)
@@ -105,33 +86,25 @@ jobs:
             shuffled[k.replace(f'model.layers.{i}.',f'model.layers.{j}.',1)]=v
           if len(shuffled)!=196: raise SystemExit('FAIL_SHUFFLE_COLLISION')
           shuffle_dir=write_adapter('layer_shuffled',shuffled)
+
           dose_dirs={}
           for dose in (0.25,0.5,1.0,1.5):
-            dw={k:(v*dose if k.endswith('.lora_b') else v) for k,v in weights.items()}
-            dose_dirs[dose]=write_adapter('dose_'+str(dose).replace('.','p'),dw)
+            dose_dirs[dose]=write_adapter('dose_'+str(dose).replace('.','p'),{k:(v*dose if k.endswith('.lora_b') else v) for k,v in weights.items()})
 
-          # Same synthetic base model is reused across arms; adapter layers are removed between runs.
           mx.random.seed(12345)
-          model=Model(args); model.eval()
-          sampler=make_sampler(0.0)
-          arms=[('BASE',None),('FULL',full_dir),('RANDOM_NORM_MATCHED',random_dir),('LAYER_SHUFFLED',shuffle_dir)]
-          arms += [('DOSE_'+str(d),dose_dirs[d]) for d in (0.25,0.5,1.0,1.5)]
+          model=Model(args); model.eval(); sampler=make_sampler(0.0)
+          arms=[('BASE',None),('FULL',full_dir),('RANDOM_NORM_MATCHED',random_dir),('LAYER_SHUFFLED',shuffle_dir)] + [('DOSE_'+str(d),dose_dirs[d]) for d in (0.25,0.5,1.0,1.5)]
           outputs={}
           for arm,adir in arms:
-            if adir is not None:
-              load_adapters(model,str(adir))
+            if adir is not None: load_adapters(model,str(adir))
             mx.random.seed(4242)
             text=generate(model,tokenizer,prompt,verbose=False,max_tokens=8,sampler=sampler)
             if not isinstance(text,str): raise SystemExit('FAIL_GENERATION_TYPE '+arm)
             outputs[arm]={'chars':len(text),'prefix':text[:80]}
-            if adir is not None:
-              remove_lora_layers(model)
+            if adir is not None: remove_lora_layers(model)
           print('ARM_OUTPUT_SUMMARY='+json.dumps(outputs,sort_keys=True,separators=(',',':')))
-          if set(outputs)!={'BASE','FULL','RANDOM_NORM_MATCHED','LAYER_SHUFFLED','DOSE_0.25','DOSE_0.5','DOSE_1.0','DOSE_1.5'}:
-            raise SystemExit('FAIL_ARM_SET')
+          if set(outputs)!={'BASE','FULL','RANDOM_NORM_MATCHED','LAYER_SHUFFLED','DOSE_0.25','DOSE_0.5','DOSE_1.0','DOSE_1.5'}: raise SystemExit('FAIL_ARM_SET')
 
-          # Cleanup and prove no external weights were consumed.
-          import shutil
           shutil.rmtree(work)
           print('HARNESS_PREFLIGHT_PASS=true')
           print('EXTERNAL_ADAPTER_BYTES=0')
