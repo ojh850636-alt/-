@@ -1,0 +1,16 @@
+{
+  "files": [
+    "R22601_C76_K_BEHAVIOR_COMPACT.json",
+    "R22601_C76_K_DELETION_RECEIPT.json",
+    "R22601_C76_K_RAWFREE_OPERATOR_GENOME.json",
+    "R22601_C76_K_RUN_SUMMARY.json",
+    "R22601_C76_K_SOURCEFREE_BEHAVIOR.json",
+    "R22601_C76_K_SOURCE_IDENTITY.json",
+    "R22601_C76_K_STATIC_OPERATOR_ATLAS.json"
+  ],
+  "github_run_id": "32650267728",
+  "no_retry": true,
+  "raw_free": true,
+  "schema": "R22601_C76K_SOURCE_RUN_INDEX_V1",
+  "source_head": "858435068b67cfedc765999f9b3db1f98ca1c20c"
+}
