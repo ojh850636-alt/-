@@ -1,0 +1,44 @@
+{
+  "causal_run": false,
+  "claim_boundary": "Source-free synthetic citation-metadata classification surrogate. No public Hallmark score is counted as LAA capability. Positive claim requires locked control separation.",
+  "confirmation_pass": false,
+  "control_separated_gain": false,
+  "discovery_full_minus_base_margin": {
+    "ci95": [
+      -1.615234375,
+      -0.9607421875000011
+    ],
+    "mean": -1.3046875
+  },
+  "discovery_full_minus_controls_margin": {
+    "RANDOM1337": {
+      "ci95": [
+        -2.16220703125,
+        -0.9433105468750003
+      ],
+      "mean": -1.58203125
+    },
+    "RANDOM224": {
+      "ci95": [
+        -0.820361328125,
+        -0.4765625
+      ],
+      "mean": -0.64453125
+    },
+    "RANDOM42": {
+      "ci95": [
+        -1.52158203125,
+        -0.6132324218750003
+      ],
+      "mean": -1.078125
+    },
+    "SHUFFLE42": {
+      "ci95": [
+        -1.181640625,
+        -0.646484375
+      ],
+      "mean": -0.92578125
+    }
+  },
+  "schema": "R22601_C76K_BEHAVIOR_COMPACT_V1"
+}
