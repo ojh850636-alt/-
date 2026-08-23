@@ -1,0 +1,26 @@
+{
+  "first": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "provider": "stub",
+      "result": {
+        "provider": "stub",
+        "ok": true,
+        "text": "simulated-response"
+      }
+    }
+  },
+  "second": {
+    "status": 200,
+    "body": {
+      "ok": true,
+      "provider": "mock",
+      "result": {
+        "provider": "mock",
+        "ok": true,
+        "text": "mocked-response: ok"
+      }
+    }
+  }
+}

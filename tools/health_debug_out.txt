@@ -1,0 +1,13 @@
+importlib OK
+module imported: <module 'lucia_ultimate_quantum_enhanced_modular' from 'c:\\Users\\Hi\\Desktop\\루시아 에이전트\\2\\lucia_ultimate_quantum_enhanced_modular.py'>
+state: <class 'lucia_core.state.SystemState'> repr=SystemState(psi=0.5, entanglement=0.0, threat_level=0, quantum_resources=30, emotion_vector=array([0., 0., 0., 0., 0., 0., 0.]), health_score=1.0, security_level=5)
+quantum_core: <class 'lucia_core.quantum.QuantumConsciousnessCore'> repr=<lucia_core.quantum.QuantumConsciousnessCore object at 0x00000157BC341940>
+emotion: <class 'lucia_core.emotion.EmotionSystem'> repr=<lucia_core.emotion.EmotionSystem object at 0x00000157BC341A90>
+sensor: <class 'lucia_core.sensors.RealitySensorSimulator'> repr=<lucia_core.sensors.RealitySensorSimulator object at 0x000001578C63FCB0>
+threat: <class 'lucia_core.threat.AdvancedThreatDetector'> repr=<lucia_core.threat.AdvancedThreatDetector object at 0x00000157BC342270>
+evolution: <class 'lucia_core.evolution.EvolutionaryEngine'> repr=<lucia_core.evolution.EvolutionaryEngine object at 0x00000157BD93CEC0>
+crypto: <class 'lucia_core.crypto.QuantumResistantCrypto'> repr=<lucia_core.crypto.QuantumResistantCrypto object at 0x00000157BD93D2B0>
+tokens: <class 'lucia_core.crypto.QuantumTokenSystem'> repr=<lucia_core.crypto.QuantumTokenSystem object at 0x00000157BD93D400>
+comms: <class 'lucia_core.comms.SecureMQTTLayer'> repr=<lucia_core.comms.SecureMQTTLayer object at 0x00000157BD93D550>
+decision: <class 'lucia_core.decision.DecisionEngine'> repr=<lucia_core.decision.DecisionEngine object at 0x00000157BD93D940>
+health(): {"ok": true, "time": "2025-08-15T18:53:06.590102", "psi": 0.40090206480188995}
