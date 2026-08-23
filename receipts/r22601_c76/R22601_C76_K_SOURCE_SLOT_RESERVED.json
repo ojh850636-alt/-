@@ -1,0 +1,11 @@
+{
+  "consumed": false,
+  "github_run_id": "32650267728",
+  "hard_rule": "ANY_RESERVATION_BLOCKS_ALL_FUTURE_SOURCE_GETS",
+  "reserved": true,
+  "schema": "R22601_C76K_SOURCE_SLOT_RESERVATION_V1",
+  "source_head": "858435068b67cfedc765999f9b3db1f98ca1c20c",
+  "source_path": "adapters.safetensors",
+  "source_repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
+  "source_revision": "4e24e866109fc0e2e7dfe2e0470529d68c45fbea"
+}
