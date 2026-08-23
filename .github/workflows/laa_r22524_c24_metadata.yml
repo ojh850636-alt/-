@@ -1,0 +1,100 @@
+name: Temporary LAA R22524 C24 exact split courier
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  courier:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Download exact allowlisted Whisper-small translation source and split archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ROOT="$RUNNER_TEMP/LAA_R22524_C24_EXACT"
+          SRC="$ROOT/source"; WHEELS="$ROOT/wheelhouse"; PARTS="$ROOT/parts"
+          mkdir -p "$SRC/adapter" "$SRC/base" "$WHEELS" "$PARTS"
+          A_REPO='Be-win/whisper-small-mal-en-lora'; A_REV='326fa07ed37811577e2b8aa8b3061dfa15743bdd'
+          B_REPO='openai/whisper-small'; B_REV='973afd24965f72e36ca33b3055d56a652f456b4d'
+          dl(){ curl -L --fail --retry 8 --retry-all-errors --connect-timeout 30 --max-time 3600 -A 'LUCIA-AA-R22524-Exact/1.0' -o "$4" "https://huggingface.co/$1/resolve/$2/$3?download=true"; }
+          for n in README.md adapter_config.json adapter_model.safetensors preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do dl "$A_REPO" "$A_REV" "$n" "$SRC/adapter/$n" || true; done
+          for n in README.md LICENSE config.json model.safetensors preprocessor_config.json generation_config.json tokenizer_config.json tokenizer.json special_tokens_map.json merges.txt vocab.json normalizer.json; do dl "$B_REPO" "$B_REV" "$n" "$SRC/base/$n" || true; done
+          test "$(stat -c%s "$SRC/adapter/adapter_model.safetensors")" = '14196448'
+          test "$(sha256sum "$SRC/adapter/adapter_model.safetensors" | awk '{print $1}')" = 'e6ccbca5a7e47cdb90a4867c46f6fda26ca35e599cc38ec984d447193c88ca8c'
+          test "$(stat -c%s "$SRC/base/model.safetensors")" = '966995080'
+          test "$(sha256sum "$SRC/base/model.safetensors" | awk '{print $1}')" = '1d7734884874f1a1513ed9aa760a4f8e97aaa02fd6d93a3a85d27b2ae9ca596b'
+          if find "$SRC" -type f \( -name '*.bin' -o -name '*.pt' -o -name '*.pth' -o -name '*.pkl' -o -name '*.pickle' -o -name '*.h5' -o -name '*.msgpack' -o -name '*.py' -o -name '*.ipynb' \) | grep -q .; then echo forbidden >&2; exit 1; fi
+          python - <<'PY'
+          import json,struct,os,pathlib
+          r=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_EXACT/source'
+          for rel in ('adapter/adapter_model.safetensors','base/model.safetensors'):
+            with (r/rel).open('rb') as f:n=struct.unpack('<Q',f.read(8))[0];h=json.loads(f.read(n))
+            t=[k for k in h if k!='__metadata__'];assert t,rel;print(rel,len(t))
+          PY
+          python -m pip download --dest "$WHEELS" --only-binary=:all: --no-deps \
+            'transformers==4.57.1' 'peft==0.19.1' 'accelerate==1.14.0' \
+            'huggingface-hub==0.36.0' 'tokenizers==0.22.1' 'safetensors==0.7.0'
+          python - <<'PY'
+          import hashlib,json,os,pathlib
+          root=pathlib.Path(os.environ['RUNNER_TEMP'])/'LAA_R22524_C24_EXACT';rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file() and 'parts' not in x.parts):
+            h=hashlib.sha256()
+            with p.open('rb') as f:
+              for b in iter(lambda:f.read(1<<20),b''):h.update(b)
+            rows.append({'path':p.relative_to(root).as_posix(),'size_bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          rec={'schema':'LUCIA_AA_R2_25_24_C24_EXACT_COURIER_V1','candidate_id':'R22524-C24-WHISPER-SMALL-MALAYALAM-ENGLISH-TRANSLATION','adapter_revision':'326fa07ed37811577e2b8aa8b3061dfa15743bdd','base_revision':'973afd24965f72e36ca33b3055d56a652f456b4d','raw_weight_committed_to_git':False,'files':rows}
+          (root/'COURIER_RECEIPT.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
+          PY
+          (cd "$ROOT" && tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -cf EXACT_SOURCE.tar source wheelhouse COURIER_RECEIPT.json)
+          sha256sum "$ROOT/EXACT_SOURCE.tar" > "$ROOT/EXACT_SOURCE.tar.sha256"
+          split -b 300000000 -d -a 2 "$ROOT/EXACT_SOURCE.tar" "$PARTS/part_"
+          (cd "$PARTS" && sha256sum part_* > PARTS_SHA256.txt && wc -c part_* > PARTS_SIZES.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_PART_00
+          path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_00
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_PART_01
+          path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_01
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_PART_02
+          path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_02
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_PART_03
+          path: ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/part_03
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LAA_R22524_C24_PART_MANIFEST
+          path: |
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/PARTS_SHA256.txt
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/parts/PARTS_SIZES.txt
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/EXACT_SOURCE.tar.sha256
+            ${{ runner.temp }}/LAA_R22524_C24_EXACT/COURIER_RECEIPT.json
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
