@@ -1,0 +1,36 @@
+{
+  "schema": "R22601_PRE_SOURCE_AUTHORIZATION_V1",
+  "campaign": "FIRST_EXTERNAL_POSITIVE_E5_CLOSURE",
+  "candidate": "C76_K_HALLMARK_MLX_QWEN25_1_5B_CITATION_VERIFICATION",
+  "strict_l4": true,
+  "strict_run_binding": "5/5",
+  "gates": {
+    "A_DEPENDENCY_ABI": "PASS_EXACT_LOCKED_MACOS_ARM64_SYNTHETIC_ABI_SOURCE_ZERO",
+    "B_EXACT_TRAINING_LINEAGE": "PASS_STRICT_L4_5_OF_5",
+    "C_SOURCEFREE_LOCKED_VERIFIER": "PASS_128_DUAL_384_MUTATIONS",
+    "D_INDEPENDENT_WORKER_CONTRACT": "PASS_HALLMARK_CANDIDATE_SPECIFIC_CONTRACT_REPLAY_PENDING"
+  },
+  "source": {
+    "repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
+    "revision": "4e24e866109fc0e2e7dfe2e0470529d68c45fbea",
+    "path": "adapters.safetensors",
+    "expected_size": 18485794,
+    "expected_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a",
+    "git_oid": "06480b3fdf52ffec35c002d6f110b7b66f31489d",
+    "xet_hash": "4485bc6e022ee98bf2429e5880ee85da1731026a4b709e05172c5c87b99e5d51"
+  },
+  "base": {
+    "repo": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+  },
+  "locked_suite_sha256": "beea0021151e66c81163d9098fd6eb859125a8cbebdffc94082d312af649e705",
+  "hard_rules": [
+    "ONE_ADAPTER_GET_ONLY",
+    "DURABLE_CONSUMED_MARKER_BEFORE_IDENTITY_CHECK",
+    "NO_BASE_GET_IF_STATIC_VIABILITY_FAILS",
+    "NO_PUBLIC_HALLMARK_SCORE_AS_LAA_BEHAVIOR_CREDIT",
+    "NO_RAW_WEIGHT_IN_RECEIPT_BRANCH",
+    "NO_RETRY_AFTER_DURABLE_CONSUMPTION",
+    "NO_C77"
+  ]
+}
