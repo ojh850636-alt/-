@@ -1,0 +1,117 @@
+name: R22601 C76 Hallmark Gate A source-zero ABI
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gatea:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - name: Verify exact MLX dependency and config ABI without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "UNAME=$(uname -a)"
+          echo "ARCH=$(uname -m)"
+          test "$(uname -m)" = "arm64"
+          python3 -m pip install --quiet --disable-pip-version-check \
+            'mlx==0.31.1' 'mlx-lm==0.31.1' 'huggingface-hub==1.9.0' \
+            'transformers==5.5.0' 'tokenizers==0.22.2'
+          python3 - <<'PY'
+          import hashlib, json, platform, urllib.request
+          import mlx, mlx_lm, huggingface_hub, transformers, tokenizers
+          from mlx_lm.models.qwen2 import Model, ModelArgs
+          from mlx_lm.tuner.utils import linear_to_lora_layers
+          from mlx_lm.tuner.lora import LoRALinear
+
+          expected={
+            'mlx':'0.31.1','mlx_lm':'0.31.1','huggingface_hub':'1.9.0',
+            'transformers':'5.5.0','tokenizers':'0.22.2'
+          }
+          got={
+            'mlx':mlx.__version__,'mlx_lm':mlx_lm.__version__,
+            'huggingface_hub':huggingface_hub.__version__,
+            'transformers':transformers.__version__,'tokenizers':tokenizers.__version__
+          }
+          print('PLATFORM_MACHINE='+platform.machine())
+          print('VERSIONS='+json.dumps(got,sort_keys=True))
+          if got != expected: raise SystemExit('FAIL_VERSION_LOCK '+repr(got))
+          if platform.machine() != 'arm64': raise SystemExit('FAIL_NOT_ARM64')
+
+          def get_bytes(url):
+            req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22601-gatea/1.0'})
+            with urllib.request.urlopen(req,timeout=45) as r: return r.read()
+          def get_json(url): return json.loads(get_bytes(url))
+
+          model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
+          model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
+          adapter_raw=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/adapter_config.json')
+          adapter=json.loads(adapter_raw)
+          print('ADAPTER_CONFIG_SHA256='+hashlib.sha256(adapter_raw).hexdigest())
+          print('ADAPTER_CONFIG='+json.dumps(adapter,sort_keys=True,separators=(',',':')))
+          if adapter.get('fine_tune_type') != 'lora': raise SystemExit('FAIL_FINE_TUNE_TYPE')
+          if adapter.get('num_layers') != 14: raise SystemExit('FAIL_NUM_LAYERS')
+          lp=adapter.get('lora_parameters') or {}
+          if lp != {'rank':8,'dropout':0.0,'scale':20.0}: raise SystemExit('FAIL_LORA_PARAMS '+repr(lp))
+          if adapter.get('model') != 'Qwen/Qwen2.5-1.5B-Instruct': raise SystemExit('FAIL_BASE_ID')
+          if lp.get('keys') is not None: raise SystemExit('FAIL_UNEXPECTED_EXPLICIT_KEYS')
+
+          tree=get_json(f'https://huggingface.co/api/models/{model_repo}/tree/{model_rev}?recursive=true&expand=true')
+          files=sorted(str(x.get('path')) for x in tree if isinstance(x,dict) and x.get('type')=='file')
+          print('MODEL_RELEASE_FILES='+json.dumps(files,separators=(',',':')))
+          learned=[p for p in files if p.endswith(('.safetensors','.bin','.pt','.pth','.ckpt','.pkl','.pickle','.npy','.npz'))]
+          print('LEARNED_BINARY_FILES='+json.dumps(learned,separators=(',',':')))
+          if learned != ['adapters.safetensors']: raise SystemExit('FAIL_AUX_LEARNED_STATE '+repr(learned))
+
+          base_repo='Qwen/Qwen2.5-1.5B-Instruct'
+          base_rev='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+          base_raw=get_bytes(f'https://huggingface.co/{base_repo}/resolve/{base_rev}/config.json')
+          base=json.loads(base_raw)
+          print('BASE_CONFIG_SHA256='+hashlib.sha256(base_raw).hexdigest())
+          print('BASE_CONFIG='+json.dumps(base,sort_keys=True,separators=(',',':')))
+          if base.get('model_type')!='qwen2': raise SystemExit('FAIL_BASE_MODEL_TYPE')
+          if base.get('architectures')!=['Qwen2ForCausalLM']: raise SystemExit('FAIL_BASE_ARCH')
+          if base.get('num_hidden_layers')!=28: raise SystemExit('FAIL_BASE_LAYER_COUNT')
+          if 'auto_map' in base: raise SystemExit('FAIL_REMOTE_AUTO_MAP')
+
+          base_tree=get_json(f'https://huggingface.co/api/models/{base_repo}/tree/{base_rev}?recursive=true&expand=true')
+          base_files=sorted(str(x.get('path')) for x in base_tree if isinstance(x,dict) and x.get('type')=='file')
+          remote_code=[p for p in base_files if p.endswith('.py')]
+          print('BASE_REMOTE_PY_FILES='+json.dumps(remote_code,separators=(',',':')))
+          if remote_code: raise SystemExit('FAIL_REMOTE_CODE_REQUIRED '+repr(remote_code))
+
+          # Tiny structural replay of the exact Qwen2/LoRA ABI. No Base/Adapter weights are loaded.
+          args=ModelArgs(
+            model_type='qwen2', hidden_size=16, num_hidden_layers=28,
+            intermediate_size=32, num_attention_heads=4, num_key_value_heads=2,
+            rms_norm_eps=1e-6, vocab_size=64, max_position_embeddings=128,
+            rope_theta=1000000.0, tie_word_embeddings=True,
+          )
+          tiny=Model(args)
+          linear_to_lora_layers(tiny,14,lp,use_dora=False)
+          names=[name for name,module in tiny.named_modules() if isinstance(module,LoRALinear)]
+          print('LORA_MODULE_COUNT='+str(len(names)))
+          print('LORA_MODULE_NAMES='+json.dumps(names,separators=(',',':')))
+          if len(names)!=98: raise SystemExit('FAIL_LORA_MODULE_COUNT '+str(len(names)))
+          expected_suffixes={
+            'self_attn.q_proj','self_attn.k_proj','self_attn.v_proj','self_attn.o_proj',
+            'mlp.gate_proj','mlp.up_proj','mlp.down_proj'
+          }
+          per_layer={}
+          for name in names:
+            parts=name.split('.')
+            # model.layers.<idx>.<suffix>
+            if len(parts)<5 or parts[0]!='model' or parts[1]!='layers':
+              raise SystemExit('FAIL_MODULE_NAME '+name)
+            idx=int(parts[2]); suffix='.'.join(parts[3:])
+            per_layer.setdefault(idx,set()).add(suffix)
+          if set(per_layer)!=set(range(14,28)): raise SystemExit('FAIL_LAYER_RANGE '+repr(sorted(per_layer)))
+          if any(v!=expected_suffixes for v in per_layer.values()): raise SystemExit('FAIL_SUFFIX_SET')
+          print('EXPECTED_ADAPTER_LOW_RANK_TENSORS=196')
+          print('GATE_A_PASS_SOURCE_ZERO=true')
+          print('ADAPTER_BYTES=0')
+          print('BASE_WEIGHT_BYTES=0')
+          print('MODEL_OUTPUT_BYTES=0')
+          PY
