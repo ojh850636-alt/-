@@ -1,0 +1,72 @@
+name: R22601 C76 Hallmark DATA witness probe
+on:
+  push:
+    branches: [r22601-c76-hallmark-data-witness]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Recover immutable public DATA object identity only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, urllib.request
+
+          repo='sebastianboehler/hallmark-mlx-reviewed-policy-traces'
+          api='https://huggingface.co/api/datasets/'+repo
+
+          def get_json(url):
+              req=urllib.request.Request(url, headers={'User-Agent':'LAA-R22601-data-witness/1.0'})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  return json.load(r)
+
+          def get_bytes(url):
+              req=urllib.request.Request(url, headers={'User-Agent':'LAA-R22601-data-witness/1.0'})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  return r.read()
+
+          meta=get_json(api)
+          rev=str(meta.get('sha') or '')
+          if len(rev)!=40:
+              raise SystemExit('FAIL_NO_IMMUTABLE_DATASET_SHA '+repr(rev))
+          print('DATASET_REPO='+repo)
+          print('DATASET_COMMIT_SHA='+rev)
+          print('DATASET_PRIVATE='+str(meta.get('private')))
+          print('DATASET_GATED='+str(meta.get('gated')))
+
+          tree=get_json(f'{api}/tree/{rev}?recursive=true&expand=true')
+          by={x.get('path'):x for x in tree if isinstance(x,dict)}
+          print('TREE_ENTRY_COUNT='+str(len(by)))
+
+          for name, expected_rows in [('train.jsonl',75),('valid.jsonl',6),('metadata.json',None),('reviewed_seed_traces_combined.jsonl',45)]:
+              item=by.get(name)
+              if not item:
+                  raise SystemExit('FAIL_MISSING_TREE_OBJECT '+name)
+              compact={k:item.get(k) for k in ('path','type','size','oid','lfs','xetHash') if k in item}
+              print('TREE_OBJECT '+name+' '+json.dumps(compact,sort_keys=True,separators=(',',':')))
+              raw=get_bytes(f'https://huggingface.co/datasets/{repo}/resolve/{rev}/{name}')
+              sha=hashlib.sha256(raw).hexdigest()
+              print(f'FILE_SHA256 {name} size={len(raw)} sha256={sha}')
+              if name.endswith('.jsonl'):
+                  rows=sum(1 for line in raw.splitlines() if line.strip())
+                  print(f'FILE_ROWS {name} rows={rows}')
+                  if expected_rows is not None and rows != expected_rows:
+                      raise SystemExit(f'FAIL_ROW_COUNT {name} {rows}!={expected_rows}')
+
+          # Model release manifest is small metadata only and binds the same run-specific data path.
+          model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
+          model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
+          manifest=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/training_manifest.json')
+          print('MODEL_TRAINING_MANIFEST_SHA256='+hashlib.sha256(manifest).hexdigest())
+          mj=json.loads(manifest)
+          print('MODEL_MANIFEST_DATASET_DIR='+str(mj.get('dataset_dir')))
+          print('MODEL_MANIFEST_RUN_ID_PRESENT='+str('61460529b25c' in json.dumps(mj,sort_keys=True)))
+          if '61460529b25c/train/prepared_dataset' not in str(mj.get('dataset_dir')):
+              raise SystemExit('FAIL_MODEL_MANIFEST_RUN_DATA_PATH')
+
+          print('DONE_R22601_DATA_WITNESS_NO_ADAPTER_BASE_WEIGHT_DOWNLOAD')
+          PY
