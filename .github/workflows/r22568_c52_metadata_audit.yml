@@ -1,0 +1,112 @@
+name: R22568 C52 One-Use Calendar Archaeology
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  onepass:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - name: Recover and verify source-zero authority artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p inherited_meta inherited_preseal r22568_evidence
+          gh api repos/ojh850636-alt/-/actions/artifacts/9263617176/zip > metadata.zip
+          gh api repos/ojh850636-alt/-/actions/artifacts/9263670402/zip > preseal.zip
+          unzip -q metadata.zip -d inherited_meta
+          unzip -q preseal.zip -d inherited_preseal
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          p=json.load(open('inherited_preseal/R22568_C52_PREOUTPUT_SEAL.json'))
+          assert p['model_weight_bytes_present']==0 and p['model_outputs_observed']==0
+          assert p['suite_n']==384
+          assert p['suite_sha256']=='34aa41d17083f277ea060459db4cf93a467d9f42494f30dfa0660e4f0b749b47'
+          assert p['contract_sha256']=='9319dbc4e4ee1ad548278feb57326156ad9af0ffc3e2980c25f5181227d4e9e6'
+          print('PRESEAL_CHAIN_PASS')
+          PY
+          cp inherited_meta/R22568_C52_CANDIDATE_AUDIT.json r22568_evidence/
+          cp inherited_preseal/R22568_C52_PREOUTPUT_SEAL.json r22568_evidence/
+          cp inherited_preseal/R22568_C52_SUITE.jsonl r22568_evidence/
+      - name: Install exact analysis runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'torch==2.8.0' 'transformers==4.56.2' 'peft==0.17.1' 'safetensors==0.6.2' 'huggingface_hub==0.34.4' 'numpy==2.2.6'
+          python - <<'PY'
+          import torch,transformers,peft,safetensors,huggingface_hub,numpy,json
+          print(json.dumps({'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'safetensors':safetensors.__version__,'huggingface_hub':huggingface_hub.__version__,'numpy':numpy.__version__},sort_keys=True))
+          PY
+      - name: Verify current contract before source ingress
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from r22568.c52_contract import generate_suite,suite_digest,contract_digest
+          assert len(generate_suite())==384
+          assert suite_digest()=='34aa41d17083f277ea060459db4cf93a467d9f42494f30dfa0660e4f0b749b47'
+          assert contract_digest()=='9319dbc4e4ee1ad548278feb57326156ad9af0ffc3e2980c25f5181227d4e9e6'
+          print('CURRENT_CONTRACT_MATCHES_PRESEAL')
+          PY
+      - name: One-use exact ingress and maximum raw-free extraction
+        shell: bash
+        env:
+          HF_HUB_DISABLE_TELEMETRY: '1'
+        run: |
+          set -euo pipefail
+          python -B r22568/c52_onepass.py
+      - name: Delete all raw source and private runtime state
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, shutil
+          from pathlib import Path
+          targets=[Path('private_c52'),Path('metadata.zip'),Path('preseal.zip'),Path('inherited_meta'),Path('inherited_preseal')]
+          before=[]
+          for p in targets:
+              if p.exists():
+                  before.append({'path':str(p),'is_dir':p.is_dir()})
+                  if p.is_dir(): shutil.rmtree(p)
+                  else: p.unlink()
+          remain=[str(p) for p in targets if p.exists()]
+          receipt={'schema':'R22568_C52_RAW_DELETION_V1','targets_present_before_delete':before,'remaining_after_delete':remain,'pass':not remain}
+          Path('r22568_evidence').mkdir(exist_ok=True)
+          Path('r22568_evidence/R22568_C52_RAW_DELETION.json').write_text(json.dumps(receipt,indent=2))
+          if remain: raise SystemExit(3)
+          PY
+          rm -rf ~/.cache/huggingface ~/.cache/torch ~/.cache/pip || true
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+      - name: Compile portable code and raw-free artifact audit
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp r22568/c52_contract.py r22568_evidence/R22568_C52_CONTRACT.py
+          cp r22568/c52_onepass.py r22568_evidence/R22568_C52_ONEPASS.py
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json
+          root=Path('r22568_evidence')
+          forbidden_ext={'.safetensors','.bin','.pt','.pth','.pkl','.pickle','.h5','.msgpack'}
+          bad=[]; rows=[]
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              if p.suffix.lower() in forbidden_ext: bad.append(str(p))
+              h=hashlib.sha256(p.read_bytes()).hexdigest(); rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':h})
+          receipt={'schema':'R22568_C52_RAWFREE_ARTIFACT_AUDIT_V1','files_before_receipt':len(rows),'forbidden_files':bad,'raw_weight_count':len(bad),'pass':not bad,'manifest_entries':rows}
+          (root/'R22568_C52_ARTIFACT_AUDIT.json').write_text(json.dumps(receipt,indent=2))
+          if bad: raise SystemExit(4)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22568-c52-terminal-rawfree-evidence
+          path: r22568_evidence/
+          retention-days: 1
+          if-no-files-found: error
