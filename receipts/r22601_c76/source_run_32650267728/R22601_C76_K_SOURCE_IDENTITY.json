@@ -1,0 +1,7 @@
+{
+  "expected_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a",
+  "expected_size": 18485794,
+  "observed_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a",
+  "observed_size": 18485794,
+  "pass": true
+}
