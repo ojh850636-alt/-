@@ -23,23 +23,21 @@ jobs:
             'transformers==5.5.0' 'tokenizers==0.22.2'
           python - <<'PY'
           import hashlib, json, platform, urllib.request
-          import mlx, mlx_lm, huggingface_hub, transformers, tokenizers
+          from importlib.metadata import version
+          import mlx_lm
           from mlx_lm.models.qwen2 import Model, ModelArgs
           from mlx_lm.tuner.utils import linear_to_lora_layers
           from mlx_lm.tuner.lora import LoRALinear
 
           expected={
-            'mlx':'0.31.1','mlx_lm':'0.31.1','huggingface_hub':'1.9.0',
+            'mlx':'0.31.1','mlx-lm':'0.31.1','huggingface-hub':'1.9.0',
             'transformers':'5.5.0','tokenizers':'0.22.2'
           }
-          got={
-            'mlx':mlx.__version__,'mlx_lm':mlx_lm.__version__,
-            'huggingface_hub':huggingface_hub.__version__,
-            'transformers':transformers.__version__,'tokenizers':tokenizers.__version__
-          }
+          got={k:version(k) for k in expected}
           print('PLATFORM_MACHINE='+platform.machine())
           print('VERSIONS='+json.dumps(got,sort_keys=True))
           if got != expected: raise SystemExit('FAIL_VERSION_LOCK '+repr(got))
+          if mlx_lm.__version__!='0.31.1': raise SystemExit('FAIL_MLX_LM_IMPORT_VERSION')
           if platform.machine() != 'arm64': raise SystemExit('FAIL_NOT_ARM64')
 
           def get_bytes(url):
