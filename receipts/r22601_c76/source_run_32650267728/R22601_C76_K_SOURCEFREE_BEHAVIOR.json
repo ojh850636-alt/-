@@ -1,0 +1,2169 @@
+{
+  "causal": {
+    "run": false
+  },
+  "claim_boundary": "Source-free synthetic citation-metadata classification surrogate. No public Hallmark score is counted as LAA capability. Positive claim requires locked control separation.",
+  "conditions": {
+    "BASE_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 0.875,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": true,
+          "margin": 0.875,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 0.875,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -0.875,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 0.875,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 1.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "B",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.75,
+        "mean_margin": 0.390625,
+        "median_margin": 0.625,
+        "n": 32,
+        "positive_margin_fraction": 0.71875
+      }
+    },
+    "DOSE025_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "C",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.625,
+        "mean_margin": -0.00390625,
+        "median_margin": 0.0,
+        "n": 32,
+        "positive_margin_fraction": 0.40625
+      }
+    },
+    "DOSE050_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": false,
+          "margin": -0.4375,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": false,
+          "margin": -0.4375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": true,
+          "margin": 0.5625,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": false,
+          "margin": -0.3125,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": true,
+          "margin": 0.4375,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": false,
+          "margin": -0.8125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "C",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": false,
+          "margin": -0.4375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "C",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.25,
+        "mean_margin": -0.197265625,
+        "median_margin": -0.375,
+        "n": 32,
+        "positive_margin_fraction": 0.25
+      }
+    },
+    "DOSE150_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 1.9375,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -2.9375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": false,
+          "margin": -2.1875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": false,
+          "margin": -2.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": false,
+          "margin": -1.8125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -1.6875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": false,
+          "margin": -2.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -2.375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 2.3125,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -3.4375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": false,
+          "margin": -2.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": false,
+          "margin": -2.1875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": false,
+          "margin": -2.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -2.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": false,
+          "margin": -2.0625,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -2.375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 2.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -3.25,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": false,
+          "margin": -2.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": false,
+          "margin": -2.125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": false,
+          "margin": -1.875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": false,
+          "margin": -1.75,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": false,
+          "margin": -2.125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -2.4375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 2.3125,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -3.0,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": false,
+          "margin": -2.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": false,
+          "margin": -2.1875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": false,
+          "margin": -1.9375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -2.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": false,
+          "margin": -2.25,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -2.6875,
+          "pred": "A",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.125,
+        "mean_margin": -1.71875,
+        "median_margin": -2.125,
+        "n": 32,
+        "positive_margin_fraction": 0.125
+      }
+    },
+    "FULL_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -0.8125,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": false,
+          "margin": -1.1875,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": false,
+          "margin": -1.1875,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": false,
+          "margin": -1.1875,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 0.5625,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -1.1875,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": false,
+          "margin": -1.3125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": false,
+          "margin": -1.1875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": false,
+          "margin": -1.0625,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -1.4375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -0.4375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 0.5625,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": false,
+          "margin": -1.4375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": false,
+          "margin": -1.25,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": false,
+          "margin": -1.125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": false,
+          "margin": -1.3125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -0.4375,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 0.6875,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": false,
+          "margin": -1.3125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": false,
+          "margin": -1.0625,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -1.3125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -0.5625,
+          "pred": "A",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.125,
+        "mean_margin": -0.9140625,
+        "median_margin": -1.1875,
+        "n": 32,
+        "positive_margin_fraction": 0.125
+      }
+    },
+    "RANDOM1337_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -1.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": true,
+          "margin": 1.75,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": true,
+          "margin": 2.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -1.625,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -1.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": true,
+          "margin": 1.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": true,
+          "margin": 1.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 2.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -1.625,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": true,
+          "margin": 1.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": true,
+          "margin": 1.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 2.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -1.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -1.125,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": true,
+          "margin": 1.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": true,
+          "margin": 1.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 2.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "B",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.75,
+        "mean_margin": 0.66796875,
+        "median_margin": 1.3125,
+        "n": 32,
+        "positive_margin_fraction": 0.71875
+      }
+    },
+    "RANDOM224_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 1.375,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -1.25,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": false,
+          "margin": -0.875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -0.875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 1.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": false,
+          "margin": -0.875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": false,
+          "margin": -0.5,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -0.875,
+          "pred": "A",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "C",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.25,
+        "mean_margin": -0.26953125,
+        "median_margin": -0.5,
+        "n": 32,
+        "positive_margin_fraction": 0.25
+      }
+    },
+    "RANDOM42_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -1.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -1.125,
+          "pred": "A",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -1.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": true,
+          "margin": 0.875,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": true,
+          "margin": 1.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -1.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -1.375,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": true,
+          "margin": 1.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": true,
+          "margin": 1.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": true,
+          "margin": 0.625,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 1.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -1.5,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -1.0,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": true,
+          "margin": 0.75,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 1.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -1.25,
+          "pred": "B",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.75,
+        "mean_margin": 0.1640625,
+        "median_margin": 0.375,
+        "n": 32,
+        "positive_margin_fraction": 0.6875
+      }
+    },
+    "SHUFFLE42_DISCOVERY": {
+      "rows": [
+        {
+          "case_id": "HK-0-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-0-1-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-0-2-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-4-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-5-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-6-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-0-7-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-0-0",
+          "correct": true,
+          "margin": 0.5,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-1-1-0",
+          "correct": false,
+          "margin": -0.375,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-1-2-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-3-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-4-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-5-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-6-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-1-7-0",
+          "correct": false,
+          "margin": -0.625,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-0-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-2-1-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-2-2-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-3-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-4-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-5-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-6-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-2-7-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-0-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "A",
+          "target": "A"
+        },
+        {
+          "case_id": "HK-3-1-0",
+          "correct": false,
+          "margin": -0.125,
+          "pred": "B",
+          "target": "C"
+        },
+        {
+          "case_id": "HK-3-2-0",
+          "correct": true,
+          "margin": 0.125,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-3-0",
+          "correct": true,
+          "margin": 0.0,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-4-0",
+          "correct": true,
+          "margin": 0.25,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-5-0",
+          "correct": false,
+          "margin": -0.25,
+          "pred": "C",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-6-0",
+          "correct": true,
+          "margin": 0.375,
+          "pred": "B",
+          "target": "B"
+        },
+        {
+          "case_id": "HK-3-7-0",
+          "correct": false,
+          "margin": -0.75,
+          "pred": "B",
+          "target": "C"
+        }
+      ],
+      "summary": {
+        "accuracy": 0.65625,
+        "mean_margin": 0.01171875,
+        "median_margin": 0.125,
+        "n": 32,
+        "positive_margin_fraction": 0.5625
+      }
+    }
+  },
+  "confirmation_pass": false,
+  "control_separated_gain": false,
+  "discovery_full_minus_base_margin": {
+    "ci95": [
+      -1.615234375,
+      -0.9607421875000011
+    ],
+    "mean": -1.3046875
+  },
+  "discovery_full_minus_controls_margin": {
+    "RANDOM1337": {
+      "ci95": [
+        -2.16220703125,
+        -0.9433105468750003
+      ],
+      "mean": -1.58203125
+    },
+    "RANDOM224": {
+      "ci95": [
+        -0.820361328125,
+        -0.4765625
+      ],
+      "mean": -0.64453125
+    },
+    "RANDOM42": {
+      "ci95": [
+        -1.52158203125,
+        -0.6132324218750003
+      ],
+      "mean": -1.078125
+    },
+    "SHUFFLE42": {
+      "ci95": [
+        -1.181640625,
+        -0.646484375
+      ],
+      "mean": -0.92578125
+    }
+  },
+  "schema": "R22601_C76K_SOURCEFREE_BEHAVIOR_V1",
+  "splits": {
+    "CAUSAL": 32,
+    "CONFIRMATION": 32,
+    "DISCOVERY": 32,
+    "STRESS": 32
+  }
+}
