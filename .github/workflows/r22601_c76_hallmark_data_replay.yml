@@ -11,14 +11,31 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Rebuild exact prepared DATA from immutable Hallmark Git snapshot
+      - name: Rebuild prepared DATA from exact pre-run repository state
         shell: bash
         run: |
           set -euo pipefail
-          git clone --filter=blob:none https://github.com/SebastianBoehler/hallmark-mlx.git upstream
-          git -C upstream checkout --detach fb2492313daaad9159cc7f38bddfc9f4e11686ec
+          PRE_RUN='fd6c7bac9ffb54e45ebdafb00c76455ea5b8322a'
+          RUN_RECORD_COMMIT='fb2492313daaad9159cc7f38bddfc9f4e11686ec'
+          git clone --quiet https://github.com/SebastianBoehler/hallmark-mlx.git upstream
           cd upstream
-          printf 'UPSTREAM_HEAD=%s\n' "$(git rev-parse HEAD)"
+          git checkout --quiet "$RUN_RECORD_COMMIT"
+          git diff --quiet "$PRE_RUN" "$RUN_RECORD_COMMIT" -- \
+            data/processed \
+            src/hallmark_mlx/training/dataset_loader.py \
+            src/hallmark_mlx/training/trace_formatter.py \
+            src/hallmark_mlx/inference/finalizer.py \
+            src/hallmark_mlx/data/schemas.py \
+            src/hallmark_mlx/types.py \
+            src/hallmark_mlx/utils/jsonl.py \
+            src/hallmark_mlx/training/prompts.py \
+            src/hallmark_mlx/protocol.py
+          echo 'DATA_COMPILER_SLICE_UNCHANGED_PRE_RUN_TO_RECORD_COMMIT=true'
+          git checkout --quiet "$PRE_RUN"
+          printf 'PRE_RUN_HEAD=%s\n' "$(git rev-parse HEAD)"
+          test "$(git rev-parse HEAD)" = "$PRE_RUN"
+          test -z "$(git status --porcelain)"
+
           if command -v uv >/dev/null 2>&1; then
             uv --version
           else
@@ -59,11 +76,16 @@ jobs:
                       'rows': sum(1 for line in raw.splitlines() if line.strip()),
                   }
                   print(
-                      f"REPLAY {split} size={got['size']} rows={got['rows']} "
+                      f"PRE_RUN_REPLAY {split} size={got['size']} rows={got['rows']} "
                       f"sha256={got['sha256']}"
                   )
                   if got != expected[split]:
-                      raise SystemExit(f'FAIL_REPLAY_MISMATCH {split} got={got} expected={expected[split]}')
+                      raise SystemExit(f'FAIL_PRE_RUN_REPLAY_MISMATCH {split} got={got} expected={expected[split]}')
 
-          print('DONE_R22601_INDEPENDENT_DATA_REPLAY_EXACT_MATCH_NO_MODEL_WEIGHT_ACCESS')
+          print('DONE_R22601_PRE_RUN_DATA_REPLAY_EXACT_MATCH_NO_MODEL_WEIGHT_ACCESS')
           PY
+          cd ..
+          rm -rf upstream
+          echo 'TEMP_EXTERNAL_BYTES_DELETED=true'
+          echo 'ADAPTER_WEIGHT_BYTES=0'
+          echo 'BASE_WEIGHT_BYTES=0'
