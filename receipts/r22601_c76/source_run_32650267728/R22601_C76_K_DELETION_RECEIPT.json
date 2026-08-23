@@ -1,0 +1,11 @@
+{
+  "adapter_path_exists_after_cleanup": false,
+  "base_cache_exists_after_cleanup": false,
+  "leftover_files": [],
+  "no_retry": true,
+  "raw_source_remaining": false,
+  "runner_rc": 0,
+  "schema": "R22601_C76K_DELETION_RECEIPT_V1",
+  "source_consumed": true,
+  "work_variant_dir_exists_after_cleanup": false
+}
