@@ -1,0 +1,13 @@
+{
+  "PASS": true,
+  "adapter_bytes": 18485794,
+  "base_runtime_attempted": true,
+  "behavior_status": "PASS_EXECUTED",
+  "causal_run": false,
+  "confirmation_pass": false,
+  "control_separated_gain": false,
+  "schema": "R22601_C76K_RUN_SUMMARY_V1",
+  "source_consumed": true,
+  "static_operator_pairs": 98,
+  "status": "STATIC_PASS_BEHAVIOR_PASS_EXECUTED"
+}
