@@ -60,9 +60,22 @@ jobs:
               req = urllib.request.Request(url, headers={'User-Agent':'LAA-R22601-gate-a/1.0'})
               with urllib.request.urlopen(req, timeout=45) as r:
                   return r.read()
+          def get_json(url):
+              return json.loads(get_bytes(url))
 
           model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
           model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
+          tree=get_json(f'https://huggingface.co/api/models/{model_repo}/tree/{model_rev}?recursive=true&expand=true')
+          by={x.get('path'):x for x in tree if isinstance(x,dict)}
+          weight_meta=by.get('adapters.safetensors')
+          if not weight_meta:
+              raise SystemExit('FAIL_NO_ADAPTER_TREE_OBJECT')
+          compact={k:weight_meta.get(k) for k in ('path','type','size','oid','lfs','xetHash') if k in weight_meta}
+          print('ADAPTER_WEIGHT_TREE_OBJECT='+json.dumps(compact,sort_keys=True,separators=(',',':')))
+          print('ADAPTER_WEIGHT_TREE_SIZE='+str(weight_meta.get('size')))
+          if int(weight_meta.get('size') or 0) <= 0:
+              raise SystemExit('FAIL_ADAPTER_TREE_SIZE')
+
           adapter_raw=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/adapter_config.json')
           adapter=json.loads(adapter_raw)
           print('ADAPTER_CONFIG_SHA256='+hashlib.sha256(adapter_raw).hexdigest())
