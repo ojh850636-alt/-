@@ -1,0 +1,69 @@
+name: R22601 C76 Hallmark DATA independent byte replay
+on:
+  push:
+    branches: [r22601-c76-hallmark-data-witness]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Rebuild exact prepared DATA from immutable Hallmark Git snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --filter=blob:none https://github.com/SebastianBoehler/hallmark-mlx.git upstream
+          git -C upstream checkout --detach fb2492313daaad9159cc7f38bddfc9f4e11686ec
+          cd upstream
+          printf 'UPSTREAM_HEAD=%s\n' "$(git rev-parse HEAD)"
+          if command -v uv >/dev/null 2>&1; then
+            uv --version
+          else
+            python -m pip install --disable-pip-version-check 'uv>=0.6,<1'
+          fi
+          uv sync --locked --no-dev
+          PYTHONPATH=src uv run --no-sync python - <<'PY'
+          import hashlib
+          import tempfile
+          from pathlib import Path
+          from hallmark_mlx.training.dataset_loader import prepare_training_dataset
+          from hallmark_mlx.types import TrainingExampleFormat
+
+          expected = {
+              'train': {
+                  'sha256': 'cc97b4be14e81cfee5d3baa0fbbc4521efb20d236647f2544d5102ae782d7d61',
+                  'size': 492316,
+                  'rows': 75,
+              },
+              'valid': {
+                  'sha256': '7c483d347185aecdaa5dcb9b712e0b78ceb76fb3f932cd3c600f504673e963b3',
+                  'size': 35481,
+                  'rows': 6,
+              },
+          }
+
+          with tempfile.TemporaryDirectory() as tmp:
+              outputs = prepare_training_dataset(
+                  Path('data/processed'),
+                  Path(tmp),
+                  example_format=TrainingExampleFormat.TOOL_TRANSCRIPT_STEPS,
+              )
+              for split in ('train', 'valid'):
+                  raw = Path(outputs[split]).read_bytes()
+                  got = {
+                      'sha256': hashlib.sha256(raw).hexdigest(),
+                      'size': len(raw),
+                      'rows': sum(1 for line in raw.splitlines() if line.strip()),
+                  }
+                  print(
+                      f"REPLAY {split} size={got['size']} rows={got['rows']} "
+                      f"sha256={got['sha256']}"
+                  )
+                  if got != expected[split]:
+                      raise SystemExit(f'FAIL_REPLAY_MISMATCH {split} got={got} expected={expected[split]}')
+
+          print('DONE_R22601_INDEPENDENT_DATA_REPLAY_EXACT_MATCH_NO_MODEL_WEIGHT_ACCESS')
+          PY
