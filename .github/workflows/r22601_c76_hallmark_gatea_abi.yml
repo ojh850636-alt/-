@@ -16,10 +16,12 @@ jobs:
           echo "UNAME=$(uname -a)"
           echo "ARCH=$(uname -m)"
           test "$(uname -m)" = "arm64"
-          python3 -m pip install --quiet --disable-pip-version-check \
+          python3 -m venv "$RUNNER_TEMP/laa-r22601-venv"
+          source "$RUNNER_TEMP/laa-r22601-venv/bin/activate"
+          python -m pip install --quiet --disable-pip-version-check \
             'mlx==0.31.1' 'mlx-lm==0.31.1' 'huggingface-hub==1.9.0' \
             'transformers==5.5.0' 'tokenizers==0.22.2'
-          python3 - <<'PY'
+          python - <<'PY'
           import hashlib, json, platform, urllib.request
           import mlx, mlx_lm, huggingface_hub, transformers, tokenizers
           from mlx_lm.models.qwen2 import Model, ModelArgs
@@ -82,7 +84,6 @@ jobs:
           print('BASE_REMOTE_PY_FILES='+json.dumps(remote_code,separators=(',',':')))
           if remote_code: raise SystemExit('FAIL_REMOTE_CODE_REQUIRED '+repr(remote_code))
 
-          # Tiny structural replay of the exact Qwen2/LoRA ABI. No Base/Adapter weights are loaded.
           args=ModelArgs(
             model_type='qwen2', hidden_size=16, num_hidden_layers=28,
             intermediate_size=32, num_attention_heads=4, num_key_value_heads=2,
@@ -102,7 +103,6 @@ jobs:
           per_layer={}
           for name in names:
             parts=name.split('.')
-            # model.layers.<idx>.<suffix>
             if len(parts)<5 or parts[0]!='model' or parts[1]!='layers':
               raise SystemExit('FAIL_MODULE_NAME '+name)
             idx=int(parts[2]); suffix='.'.join(parts[3:])
