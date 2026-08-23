@@ -22,7 +22,9 @@ jobs:
           cd upstream
           echo "UPSTREAM_HEAD=$(git rev-parse HEAD)"
           if ! command -v uv >/dev/null 2>&1; then
-            python3 -m pip install --disable-pip-version-check 'uv==0.12.5'
+            python3 -m venv /tmp/r22601-uv-bootstrap
+            /tmp/r22601-uv-bootstrap/bin/python -m pip install --disable-pip-version-check 'uv==0.12.5'
+            export PATH="/tmp/r22601-uv-bootstrap/bin:$PATH"
           fi
           uv --version
           uv sync --locked --no-dev --extra mlx
@@ -136,6 +138,7 @@ jobs:
               for name in sorted(synth):
                   if loaded[name].shape != synth[name].shape:
                       raise SystemExit('FAIL_SYNTHETIC_SHAPE '+name)
+                  mx.eval(loaded[name], synth[name])
                   if not bool(mx.array_equal(loaded[name],synth[name]).item()):
                       raise SystemExit('FAIL_SYNTHETIC_VALUE '+name)
               print('SYNTHETIC_ABI_ROUNDTRIP=PASS')
