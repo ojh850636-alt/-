@@ -1,0 +1,13 @@
+name: R22574 C58 PorTAL adapter-first (closed)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  closed:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo 'C58 adapter-first source was consumed once in workflow run 32143923154.'
+          echo 'Automatic rerun is disabled. Use the derivative RTE/COPA escrow for downstream work.'
+          exit 1

@@ -1,0 +1,59 @@
+{
+  "schema": "R22574_C58_BASE_METADATA_PREINGRESS_AMENDMENT_V1",
+  "bound_before_base_weight_ingress": true,
+  "base_weight_bytes_consumed_before_amendment": 0,
+  "model_outputs_observed_before_amendment": 0,
+  "scientific_candidate_unchanged": true,
+  "scientific_question_unchanged": true,
+  "procedural_suite_unchanged": true,
+  "natural_locked_source_unchanged": true,
+  "positive_and_failure_thresholds_unchanged": true,
+  "reason": "The first behavior campaign failed fail-closed during exact Hugging Face metadata validation before Base weight download because the preseal carried a stale byte-size for shard 2. Exact revision and LFS SHA were unchanged.",
+  "failed_behavior_run": {
+    "run_id": 32146394800,
+    "status": "PRE_BASE_METADATA_FAIL_NO_MODEL_OUTPUT",
+    "adopted_scientific_evidence": false,
+    "base_weight_bytes_consumed": 0,
+    "model_outputs_observed": 0,
+    "stale_expected": {
+      "model-00002-of-00002.safetensors": {
+        "bytes": 622294200,
+        "sha256": "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
+      }
+    }
+  },
+  "metadata_authority": {
+    "run_id": 32146915148,
+    "artifact_id": 9328133128,
+    "artifact_digest": "sha256:dca0f4f317d73e42700e1f656038b370b2e6de328f4e1136d5bbcca76ea731a2",
+    "repo": "Qwen/Qwen3-1.7B",
+    "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "resolved_revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "weight_files_downloaded": 0,
+    "model_outputs_observed": 0,
+    "files": {
+      "model-00001-of-00002.safetensors": {
+        "bytes": 3441185608,
+        "sha256": "169ad53ec313c3a34b06c0809216e4fc072cce444a5d4ff2b59690d064130ed5"
+      },
+      "model-00002-of-00002.safetensors": {
+        "bytes": 622329984,
+        "sha256": "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"
+      },
+      "tokenizer.json": {
+        "bytes": 11422654,
+        "sha256": "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
+      }
+    }
+  },
+  "correction": {
+    "field": "model-00002-of-00002.safetensors.bytes",
+    "old": 622294200,
+    "new": 622329984,
+    "delta_bytes": 35784,
+    "sha256_changed": false
+  },
+  "method_gene_mutation_candidate": "EXACT_REMOTE_METADATA_AUTHORITY_MUST_BE_QUERIED_AT_PINNED_REVISION_IMMEDIATELY_BEFORE_WEIGHT_INGRESS",
+  "next_authorized_stage": "SAME_C58_BEHAVIOR_CAUSAL_CAMPAIGN_USING_CORRECTED_METADATA_ONLY",
+  "scientific_credit": 0
+}

@@ -1,0 +1,13 @@
+name: R22574 C58 exact Base metadata authority (closed)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  closed:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo 'Exact Base metadata authority is already bound by run 32146915148.'
+          echo 'Use r22574/C58_BASE_METADATA_PREINGRESS_AMENDMENT.json; do not re-query for scientific credit.'
+          exit 1
