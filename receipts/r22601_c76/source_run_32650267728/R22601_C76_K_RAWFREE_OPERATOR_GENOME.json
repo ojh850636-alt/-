@@ -1,0 +1,105 @@
+{
+  "adapted_layers": [
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27
+  ],
+  "claim_boundary": "Static learned-operator material only; not task capability evidence.",
+  "layer_energy_share": {
+    "14": 0.06919718900517924,
+    "15": 0.0710403067300277,
+    "16": 0.07374554557587146,
+    "17": 0.07297099945372168,
+    "18": 0.06956042245770264,
+    "19": 0.07733230984992,
+    "20": 0.0749826647055803,
+    "21": 0.0738124051421834,
+    "22": 0.0718254431294552,
+    "23": 0.07196786929115319,
+    "24": 0.0730248884127478,
+    "25": 0.07231717966909201,
+    "26": 0.06478144767543995,
+    "27": 0.06344132890192544
+  },
+  "module_energy_share": {
+    "mlp.down_proj": 0.08390936169095856,
+    "mlp.gate_proj": 0.3997923522210912,
+    "mlp.up_proj": 0.37336156548930416,
+    "self_attn.k_proj": 0.00991002198778027,
+    "self_attn.o_proj": 0.05736301363608972,
+    "self_attn.q_proj": 0.06603224114306463,
+    "self_attn.v_proj": 0.009631443831711472
+  },
+  "module_families": [
+    "mlp.down_proj",
+    "mlp.gate_proj",
+    "mlp.up_proj",
+    "self_attn.k_proj",
+    "self_attn.o_proj",
+    "self_attn.q_proj",
+    "self_attn.v_proj"
+  ],
+  "operator_pairs": 98,
+  "rank": 8,
+  "rank_component_energy_proxy_normalized": [
+    0.12507812624035144,
+    0.12513699211321308,
+    0.12426955334802361,
+    0.12532018400026013,
+    0.12328863208370483,
+    0.12501281744443138,
+    0.12610410711979123,
+    0.1257895876502243
+  ],
+  "scale": 20.0,
+  "schema": "R22601_C76K_RAWFREE_OPERATOR_GENOME_V1",
+  "static_viability_pass": true,
+  "subspace_coherence": {
+    "mlp.down_proj": {
+      "input_subspace_mean_cos2": 0.0008512041767994391,
+      "output_subspace_mean_cos2": 0.03713808471453295,
+      "pair_count": 91
+    },
+    "mlp.gate_proj": {
+      "input_subspace_mean_cos2": 0.005558907970512611,
+      "output_subspace_mean_cos2": 0.0009048217152710648,
+      "pair_count": 91
+    },
+    "mlp.up_proj": {
+      "input_subspace_mean_cos2": 0.005322244219698191,
+      "output_subspace_mean_cos2": 0.0009004168265304172,
+      "pair_count": 91
+    },
+    "self_attn.k_proj": {
+      "input_subspace_mean_cos2": 0.005224612141267116,
+      "output_subspace_mean_cos2": 0.030966413238692776,
+      "pair_count": 91
+    },
+    "self_attn.o_proj": {
+      "input_subspace_mean_cos2": 0.005177141288494104,
+      "output_subspace_mean_cos2": 0.03792162954090791,
+      "pair_count": 91
+    },
+    "self_attn.q_proj": {
+      "input_subspace_mean_cos2": 0.005416514577154742,
+      "output_subspace_mean_cos2": 0.005365175946047859,
+      "pair_count": 91
+    },
+    "self_attn.v_proj": {
+      "input_subspace_mean_cos2": 0.005233500500467288,
+      "output_subspace_mean_cos2": 0.03004910080631488,
+      "pair_count": 91
+    }
+  }
+}
