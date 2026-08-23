@@ -1,0 +1,1 @@
+R22595 C76 metadata-only probe trigger. No model or adapter weight bytes.
