@@ -1,0 +1,147 @@
+name: R22601 C76 Hallmark Gate A source-zero MLX ABI
+on:
+  push:
+    branches: [r22601-c76-hallmark-data-witness]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  gate_a:
+    runs-on: macos-14
+    timeout-minutes: 20
+    steps:
+      - name: Execute exact locked MLX ABI probe without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "UNAME_M=$(uname -m)"
+          test "$(uname -m)" = "arm64"
+          git clone --filter=blob:none https://github.com/SebastianBoehler/hallmark-mlx.git upstream
+          git -C upstream checkout --detach fb2492313daaad9159cc7f38bddfc9f4e11686ec
+          cd upstream
+          echo "UPSTREAM_HEAD=$(git rev-parse HEAD)"
+          if ! command -v uv >/dev/null 2>&1; then
+            python3 -m pip install --disable-pip-version-check 'uv==0.12.5'
+          fi
+          uv --version
+          uv sync --locked --no-dev --extra mlx
+          PYTHONPATH=src uv run --no-sync python - <<'PY'
+          import hashlib
+          import importlib.metadata as md
+          import json
+          import tempfile
+          import urllib.request
+          from pathlib import Path
+
+          import mlx.core as mx
+          from mlx.utils import tree_flatten
+          from mlx_lm.models.qwen2 import Model, ModelArgs
+          from mlx_lm.tuner.lora import LoRALinear
+          from mlx_lm.tuner.utils import linear_to_lora_layers, load_adapters
+
+          expected_versions = {
+              'mlx': '0.31.1',
+              'mlx-lm': '0.31.1',
+              'huggingface-hub': '1.9.0',
+              'transformers': '5.5.0',
+          }
+          for pkg, expected in expected_versions.items():
+              got = md.version(pkg)
+              print(f'VERSION {pkg}={got}')
+              if got != expected:
+                  raise SystemExit(f'FAIL_VERSION {pkg} {got}!={expected}')
+
+          def get_bytes(url):
+              if 'safetensors' in url.lower():
+                  raise SystemExit('FAIL_WEIGHT_URL_FORBIDDEN '+url)
+              req = urllib.request.Request(url, headers={'User-Agent':'LAA-R22601-gate-a/1.0'})
+              with urllib.request.urlopen(req, timeout=45) as r:
+                  return r.read()
+
+          model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
+          model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
+          adapter_raw=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/adapter_config.json')
+          adapter=json.loads(adapter_raw)
+          print('ADAPTER_CONFIG_SHA256='+hashlib.sha256(adapter_raw).hexdigest())
+          print('ADAPTER_CONFIG='+json.dumps(adapter,sort_keys=True,separators=(',',':')))
+
+          base_repo='Qwen/Qwen2.5-1.5B-Instruct'
+          base_rev='989aa7980e4cf806f80c7fef2b1adb7bc71aa306'
+          base_raw=get_bytes(f'https://huggingface.co/{base_repo}/resolve/{base_rev}/config.json')
+          base=json.loads(base_raw)
+          print('BASE_CONFIG_SHA256='+hashlib.sha256(base_raw).hexdigest())
+          print('BASE_MODEL_TYPE='+str(base.get('model_type')))
+          print('BASE_ARCHITECTURES='+json.dumps(base.get('architectures'),sort_keys=True))
+          print('BASE_NUM_HIDDEN_LAYERS='+str(base.get('num_hidden_layers')))
+
+          required_adapter = {
+              'fine_tune_type': 'lora',
+              'num_layers': 14,
+              'model': 'Qwen/Qwen2.5-1.5B-Instruct',
+          }
+          for key, expected in required_adapter.items():
+              got=adapter.get(key)
+              if got != expected:
+                  raise SystemExit(f'FAIL_ADAPTER_CONFIG {key} {got!r}!={expected!r}')
+          lp=adapter.get('lora_parameters') or {}
+          if lp != {'rank':8,'dropout':0.0,'scale':20.0}:
+              raise SystemExit('FAIL_LORA_PARAMETERS '+repr(lp))
+          if 'keys' in lp:
+              raise SystemExit('FAIL_UNEXPECTED_EXPLICIT_KEYS')
+          if base.get('model_type') != 'qwen2':
+              raise SystemExit('FAIL_BASE_MODEL_TYPE')
+          if int(base.get('num_hidden_layers',0)) < 14:
+              raise SystemExit('FAIL_BASE_TOO_FEW_LAYERS')
+
+          args=ModelArgs(
+              model_type='qwen2', hidden_size=16, num_hidden_layers=14,
+              intermediate_size=32, num_attention_heads=4, rms_norm_eps=1e-6,
+              vocab_size=64, num_key_value_heads=2, max_position_embeddings=64,
+              rope_theta=1000000, rope_traditional=False, tie_word_embeddings=True,
+          )
+          model=Model(args)
+          model.freeze()
+          linear_to_lora_layers(model, adapter['num_layers'], lp, use_dora=False)
+          lora_names=sorted(name for name,module in model.named_modules() if isinstance(module,LoRALinear))
+          suffixes=sorted({'.'.join(name.split('.')[-2:]) for name in lora_names})
+          expected_suffixes=sorted([
+              'self_attn.q_proj','self_attn.k_proj','self_attn.v_proj','self_attn.o_proj',
+              'mlp.gate_proj','mlp.up_proj','mlp.down_proj',
+          ])
+          print('LORA_MODULE_COUNT='+str(len(lora_names)))
+          print('LORA_SUFFIXES='+json.dumps(suffixes))
+          if len(lora_names) != 14*7 or suffixes != expected_suffixes:
+              raise SystemExit('FAIL_TARGET_NAMESPACE')
+
+          trainable=dict(tree_flatten(model.trainable_parameters()))
+          print('SYNTHETIC_TRAINABLE_TENSOR_COUNT='+str(len(trainable)))
+          if len(trainable) != 14*7*2:
+              raise SystemExit('FAIL_TRAINABLE_TENSOR_COUNT')
+          synth={}
+          for i,(name,value) in enumerate(sorted(trainable.items())):
+              synth[name]=mx.ones(value.shape,dtype=value.dtype)*((i%7)+1)/8.0
+          mx.eval(synth)
+
+          with tempfile.TemporaryDirectory() as td:
+              p=Path(td)
+              (p/'adapter_config.json').write_bytes(adapter_raw)
+              mx.save_safetensors(str(p/'adapters.safetensors'),synth)
+              fresh=Model(args)
+              fresh.freeze()
+              load_adapters(fresh,str(p))
+              loaded=dict(tree_flatten(fresh.trainable_parameters()))
+              if sorted(loaded) != sorted(synth):
+                  raise SystemExit('FAIL_SYNTHETIC_KEYSET')
+              for name in sorted(synth):
+                  if loaded[name].shape != synth[name].shape:
+                      raise SystemExit('FAIL_SYNTHETIC_SHAPE '+name)
+                  if not bool(mx.array_equal(loaded[name],synth[name]).item()):
+                      raise SystemExit('FAIL_SYNTHETIC_VALUE '+name)
+              print('SYNTHETIC_ABI_ROUNDTRIP=PASS')
+
+          print('ADAPTER_WEIGHT_BYTES=0')
+          print('BASE_WEIGHT_BYTES=0')
+          print('MODEL_OUTPUT_BYTES=0')
+          print('DONE_R22601_GATE_A_SOURCE_ZERO_MLX_ABI_PASS')
+          PY
