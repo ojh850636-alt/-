@@ -1,0 +1,15 @@
+{
+  "consumed": true,
+  "created_utc": "2026-08-23T15:59:42.741397+00:00",
+  "expected_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a",
+  "expected_size": 18485794,
+  "github_run_id": "32650267728",
+  "no_retry": true,
+  "observed_size_before_hash": 18485794,
+  "schema": "R22601_C76K_SOURCE_CONSUMED_V1",
+  "source_head": "858435068b67cfedc765999f9b3db1f98ca1c20c",
+  "source_path": "adapters.safetensors",
+  "source_repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
+  "source_revision": "4e24e866109fc0e2e7dfe2e0470529d68c45fbea",
+  "status": "CONSUMED_AFTER_GET_BEFORE_IDENTITY_CHECK"
+}
