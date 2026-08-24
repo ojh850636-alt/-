@@ -1,0 +1,98 @@
+{
+  "schema": "LAA_R22601_C76_K_ONE_USE_SOURCE_PRECOMMIT_V1",
+  "candidate": "C76-K_HALLMARK_MLX",
+  "source_authority": "FIRST_EXTERNAL_POSITIVE_E5_CLOSURE",
+  "adapter": {
+    "repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
+    "revision": "4e24e866109fc0e2e7dfe2e0470529d68c45fbea",
+    "path": "adapters.safetensors",
+    "expected_size": 18485794,
+    "expected_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a"
+  },
+  "base": {
+    "repo": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+  },
+  "hallmark_code_commit": "fb2492313daaad9159cc7f38bddfc9f4e11686ec",
+  "locked_suite": {
+    "case_count": 128,
+    "suite_sha256": "beea0021151e66c81163d9098fd6eb859125a8cbebdffc94082d312af649e705",
+    "generator": "exact R22599 Cartesian generator; regenerate and fail unless byte hash matches",
+    "full_eval_indices": "0..127",
+    "confirmation_rule": "index % 2 == 1",
+    "confirmation_count": 64,
+    "discovery_rule": "index % 4 == 0",
+    "discovery_count": 32,
+    "reserve_rule": "index % 4 == 2",
+    "reserve_count": 32
+  },
+  "conditions": [
+    "BASE",
+    "FULL",
+    "RANDOM_NORM_MATCHED_SEED42",
+    "LAYER_SHUFFLED_SEED42",
+    "DOSE_0_5",
+    "DOSE_1_5"
+  ],
+  "evaluation_plan": {
+    "BASE": "all 128",
+    "FULL": "all 128",
+    "RANDOM_NORM_MATCHED_SEED42": "locked confirmation 64",
+    "LAYER_SHUFFLED_SEED42": "locked confirmation 64",
+    "DOSE_0_5": "discovery 32",
+    "DOSE_1_5": "discovery 32",
+    "reserve_expansion": "only if confirmation positive; then RANDOM seeds 224/1337 plus extra dose/ablation may use reserve 32"
+  },
+  "primary_metric": "abstract exact triplet accuracy: label + first_action + exact issue_codes",
+  "secondary_metrics": [
+    "label_accuracy",
+    "issue_exact_accuracy",
+    "first_action_accuracy",
+    "finalization_rate",
+    "first_response_tool_call_rate",
+    "parse_error_rate",
+    "average_tool_calls"
+  ],
+  "positive_gate": {
+    "minimum_full_minus_base": 0.05,
+    "minimum_full_minus_random": 0.05,
+    "minimum_full_minus_layer_shuffled": 0.05,
+    "paired_bootstrap_iterations": 10000,
+    "paired_bootstrap_seed": 22601,
+    "require_95pct_lower_bound_gt_zero_for": [
+      "FULL_minus_BASE",
+      "FULL_minus_RANDOM_NORM_MATCHED_SEED42",
+      "FULL_minus_LAYER_SHUFFLED_SEED42"
+    ],
+    "if_false": "NO_POSITIVE_ADAPTER_CAPABILITY_CLAIM_AND_NO_CAUSAL_CAPABILITY_CLAIM"
+  },
+  "static_viability": {
+    "expected_tensor_count": 196,
+    "expected_pair_count": 98,
+    "expected_rank": 8,
+    "expected_layers": [14,15,16,17,18,19,20,21,22,23,24,25,26,27],
+    "expected_module_suffixes": [
+      "self_attn.q_proj",
+      "self_attn.k_proj",
+      "self_attn.v_proj",
+      "self_attn.o_proj",
+      "mlp.gate_proj",
+      "mlp.up_proj",
+      "mlp.down_proj"
+    ],
+    "require_finite": true,
+    "require_nonzero_every_pair": true,
+    "require_no_unexpected_tensor_keys": true,
+    "on_fail": "DELETE_ADAPTER_AND_DO_NOT_DOWNLOAD_BASE"
+  },
+  "one_use": {
+    "durable_gate_branch": "r22601-c76-hallmark-source-receipts",
+    "durable_gate_path": "r22601/c76_hallmark_adapter_gate.json",
+    "gate_nonce": "02c493b2-6e0d-4618-9b91-d4d20003dc87",
+    "persist_consumed_before_adapter_get": true,
+    "adapter_get_max": 1,
+    "base_snapshot_ingress_max": 1,
+    "rerun_after_consumed": "FORBIDDEN",
+    "delete_all_raw_external_bytes_before_durable_report": true
+  }
+}
