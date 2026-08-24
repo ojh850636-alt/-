@@ -1,0 +1,216 @@
+name: R22601 C76-K Hallmark durable one-use source archaeology
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: write
+concurrency:
+  group: r22601-c76-k-hallmark-durable-one-use-source
+  cancel-in-progress: false
+jobs:
+  source:
+    if: github.event.pull_request.head.ref == 'r22601-c76-hallmark-one-use-source'
+    runs-on: macos-14-arm64
+    timeout-minutes: 120
+    env:
+      SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      RECEIPT_BRANCH: r22601-c76-hallmark-source-receipts
+      GATE_PATH: r22601/c76_hallmark_adapter_gate.json
+      GATE_NONCE: 02c493b2-6e0d-4618-9b91-d4d20003dc87
+      EXPECT_RUNNER_SHA256: f9e026ee24b11fb3efed8168bf6a18efcaed7bf2f240f9f66033e74ca9c1b621
+      HALLMARK_COMMIT: fb2492313daaad9159cc7f38bddfc9f4e11686ec
+      ADAPTER_REPO: sebastianboehler/hallmark-mlx-qwen25-1.5b-lora
+      ADAPTER_REV: 4e24e866109fc0e2e7dfe2e0470529d68c45fbea
+      BASE_REPO: Qwen/Qwen2.5-1.5B-Instruct
+      BASE_REV: 989aa7980e4cf806f80c7fef2b1adb7bc71aa306
+      HF_HOME: /tmp/r22601_hfhome
+      HF_HUB_CACHE: /tmp/r22601_hfhome/hub
+      HF_XET_CACHE: /tmp/r22601_hfhome/xet
+      R22601_REPORT_PATH: /tmp/r22601_rawfree_report.json
+      R22601_ADAPTER_CONFIG_PATH: /tmp/r22601_meta/adapter_config.json
+      R22601_EPHEMERAL_RUNNER: '1'
+
+    steps:
+      - name: Pre-source fail-closed environment and code preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          df -h /tmp
+          FREE_KB=$(df -Pk /tmp | awk 'NR==2 {print $4}')
+          test "$FREE_KB" -gt 12000000
+
+          rm -rf /tmp/r22601-control /tmp/upstream /tmp/r22601_meta /tmp/r22601_runner.py /tmp/r22601-uv-bootstrap
+          git clone --quiet --filter=blob:none https://github.com/ojh850636-alt/-.git /tmp/r22601-control
+          git -C /tmp/r22601-control checkout --quiet --detach "$SOURCE_HEAD_SHA"
+          test "$(git -C /tmp/r22601-control rev-parse HEAD)" = "$SOURCE_HEAD_SHA"
+
+          git clone --quiet --filter=blob:none https://github.com/SebastianBoehler/hallmark-mlx.git /tmp/upstream
+          git -C /tmp/upstream checkout --quiet --detach "$HALLMARK_COMMIT"
+          test "$(git -C /tmp/upstream rev-parse HEAD)" = "$HALLMARK_COMMIT"
+
+          python3 -m venv /tmp/r22601-uv-bootstrap
+          /tmp/r22601-uv-bootstrap/bin/python -m pip install --disable-pip-version-check -q 'uv==0.12.5'
+          export PATH="/tmp/r22601-uv-bootstrap/bin:$PATH"
+          cd /tmp/upstream
+          uv sync --locked --no-dev --extra mlx
+
+          python - <<'PY'
+          import base64, gzip, hashlib, json, py_compile, urllib.request
+          from pathlib import Path
+
+          control=Path('/tmp/r22601-control')
+          pre=json.loads((control/'r22601/c76_k_source_precommit.json').read_text())
+          assert pre['runner']['uncompressed_sha256'] == 'f9e026ee24b11fb3efed8168bf6a18efcaed7bf2f240f9f66033e74ca9c1b621'
+          assert pre['one_use']['gate_nonce'] == '02c493b2-6e0d-4618-9b91-d4d20003dc87'
+          assert pre['runtime']['max_tokens'] == 192 and pre['runtime']['max_rollout_rounds'] == 4
+          packed=(control/'r22601/c76_k_one_use_runner.py.gz.b64').read_text().strip()
+          raw=gzip.decompress(base64.b64decode(packed))
+          got=hashlib.sha256(raw).hexdigest()
+          print('RUNNER_SHA256='+got)
+          assert got == pre['runner']['uncompressed_sha256']
+          Path('/tmp/r22601_runner.py').write_bytes(raw)
+          py_compile.compile('/tmp/r22601_runner.py', doraise=True)
+
+          def get_bytes(url):
+              if url.lower().endswith('.safetensors'):
+                  raise SystemExit('PREFLIGHT_WEIGHT_URL_FORBIDDEN '+url)
+              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22601-one-use-preflight/1.0'})
+              with urllib.request.urlopen(req,timeout=45) as r: return r.read()
+          def get_json(url): return json.loads(get_bytes(url))
+
+          model_repo='sebastianboehler/hallmark-mlx-qwen25-1.5b-lora'
+          model_rev='4e24e866109fc0e2e7dfe2e0470529d68c45fbea'
+          tree=get_json(f'https://huggingface.co/api/models/{model_repo}/tree/{model_rev}?recursive=true&expand=true')
+          by={x.get('path'):x for x in tree if isinstance(x,dict)}
+          w=by['adapters.safetensors']
+          assert int(w['size']) == 18485794
+          assert (w.get('lfs') or {}).get('oid') == '551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a'
+          cfg=get_bytes(f'https://huggingface.co/{model_repo}/resolve/{model_rev}/adapter_config.json')
+          assert hashlib.sha256(cfg).hexdigest() == '07e3354eb4fe8a2f5ea538f21c32d6d2d5c71513c7b38f0d9cfa8d7a8eb1b3dc'
+          Path('/tmp/r22601_meta').mkdir(parents=True,exist_ok=True)
+          Path('/tmp/r22601_meta/adapter_config.json').write_bytes(cfg)
+          base=get_bytes('https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct/resolve/989aa7980e4cf806f80c7fef2b1adb7bc71aa306/config.json')
+          assert hashlib.sha256(base).hexdigest() == '98d2ff8cc47488d08a2b0b3acf4eb99ef210779b42bd48605f6b8e36acdbf670'
+          print('SOURCE_PREFLIGHT_METADATA_ONLY=PASS')
+          PY
+
+          PYTHONPATH=/tmp/upstream/src uv run --no-sync python - <<'PY'
+          import importlib.metadata as md
+          exp={'mlx':'0.31.1','mlx-lm':'0.31.1','huggingface-hub':'1.9.0','transformers':'5.5.0'}
+          for k,v in exp.items():
+              got=md.version(k); print('VERSION',k,got); assert got==v
+          import mlx.core as mx
+          assert hasattr(mx,'array')
+          print('LOCKED_RUNTIME_IMPORT=PASS')
+          PY
+
+      - name: Atomically consume durable gate before any Adapter weight GET
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64, datetime, json, os, urllib.parse, urllib.request
+          repo='ojh850636-alt/-'
+          path=os.environ['GATE_PATH']; branch=os.environ['RECEIPT_BRANCH']; token=os.environ['GH_TOKEN']
+          url=f'https://api.github.com/repos/{repo}/contents/{path}?ref='+urllib.parse.quote(branch,safe='')
+          headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LAA-R22601-one-use-gate/1.0'}
+          req=urllib.request.Request(url,headers=headers)
+          with urllib.request.urlopen(req,timeout=30) as r: obj=json.load(r)
+          gate=json.loads(base64.b64decode(obj['content']))
+          assert gate['nonce']==os.environ['GATE_NONCE']
+          assert gate['strict_run_binding']['passed_edges']==5 and gate['strict_run_binding']['strict_l4'] is True
+          assert all(gate['four_gate_status'].values())
+          if gate.get('consumed') is not False:
+              raise SystemExit('DURABLE_GATE_ALREADY_CONSUMED_PRE_SOURCE')
+          gate['consumed']=True
+          gate['consumed_at']=datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
+          gate['consuming_run_id']=os.environ['RUN_ID']
+          gate['consuming_run_attempt']=os.environ['RUN_ATTEMPT']
+          gate['consuming_head_sha']=os.environ['SOURCE_HEAD_SHA']
+          gate['final_status']='CONSUMED_SOURCE_RUN_IN_PROGRESS'
+          body=json.dumps({'message':'Consume R22601 C76-K one-use source gate before Adapter GET','content':base64.b64encode((json.dumps(gate,indent=2,sort_keys=True)+'\n').encode()).decode(),'sha':obj['sha'],'branch':branch}).encode()
+          put=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{path}',data=body,method='PUT',headers={**headers,'Content-Type':'application/json'})
+          with urllib.request.urlopen(put,timeout=30) as r: out=json.load(r)
+          print('DURABLE_GATE_CONSUMED_COMMIT='+out['commit']['sha'])
+          PY
+          echo 'R22601_GATE_CLAIMED=true' >> "$GITHUB_ENV"
+
+      - name: Execute single Adapter ingress, static viability, Base once, behavior and controls
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/upstream
+          set +e
+          PYTHONPATH=/tmp/upstream/src uv run --no-sync python /tmp/r22601_runner.py | tee /tmp/r22601_runner.log
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "RUNNER_EXIT_CODE=$RC"
+          rm -rf /tmp/r22601_source /tmp/r22601_hfhome /tmp/r22601_hf_cache "$HOME/.cache/huggingface/xet" "$HOME/.cache/huggingface/hub"
+          if [ ! -f /tmp/r22601_rawfree_report.json ]; then
+            python - <<'PY'
+          import datetime,json
+          p={'schema':'LAA_R22601_C76_K_ONE_USE_BINARY_REPORT_V1','candidate':'C76-K_HALLMARK_MLX','status':'TERMINAL_HARD_PROCESS_FAILURE_AFTER_GATE_CLAIM','finished_at':datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z'),'source_truth':{'raw_adapter_retained_bytes':0,'raw_base_retained_bytes':0,'model_output_raw_text_retained':False},'raw_cleanup':{'performed':True}}
+          open('/tmp/r22601_rawfree_report.json','w').write(json.dumps(p,indent=2,sort_keys=True))
+          PY
+          fi
+          exit 0
+
+      - name: Persist raw-free science receipt and finalize durable gate
+        if: always()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/r22601_source /tmp/r22601_hfhome /tmp/r22601_hf_cache "$HOME/.cache/huggingface/xet" "$HOME/.cache/huggingface/hub"
+          test ! -d /tmp/r22601_source
+          test ! -d /tmp/r22601_hfhome
+          python - <<'PY'
+          import base64, datetime, hashlib, json, os, urllib.parse, urllib.request
+          from pathlib import Path
+          if os.environ.get('R22601_GATE_CLAIMED') != 'true':
+              print('GATE_NOT_CLAIMED_NO_SOURCE_REPORT_PERSISTED')
+              raise SystemExit(0)
+          report_path=Path('/tmp/r22601_rawfree_report.json')
+          if not report_path.exists():
+              report={'schema':'LAA_R22601_C76_K_ONE_USE_BINARY_REPORT_V1','candidate':'C76-K_HALLMARK_MLX','status':'TERMINAL_NO_RUNNER_REPORT_AFTER_GATE_CLAIM'}
+          else:
+              report=json.loads(report_path.read_text())
+          report['workflow_receipt']={'run_id':os.environ['RUN_ID'],'run_attempt':os.environ['RUN_ATTEMPT'],'head_sha':os.environ['SOURCE_HEAD_SHA'],'runner_os':'macos-14-arm64'}
+          report.setdefault('source_truth',{})['raw_adapter_retained_bytes']=0
+          report['source_truth']['raw_base_retained_bytes']=0
+          report['raw_cleanup_attested_before_persist']=True
+          text=json.dumps(report,indent=2,sort_keys=True)+'\n'
+          repo='ojh850636-alt/-'; branch=os.environ['RECEIPT_BRANCH']; token=os.environ['GH_TOKEN']
+          headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LAA-R22601-one-use-persist/1.0','Content-Type':'application/json'}
+          science_path=f"r22601/C76_K_ONE_USE_BINARY_REPORT_RUN_{os.environ['RUN_ID']}.json"
+          body=json.dumps({'message':'Persist raw-free R22601 C76-K one-use science receipt','content':base64.b64encode(text.encode()).decode(),'branch':branch}).encode()
+          req=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{science_path}',data=body,method='PUT',headers=headers)
+          with urllib.request.urlopen(req,timeout=30) as r: out=json.load(r)
+          print('RAWFREE_REPORT_COMMIT='+out['commit']['sha'])
+
+          gate_path=os.environ['GATE_PATH']
+          get=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{gate_path}?ref='+urllib.parse.quote(branch,safe=''),headers=headers)
+          with urllib.request.urlopen(get,timeout=30) as r: obj=json.load(r)
+          gate=json.loads(base64.b64decode(obj['content']))
+          assert gate.get('consumed') is True and str(gate.get('consuming_run_id'))==os.environ['RUN_ID']
+          gate['final_status']=report.get('status','UNKNOWN')
+          gate['finished_at']=datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00','Z')
+          gate['raw_cleanup_attested']=True
+          gate['rawfree_report_path']=science_path
+          gate['rawfree_report_sha256']=hashlib.sha256(text.encode()).hexdigest()
+          update=json.dumps({'message':'Finalize R22601 C76-K durable one-use source gate','content':base64.b64encode((json.dumps(gate,indent=2,sort_keys=True)+'\n').encode()).decode(),'sha':obj['sha'],'branch':branch}).encode()
+          put=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{gate_path}',data=update,method='PUT',headers=headers)
+          with urllib.request.urlopen(put,timeout=30) as r: gout=json.load(r)
+          print('DURABLE_GATE_FINAL_COMMIT='+gout['commit']['sha'])
+          print('FINAL_SCIENCE_STATUS='+str(report.get('status')))
+          if 'behavior_verdict' in report:
+              print('FINAL_BEHAVIOR_VERDICT='+str(report['behavior_verdict'].get('verdict')))
+          PY
