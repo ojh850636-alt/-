@@ -11,7 +11,8 @@
     "A_DEPENDENCY_ABI": true,
     "B_EXACT_TRAINING_LINEAGE": true,
     "C_SOURCEFREE_LOCKED_VERIFIER": true,
-    "D_INDEPENDENT_WORKER_CONTRACT": true
+    "D_INDEPENDENT_WORKER_CONTRACT": true,
+    "SOURCE_EXECUTION_RELEASED": false
   },
   "adapter": {
     "repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
@@ -52,5 +53,7 @@
   "consuming_run_id": null,
   "consuming_run_attempt": null,
   "consuming_head_sha": null,
-  "final_status": "PRECREATED_NOT_CONSUMED"
+  "source_execution_released": false,
+  "source_execution_hold_reason": "Pre-source correction: a failed positive gate must not automatically increment failure_delta without substantive behavior failure evidence.",
+  "final_status": "PRE_SOURCE_RUNNER_AMENDMENT_HOLD"
 }
