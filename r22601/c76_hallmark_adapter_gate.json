@@ -1,0 +1,56 @@
+{
+  "schema": "LAA_R22601_C76_K_DURABLE_ONE_USE_GATE_V1",
+  "candidate": "C76-K_HALLMARK_MLX",
+  "authority": "FIRST_EXTERNAL_POSITIVE_E5_CLOSURE",
+  "strict_run_binding": {
+    "passed_edges": 5,
+    "required_edges": 5,
+    "strict_l4": true
+  },
+  "four_gate_status": {
+    "A_DEPENDENCY_ABI": true,
+    "B_EXACT_TRAINING_LINEAGE": true,
+    "C_SOURCEFREE_LOCKED_VERIFIER": true,
+    "D_INDEPENDENT_WORKER_CONTRACT": true
+  },
+  "adapter": {
+    "repo": "sebastianboehler/hallmark-mlx-qwen25-1.5b-lora",
+    "revision": "4e24e866109fc0e2e7dfe2e0470529d68c45fbea",
+    "path": "adapters.safetensors",
+    "expected_size": 18485794,
+    "expected_sha256": "551975ad96235ee5a125df3bef460111d46ed51e95061fd3c37398be4cf5b53a",
+    "expected_xet_hash": "4485bc6e022ee98bf2429e5880ee85da1731026a4b709e05172c5c87b99e5d51"
+  },
+  "base": {
+    "repo": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "989aa7980e4cf806f80c7fef2b1adb7bc71aa306"
+  },
+  "hallmark_code_commit": "fb2492313daaad9159cc7f38bddfc9f4e11686ec",
+  "data": {
+    "dataset_repo": "sebastianboehler/hallmark-mlx-reviewed-policy-traces",
+    "dataset_commit": "d8b8359473e28278b1dc558b63ebc406974785f3",
+    "train_sha256": "cc97b4be14e81cfee5d3baa0fbbc4521efb20d236647f2544d5102ae782d7d61",
+    "valid_sha256": "7c483d347185aecdaa5dcb9b712e0b78ceb76fb3f932cd3c600f504673e963b3"
+  },
+  "preseal": {
+    "suite_sha256": "beea0021151e66c81163d9098fd6eb859125a8cbebdffc94082d312af649e705",
+    "cases": 128,
+    "primary_pass": 128,
+    "independent_pass": 128,
+    "mutation_rejections_each": 384
+  },
+  "one_use_policy": {
+    "adapter_get_max": 1,
+    "base_snapshot_get_max": 1,
+    "must_persist_consumed_before_adapter_get": true,
+    "rerun_forbidden_after_consumed": true,
+    "raw_delete_required_before_durable_science_report": true
+  },
+  "nonce": "02c493b2-6e0d-4618-9b91-d4d20003dc87",
+  "consumed": false,
+  "consumed_at": null,
+  "consuming_run_id": null,
+  "consuming_run_attempt": null,
+  "consuming_head_sha": null,
+  "final_status": "PRECREATED_NOT_CONSUMED"
+}
