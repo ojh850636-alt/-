@@ -16,7 +16,7 @@
   "hallmark_code_commit": "fb2492313daaad9159cc7f38bddfc9f4e11686ec",
   "runner": {
     "uncompressed_sha256": "f9e026ee24b11fb3efed8168bf6a18efcaed7bf2f240f9f66033e74ca9c1b621",
-    "delivery": "gzip+base64 embedded in immutable source workflow; decode then SHA-check before durable gate claim",
+    "delivery": "gzip+base64 pinned as r22601/c76_k_one_use_runner.py.gz.b64 on the immutable source head; workflow decodes then SHA-checks before durable gate claim",
     "bytecode_compile_checked_before_upload": true
   },
   "runtime": {
