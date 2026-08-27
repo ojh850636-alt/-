@@ -1,0 +1,29 @@
+name: R22603 C76-R delete consumed artifact
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/r22603_c76r_cleanup.yml'
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete consumed raw artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/actions/artifacts/9640988498"
+          if gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/9640988498" >/tmp/artifact.json 2>/tmp/artifact.err; then
+            echo 'artifact unexpectedly still exists' >&2
+            cat /tmp/artifact.json >&2
+            exit 1
+          fi
+          grep -Eq '404|Not Found' /tmp/artifact.err || { cat /tmp/artifact.err >&2; exit 1; }
+          echo 'ARTIFACT_DELETE_AND_404_PASS'
