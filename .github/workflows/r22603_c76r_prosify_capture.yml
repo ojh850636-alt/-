@@ -1,0 +1,88 @@
+name: R22603 C76-R Prosify adapter capture
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/r22603_c76r_prosify_capture.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  capture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Resolve exact revision and capture allowlisted files
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='krishy-d/prosify_qwen_1.5b_lora'
+          REV="$(git ls-remote "https://huggingface.co/${REPO}" HEAD | awk '{print $1}')"
+          test -n "$REV"
+          mkdir -p payload
+          printf '%s\n' "$REPO" > payload/REPO.txt
+          printf '%s\n' "$REV" > payload/REVISION.txt
+          for f in adapter_config.json adapter_model.safetensors README.md; do
+            curl --fail --location --retry 3 --retry-delay 2 \
+              "https://huggingface.co/${REPO}/resolve/${REV}/${f}?download=true" \
+              -o "payload/${f}"
+          done
+          python - <<'PY'
+          import json, pathlib, struct, hashlib
+          p = pathlib.Path('payload')
+          cfg = json.loads((p/'adapter_config.json').read_text(encoding='utf-8'))
+          assert cfg.get('peft_type') == 'LORA', cfg.get('peft_type')
+          assert cfg.get('r') == 16, cfg.get('r')
+          assert cfg.get('lora_alpha') == 32, cfg.get('lora_alpha')
+          targets = sorted(cfg.get('target_modules') or [])
+          assert targets == ['k_proj','o_proj','q_proj','v_proj'], targets
+          sf = p/'adapter_model.safetensors'
+          with sf.open('rb') as f:
+              n = struct.unpack('<Q', f.read(8))[0]
+              assert 0 < n < 100_000_000, n
+              header = json.loads(f.read(n))
+          tensor_keys = sorted(k for k in header if k != '__metadata__')
+          assert tensor_keys, 'no tensor keys'
+          forbidden = [x for x in p.rglob('*') if x.is_file() and x.suffix.lower() in {'.bin','.pt','.pth','.pkl','.pickle','.ckpt'}]
+          assert not forbidden, forbidden
+          files = {}
+          for x in sorted(y for y in p.iterdir() if y.is_file()):
+              b = x.read_bytes()
+              files[x.name] = {'bytes': len(b), 'sha256': hashlib.sha256(b).hexdigest()}
+          out = {
+              'schema': 'LAA_R22603_C76R_CAPTURE_V1',
+              'repo': (p/'REPO.txt').read_text().strip(),
+              'revision': (p/'REVISION.txt').read_text().strip(),
+              'files': files,
+              'adapter_config_summary': {
+                  'base_model_name_or_path': cfg.get('base_model_name_or_path'),
+                  'revision': cfg.get('revision'),
+                  'peft_type': cfg.get('peft_type'),
+                  'task_type': cfg.get('task_type'),
+                  'r': cfg.get('r'),
+                  'lora_alpha': cfg.get('lora_alpha'),
+                  'lora_dropout': cfg.get('lora_dropout'),
+                  'target_modules': targets,
+                  'modules_to_save': cfg.get('modules_to_save'),
+                  'bias': cfg.get('bias'),
+              },
+              'safetensors_header': {
+                  'tensor_count': len(tensor_keys),
+                  'tensor_names': tensor_keys,
+              },
+              'raw_git_commit': False,
+              'base_downloaded': False,
+          }
+          (p/'CAPTURE_MANIFEST.json').write_text(json.dumps(out, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+          PY
+          sha256sum payload/* | sort > payload/SHA256SUMS.txt
+
+      - name: Upload one-use capture artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22603-c76r-prosify-adapter-source
+          path: payload/
+          if-no-files-found: error
+          retention-days: 1
