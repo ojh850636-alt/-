@@ -1,4 +1,4 @@
-name: R22619 CPU candidate metadata-only audit v2
+name: R22619 CPU candidate metadata-only audit v3
 on:
   push:
     branches: [r22619-meta-cpu]
@@ -7,44 +7,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Audit unused-small-base candidates without weight GET
+      - name: Audit explicit-license Gemma-270M candidates without weight GET
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
           import json, urllib.request, pathlib, hashlib
-          repos = [
-            'moneytrackersa/smollm-purchase-categorizer',
-            'Toan4992/smollm-energy-extraction',
-            'Gurudath2006/ada-html-fixer-model',
-            'ArunKr/gemma-3-270m-it-web-agent-lora',
+          repos=[
+            'damienlusson/gemma-3-270m-it-unsloth-bnb-4bit-jobs-extraction-LoRA',
+            'ArunKr/gemma-3-270m-it-lora',
+            'kiethuynhanh/gemma-3-270m-it-unsloth-legal-vn',
           ]
           def get(url):
-              req=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22619-meta-v2'})
+              req=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22619-meta-v3'})
               with urllib.request.urlopen(req,timeout=30) as r:return r.read()
           out=[]
           for repo in repos:
-              try:
-                  meta=json.loads(get('https://huggingface.co/api/models/'+repo+'/revision/main?blobs=true'))
-              except Exception as e:
-                  out.append({'repo':repo,'api_error':type(e).__name__+':'+str(e)}); continue
+              try: meta=json.loads(get('https://huggingface.co/api/models/'+repo+'/revision/main?blobs=true'))
+              except Exception as e: out.append({'repo':repo,'api_error':type(e).__name__+':'+str(e)}); continue
               sha=meta.get('sha'); sib=[]
               for s in meta.get('siblings',[]):
                   row={'name':s.get('rfilename')}; l=s.get('lfs') or {}
                   if l: row.update({'lfs_sha256':l.get('sha256'),'bytes':l.get('size')})
                   sib.append(row)
               small={}
-              for fn in ('adapter_config.json','README.md'):
+              for fn in ('adapter_config.json','README.md','training_args.json','config.json'):
                   try:
                       b=get(f'https://huggingface.co/{repo}/resolve/{sha}/{fn}')
-                      small[fn]={'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'text':b.decode('utf-8','replace')[:30000]}
+                      small[fn]={'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'text':b.decode('utf-8','replace')[:40000]}
                   except Exception as e: small[fn]={'error':type(e).__name__+':'+str(e)}
               out.append({'repo':repo,'sha':sha,'library':meta.get('library_name'),'pipeline_tag':meta.get('pipeline_tag'),'tags':meta.get('tags',[]),'cardData':meta.get('cardData',{}),'siblings':sib,'small':small})
-          pathlib.Path('r22619_meta_v2.json').write_text(json.dumps({'schema':'R22619_CPU_META_AUDIT_V2','weight_get_bytes':0,'candidates':out},indent=2,sort_keys=True)+'\n')
-          print(pathlib.Path('r22619_meta_v2.json').read_text())
+          pathlib.Path('r22619_meta_v3.json').write_text(json.dumps({'schema':'R22619_CPU_META_AUDIT_V3','weight_get_bytes':0,'candidates':out},indent=2,sort_keys=True)+'\n')
+          print(pathlib.Path('r22619_meta_v3.json').read_text())
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22619-cpu-meta-v2
-          path: r22619_meta_v2.json
+          name: r22619-cpu-meta-v3
+          path: r22619_meta_v3.json
           retention-days: 1
