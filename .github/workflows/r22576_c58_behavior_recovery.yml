@@ -1,0 +1,159 @@
+name: R22576 C58 PorTAL ABI recovery from verified escrow
+on:
+  push:
+    branches: [r22574-c58-behavior]
+permissions:
+  contents: read
+  actions: write
+jobs:
+  recover_behavior:
+    if: github.event.head_commit.message == 'Run C58 PorTAL ABI recovery from verified escrow'
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      SOURCE_RUN_ID: '32212422459'
+      SOURCE_ARTIFACT_ID: '9351241418'
+      DERIVATIVE_ARTIFACT_ID: '9327063037'
+      EXPECTED_PROC_SHA: '299480cbdd677a481f0ec545cd60bffe9e25e193829b0e8da063a8ffe2e6459f'
+      EXPECTED_NAT_SHA: '297ea4def1d30bfde0b75870be97f6925bf5a1ef065f5ac9fdffdf17ffeb9146'
+      HF_HOME: /tmp/r22576-c58-hf
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Recreate exact successful runtime contract
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install \
+            'portallib==0.2.0' 'torch==2.13.0' 'transformers==5.15.0' 'peft==0.20.0' \
+            'huggingface-hub==1.28.0' 'safetensors==0.8.0' 'tokenizers==0.22.2' \
+            'accelerate==1.14.0' 'datasets==4.8.5' 'numpy==2.5.2'
+          python - <<'PY'
+          import importlib.metadata as m,json,pathlib
+          names=['portallib','torch','transformers','peft','huggingface-hub','safetensors','tokenizers','accelerate','datasets','numpy']
+          got={n:m.version(n) for n in names}
+          exp={'portallib':'0.2.0','torch':'2.13.0','transformers':'5.15.0','peft':'0.20.0','huggingface-hub':'1.28.0','safetensors':'0.8.0','tokenizers':'0.22.2','accelerate':'1.14.0','datasets':'4.8.5','numpy':'2.5.2'}
+          assert got==exp,(got,exp)
+          pathlib.Path('C58_RECOVERY_RUNTIME_FREEZE.json').write_text(json.dumps(got,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(got,sort_keys=True))
+          PY
+
+      - name: Download verified Base+derivative recovery escrow only
+        uses: actions/download-artifact@v4
+        with:
+          name: r22576-c58-portal-source-escrow
+          path: escrow
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ojh850636-alt/-
+          run-id: '32212422459'
+
+      - name: Reconstruct exact Base and derivative adapters from escrow and verify all bytes
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json,hashlib,pathlib,shutil
+          root=pathlib.Path('escrow'); man=json.loads((root/'SOURCE_ESCROW_MANIFEST.json').read_text())
+          def sha(p):
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                  for b in iter(lambda:f.read(1<<20),b''):h.update(b)
+              return h.hexdigest()
+          base=pathlib.Path('base'); base.mkdir()
+          for p in (root/'base_meta').iterdir():
+              if p.is_file(): shutil.copy2(p,base/p.name)
+          for obj in man['originals']:
+              parts=sorted([x for x in man['parts'] if x['source']==obj['path']],key=lambda x:x['index'])
+              out=base/obj['path']
+              with out.open('wb') as w:
+                  for x in parts:
+                      q=root/x['path']; assert q.stat().st_size==x['bytes'] and sha(q)==x['sha256'],x
+                      with q.open('rb') as r: shutil.copyfileobj(r,w,1<<20)
+              assert out.stat().st_size==obj['bytes'] and sha(out)==obj['sha256'],obj
+          derivative=root/'adapters'
+          assert sha(derivative/'rte/adapter_model.safetensors')=='b8a49f7ac09348b421f4be2a5ac044dd4290e1ec0fd434ec6bc00d1412147d47'
+          assert sha(derivative/'copa/adapter_model.safetensors')=='6938c784de4d533df16d59e39fcf9f051de71a593d92327aaf04415dd58c68b0'
+          rec={'schema':'R22576_C58_ESCROW_RECONSTRUCTION_V1','source_artifact_id':9351241418,'base_originals':man['originals'],'part_count':len(man['parts']),'derivative_rte_sha256':sha(derivative/'rte/adapter_model.safetensors'),'derivative_copa_sha256':sha(derivative/'copa/adapter_model.safetensors'),'hf_model_redownloads':0,'verdict':'PASS'}
+          pathlib.Path('C58_ESCROW_RECONSTRUCTION.json').write_text(json.dumps(rec,indent=2,sort_keys=True)+'\n')
+          print(json.dumps({'part_count':len(man['parts']),'base_bytes':sum(x['bytes'] for x in man['originals'])},sort_keys=True))
+          PY
+
+      - name: Reproduce exact locked procedural and natural rows without model-weight network access
+        run: |
+          set -euo pipefail
+          python -B r22574/build_c58_procedural_rte.py --out C58_PROCEDURAL_RTE_256.jsonl
+          test "$(sha256sum C58_PROCEDURAL_RTE_256.jsonl | cut -d' ' -f1)" = "$EXPECTED_PROC_SHA"
+          python - <<'PY'
+          from datasets import load_dataset
+          import json,pathlib,hashlib
+          ds=load_dataset('RampPublic/portallib-tasks',revision='ffc3c0e44f529bf64a5ae62ed5db090952db97ea',split='validation')
+          rows=[]
+          for x in ds:
+              if str(x['task'])=='rte': rows.append({'task':'rte','prompt':str(x['prompt']),'choices':[str(c) for c in x['choices']],'gold_idx':int(x['gold_idx'])})
+          p=pathlib.Path('C58_NATURAL_RTE_PRIVATE.json'); p.write_text(json.dumps(rows,ensure_ascii=False,separators=(',',':'))+'\n')
+          h=hashlib.sha256(p.read_bytes()).hexdigest()
+          assert h=='297ea4def1d30bfde0b75870be97f6925bf5a1ef065f5ac9fdffdf17ffeb9146',(h,len(rows))
+          print('NATURAL_LOCKED_REPRO_PASS',len(rows),h)
+          PY
+
+      - name: Run ABI-corrected unchanged behavior/control/causal contract
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/behavior
+          python -B r22574/runtime_source/c58_behavior_causal.py \
+            --base-dir base \
+            --adapter-escrow escrow/adapters \
+            --procedural C58_PROCEDURAL_RTE_256.jsonl \
+            --natural-json C58_NATURAL_RTE_PRIVATE.json \
+            --out evidence/behavior \
+            --batch 16
+          python - <<'PY'
+          import json,pathlib
+          r=json.load(open('evidence/behavior/C58_BEHAVIOR_CAUSAL_RAWFREE.json'))
+          assert r['parity']['pass'] is True,r['parity']
+          assert r['raw_contract']=={'raw_logits':False,'raw_activations':False,'hidden_states':False,'natural_text':False,'adapter_AB_values':False,'deltaW':False}
+          summary={'schema':'R22576_C58_BEHAVIOR_RECOVERY_SUMMARY_V1','reproduction_green':r['behavior']['reproduction_green'],'failure_reproduction_green':r['behavior']['failure_reproduction_green'],'safety_green':r['behavior']['safety_green'],'causal_status':r['causal']['status'],'parity':r['parity'],'source_redownloads':0,'runtime_abi_recovery':True}
+          pathlib.Path('C58_BEHAVIOR_RECOVERY_SUMMARY.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(summary,sort_keys=True))
+          PY
+
+      - name: Upload authoritative raw-free behavior evidence before destructive cleanup
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-behavior-causal-recovery-rawfree
+          path: |
+            evidence/behavior/C58_BEHAVIOR_CAUSAL_RAWFREE.json
+            C58_BEHAVIOR_RECOVERY_SUMMARY.json
+            C58_ESCROW_RECONSTRUCTION.json
+            C58_RECOVERY_RUNTIME_FREEZE.json
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Destructive remote/local raw cleanup after evidence upload
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          rm -rf base escrow C58_NATURAL_RTE_PRIVATE.json C58_PROCEDURAL_RTE_256.jsonl "$HF_HOME"
+          for id in "$SOURCE_ARTIFACT_ID" "$DERIVATIVE_ARTIFACT_ID"; do
+            code=$(gh api -X DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" >/dev/null 2>&1; echo $?)
+            test "$code" = '0'
+          done
+          for id in "$SOURCE_ARTIFACT_ID" "$DERIVATIVE_ARTIFACT_ID"; do
+            if gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$id" >/dev/null 2>&1; then echo "raw artifact still exists: $id"; exit 1; fi
+          done
+          cat > C58_PORTAL_RAW_CLEANUP.json <<'JSON'
+          {"schema":"R22576_C58_PORTAL_RAW_CLEANUP_V1","source_escrow_artifact_id":9351241418,"derivative_escrow_artifact_id":9327063037,"hf_model_redownloads":0,"local_raw_deleted":true,"remote_raw_deleted":true,"verdict":"PASS"}
+          JSON
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22576-c58-portal-cleanup-rawfree
+          path: C58_PORTAL_RAW_CLEANUP.json
+          retention-days: 1
+          if-no-files-found: error

@@ -1,0 +1,38 @@
+{
+  "schema": "R22574_C58_BEHAVIOR_CAUSAL_AMENDMENT_PREBASE_V1",
+  "bound_before_base_ingress": true,
+  "base_weight_bytes_consumed_at_binding": 0,
+  "model_outputs_observed_at_binding": 0,
+  "candidate_unchanged": true,
+  "procedural_suite_unchanged": true,
+  "natural_locked_source_unchanged": true,
+  "positive_thresholds_unchanged": true,
+  "reason": "Historical C18 established that positive-only causal precommit discards useful control-separated failure mechanisms. C58 therefore binds a symmetric negative failure lane before any Base or model output.",
+  "failure_reproduction_gate": {
+    "natural_full_minus_base_max": -0.03,
+    "procedural_confirmation_full_minus_base_max": -0.02,
+    "procedural_generator_holdout_full_minus_base_max": 0.0,
+    "paired_bootstrap_upper_bound_lt": 0.0,
+    "full_minus_each_random_shuffle_wrongtask_max": -0.02,
+    "all_required": true
+  },
+  "failure_causal_semantics": {
+    "necessity": "removing the target improves accuracy relative to FULL",
+    "sufficiency": "target-only is worse than BASE",
+    "broad_objects": ["Q_ALL","V_ALL","EARLY_QV","MIDDLE_QV","LATE_QV"],
+    "necessity_improvement_min": 0.03,
+    "sufficiency_degradation_min": 0.03,
+    "matched_control_margin_min": 0.01,
+    "holm_alpha": 0.05,
+    "locked_validation_min": 0.02,
+    "same_environment_max_grade": "E3_OR_SCOPED_E4_AFTER_FRESH_PROCESS_ONLY",
+    "positive_student_or_promotion_allowed": false
+  },
+  "matched_control_contract": {
+    "same_site_count": true,
+    "must_be_disjoint_from_target": true,
+    "deterministic_seeded_selection": true,
+    "fail_closed_if_disjoint_same_size_control_cannot_be_constructed": true
+  },
+  "scientific_credit_for_this_amendment": 0
+}

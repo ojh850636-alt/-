@@ -1,0 +1,90 @@
+{
+  "schema": "R22574_C58_BEHAVIOR_CAUSAL_SEAL_V1",
+  "bound_after_adapter_first_before_base_or_model_output": true,
+  "model_outputs_observed_at_binding": 0,
+  "base_weight_bytes_consumed_at_binding": 0,
+  "adapter_first_authority": "r22574/C58_ADAPTER_FIRST_AUTHORITY.json",
+  "exact_base": {
+    "repo": "Qwen/Qwen3-1.7B",
+    "revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "training_time_revision_proven_by_release_recipe": true,
+    "license": "Apache-2.0",
+    "allowed_files": {
+      "model-00001-of-00002.safetensors": {"bytes": 3441185608, "sha256": "169ad53ec313c3a34b06c0809216e4fc072cce444a5d4ff2b59690d064130ed5"},
+      "model-00002-of-00002.safetensors": {"bytes": 622294200, "sha256": "912becff8d60672aa8628ef08c05898d9adf17c2ad4ae3caf99b065622fdeff9"},
+      "model.safetensors.index.json": {"required": true},
+      "config.json": {"required": true},
+      "generation_config.json": {"required": false},
+      "tokenizer.json": {"required": true},
+      "tokenizer_config.json": {"required": true},
+      "merges.txt": {"required": true},
+      "vocab.json": {"required": true}
+    },
+    "forbidden_patterns": ["*.bin","*.pt","*.pth","*.pkl","*.pickle","*.h5","*.msgpack","*.py"]
+  },
+  "derivative_adapter_escrow": {
+    "source_run_id": 32143923154,
+    "artifact_id": 9327063037,
+    "artifact_digest": "sha256:f9ce7a9f67d477cf5dd730453632ca4a16ee3f2895a4bfcc160163d3aea59898",
+    "rte_weight_sha256": "b8a49f7ac09348b421f4be2a5ac044dd4290e1ec0fd434ec6bc00d1412147d47",
+    "copa_weight_sha256": "6938c784de4d533df16d59e39fcf9f051de71a593d92327aaf04415dd58c68b0"
+  },
+  "behavior": {
+    "natural_locked": {"repo": "RampPublic/portallib-tasks", "revision": "ffc3c0e44f529bf64a5ae62ed5db090952db97ea", "split": "validation", "task": "rte", "rows": "ALL_AVAILABLE", "raw_text_export": false},
+    "procedural_suite_sha256": "299480cbdd677a481f0ec545cd60bffe9e25e193829b0e8da063a8ffe2e6459f",
+    "conditions": ["BASE","FULL_RTE","RANDOM_NORM_MATCHED","LAYER_SHUFFLE","WRONG_TASK_COPA","DOSE_0p25","DOSE_0p5","DOSE_1p5"],
+    "shortcut_conditions": ["PREMISE_SHUFFLE_BASE","PREMISE_SHUFFLE_FULL"],
+    "seeds": [42,224,1337],
+    "canonical_seed": 42,
+    "metrics": ["acc_norm","gold_token_mean_nll","paired_accuracy_delta","bootstrap_95ci","best_control_margin","premise_shuffle_retention"],
+    "official_metric_parity": "PorTAL continuation boundary + character-normalized choice score; compact-logit scorer must be exactly parity-checked against full logits before canonical adoption"
+  },
+  "reproduction_gate": {
+    "natural_full_minus_base_min": 0.03,
+    "procedural_confirmation_full_minus_base_min": 0.02,
+    "procedural_generator_holdout_full_minus_base_min": 0.00,
+    "paired_bootstrap_lower_bound_gt": 0.0,
+    "full_minus_best_random_shuffle_wrongtask_min": 0.02,
+    "all_required": true
+  },
+  "safety_shortcut_gate": {
+    "full_premise_shuffle_accuracy_retention_max": 0.80,
+    "positive_training_or_promotion_requires_green": true,
+    "safety_red_allows_quarantined_failure_archaeology": true
+  },
+  "causal_discovery": {
+    "entry": "REPRODUCTION_GREEN_ONLY_FOR_POSITIVE_LANE",
+    "discovery_rows": "PROCEDURAL_DISCOVERY_64_PLUS_FIRST_64_NATURAL_RTE_VALIDATION",
+    "locked_rows": "PROCEDURAL_GENERATOR_HOLDOUT_64_PLUS_NEXT_64_NATURAL_RTE_VALIDATION",
+    "ood_rows": "PROCEDURAL_COMPOSITIONAL_OOD_48",
+    "broad_objects": ["Q_ALL","V_ALL","EARLY_QV","MIDDLE_QV","LATE_QV"],
+    "layer_bands": {"EARLY": [0,1,2,3,4,5,6,7,8,9], "MIDDLE": [10,11,12,13,14,15,16,17,18], "LATE": [19,20,21,22,23,24,25,26,27]},
+    "screen_requirements": {
+      "necessity_drop_min": 0.03,
+      "sufficiency_gain_min": 0.03,
+      "matched_random_margin_min": 0.01,
+      "holm_alpha": 0.05,
+      "require_necessity_and_sufficiency": true
+    },
+    "fine_order": ["surviving_band_or_projection","individual_layer","q_or_v_projection_within_layer","rank_or_subspace","path_or_interaction"],
+    "locked_validation_requirements": {"necessity_drop_min": 0.02, "sufficiency_gain_min": 0.02, "holm_alpha": 0.05},
+    "same_environment_max_grade": "SCOPED_E4",
+    "fresh_process_required_for_scoped_E4": true
+  },
+  "positive_E5": {
+    "requires": ["scoped_E4_candidate","same_exact_source_bytes","different_physical_host_or_worker_identity","different_environment_digest","independent_generator_holdout","independent_verifier_implementation_holdout","locked_natural_RTE_validation","path_or_subspace_robustness","training_time_base_revision_proven"],
+    "if_unavailable": "AWAIT_INDEPENDENT_E5_REPLAY",
+    "no_lowering_thresholds_post_output": true
+  },
+  "source_escrow": {
+    "create_immediately_after_exact_base_hash_validation_before_model_load": true,
+    "split_bytes": 450000000,
+    "remote_retention_days": 1,
+    "delete_after_terminal_or_E5_replay": true,
+    "raw_git_commit_forbidden": true
+  },
+  "terminal_rawfree": {
+    "forbid": ["Base weights","RTE/COPA adapter weights","LoRA A/B","reconstructable deltaW","raw logits","raw activations","hidden states","natural locked raw text","tokenizer originals","runtime caches"],
+    "require_predelete_delivery_before_destructive_cleanup": true
+  }
+}

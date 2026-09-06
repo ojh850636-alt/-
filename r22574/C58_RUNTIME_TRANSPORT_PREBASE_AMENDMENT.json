@@ -1,0 +1,36 @@
+{
+  "schema": "R22574_C58_RUNTIME_TRANSPORT_PREBASE_AMENDMENT_V1",
+  "bound_before_base_weight_ingress": true,
+  "base_weight_bytes_consumed_before_amendment": 0,
+  "model_outputs_observed_before_amendment": 0,
+  "scientific_candidate_unchanged": true,
+  "scientific_question_unchanged": true,
+  "suite_controls_thresholds_unchanged": true,
+  "failed_behavior_run": {
+    "run_id": 32147568921,
+    "status": "PRE_BASE_RUNTIME_TRANSPORT_CRC_FAIL_NO_SOURCE_NO_MODEL_OUTPUT",
+    "adopted_scientific_evidence": false,
+    "failure": "single connector-transferred base64/gzip runtime bundle failed gzip CRC/length validation before dependency install or source ingress"
+  },
+  "replacement_transport": {
+    "type": "FOUR_EXACT_BASE64_CHUNKS_WITH_LAYERED_HASH_AND_TAR_CRC_VERIFICATION",
+    "chunks": [
+      {"path": "r22574/runtime_chunks/c58_bundle_00.b64", "chars": 4000, "sha256": "ccba3d716493f6403ed502035aeb735acab6b1add0c8597724099c11d866e8fb"},
+      {"path": "r22574/runtime_chunks/c58_bundle_01.b64", "chars": 4000, "sha256": "b5d78e948e563f7453aa8bae6ef49d5c5c4e5c9a257daf4fb679ac3253ada546"},
+      {"path": "r22574/runtime_chunks/c58_bundle_02.b64", "chars": 4000, "sha256": "a58e0b5446f38b3e2672b982bcff0a6b0928f100190e3f7593185291131678a4"},
+      {"path": "r22574/runtime_chunks/c58_bundle_03.b64", "chars": 2832, "sha256": "1c66ade05f0c643d5dbe2947fe10d1e152340e56c7d3742e9ee7cc25994e2779"}
+    ],
+    "concatenated_base64_chars": 14832,
+    "concatenated_base64_sha256": "ed95893be82ec12fc63dec3d1345294c1386c4facaf7fa332dedcfe692ab81f3",
+    "decoded_tar_gz_bytes": 11123,
+    "decoded_tar_gz_sha256": "2dcbc9550b11a3287c7edd67afe8fa4dc74c140a2edfe888dcb62ed6fd338989",
+    "required_tar_crc_check": true,
+    "extracted_scripts": {
+      "c58_prepare_source.py": "8e4c950f622e69b0b1c23a1fd4216c26cd7c32c65ca28d66dc7dc8d80ad2be08",
+      "c58_behavior_causal.py": "30d6157311200990af437357136016d5b35aeac67deabdae100dcbab6ecc8f53"
+    }
+  },
+  "method_gene_mutation_candidate": "RUNTIME_TRANSPORT_MUST_VERIFY_CHUNK_MANIFEST_AND_DECODED_ARCHIVE_SHA_BEFORE_SCIENTIFIC_RUNTIME",
+  "next_authorized_stage": "SAME_C58_BEHAVIOR_CAUSAL_CAMPAIGN_AFTER_TRANSPORT_SELF_TEST_PASS",
+  "scientific_credit": 0
+}

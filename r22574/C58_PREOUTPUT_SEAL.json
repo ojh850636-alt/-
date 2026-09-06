@@ -1,0 +1,75 @@
+{
+  "schema": "R22574_C58_PREOUTPUT_SEAL_V1",
+  "candidate": "C58_PORTAL_RTE_PORTABILITY",
+  "scientific_question_fingerprint": "dd1bff98c065b4ea73052d6617fec8d2f05881264eaff0ab0134b4513bcbfedd",
+  "model_output_observed_before_seal": false,
+  "raw_weight_bytes_present_in_release_before_seal": 0,
+  "selected_source": {
+    "repo": "RampPublic/portal-qwen3-1.7b",
+    "revision_tag": "v0.2.0",
+    "commit": "be09be533b5c0418ad20269f19ebb63e9efbc330",
+    "safetensors_sha256": "732286e119c396c62b8c1d6b115f3ae6eec951a47eaa9bcdf0fee65564ff9688",
+    "training_base": "Qwen/Qwen3-1.7B",
+    "training_base_revision": "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+    "dataset": "RampPublic/portallib-tasks",
+    "dataset_revision": "ffc3c0e44f529bf64a5ae62ed5db090952db97ea",
+    "portallib_version": "0.2.0"
+  },
+  "adapter_first_stage": {
+    "must_run_before_base_ingress": true,
+    "export_tasks": "all_14_for_rawfree_atlas",
+    "behavior_task": "rte",
+    "wrong_task_control": "copa",
+    "requirements": [
+      "artifact_sha_exact",
+      "export_is_deterministic",
+      "rte_export_nonzero_effective_pairs",
+      "no_nonfinite",
+      "expected_qv_rank8_alpha16",
+      "no_unexpected_auxiliary_modules"
+    ],
+    "dead_operator_disposition": "CLOSED_E1_OPERATOR_DEGENERATE_BASE_BYTES_ZERO"
+  },
+  "behavior_suite": {
+    "procedural_reproducer": "r22574/build_c58_procedural_rte.py",
+    "procedural_cases": 256,
+    "procedural_sha256": "299480cbdd677a481f0ec545cd60bffe9e25e193829b0e8da063a8ffe2e6459f",
+    "natural_locked": {
+      "repo": "RampPublic/portallib-tasks",
+      "revision": "ffc3c0e44f529bf64a5ae62ed5db090952db97ea",
+      "split": "validation",
+      "task": "rte",
+      "selection": "all available RTE validation rows; raw text never exported"
+    },
+    "conditions": [
+      "BASE","FULL_RTE","RANDOM_NORM_MATCHED","LAYER_SHUFFLE","WRONG_TASK_COPA",
+      "DOSE_0p25","DOSE_0p5","DOSE_1p5","PREMISE_SHUFFLE_BASE","PREMISE_SHUFFLE_FULL"
+    ],
+    "metrics": ["acc_norm","gold_token_mean_nll","paired_accuracy_delta","bootstrap_95ci","control_margin","premise_shuffle_retention"]
+  },
+  "reproduction_gate": {
+    "natural_full_minus_base_min": 0.03,
+    "procedural_confirmation_full_minus_base_min": 0.02,
+    "procedural_generator_holdout_full_minus_base_min": 0.00,
+    "bootstrap_lower_bound_gt": 0.0,
+    "full_minus_best_random_shuffle_wrongtask_min": 0.02,
+    "all_required": true
+  },
+  "safety_shortcut_gate": {
+    "premise_shuffle_accuracy_retention_max": 0.80,
+    "positive_promotion_requires_green": true,
+    "safety_red_still_allows_quarantined_causal_forensics": true
+  },
+  "causal_lane": {
+    "precommitted": true,
+    "broad_objects": ["Q_ALL","V_ALL","EARLY_QV","MIDDLE_QV","LATE_QV"],
+    "fine_if_survivor": "layer_then_projection_then_rank_or_subspace",
+    "tests": ["necessity","candidate_only_sufficiency","matched_random","Holm","locked_validation","fresh_process_replay"],
+    "same_environment_max_grade": "SCOPED_E4",
+    "E5_requires_independent_physical_environment": true
+  },
+  "raw_free_contract": {
+    "forbid_final": ["portal model.safetensors","exported adapter_model.safetensors","Base weights","tokenizer originals","LoRA A/B","reconstructable deltaW","raw logits","raw activations","hidden states","raw natural validation text"],
+    "allow": ["hashes","shapes","scalar norms","energy ratios","task/operator cosine summaries","aggregate behavior metrics","case semantic digests","causal effect sizes","counterexamples without copyrighted source rows"]
+  }
+}

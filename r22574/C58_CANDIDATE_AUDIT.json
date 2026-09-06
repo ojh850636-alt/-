@@ -1,0 +1,100 @@
+{
+  "schema": "R22574_C58_CANDIDATE_AUDIT_V1",
+  "parent": "R22573_EXACT_FINAL",
+  "objective": "FIRST_EXTERNAL_POSITIVE_E5_CLOSURE_CANDIDATE",
+  "selection_policy": {
+    "minimum_candidates": 3,
+    "primary_metric": "E5_vertical_closure_likelihood",
+    "rules": [
+      "scientific_question_fingerprint_must_be_new",
+      "training_time_base_provenance_preferred",
+      "adapter_first_viability_before_large_base",
+      "deterministic_independent_verifier_required",
+      "raw_free_final_only"
+    ]
+  },
+  "candidates": [
+    {
+      "rank": 1,
+      "id": "RampPublic/portal-qwen3-1.7b",
+      "source_type": "NATIVE_PORTAL_TASK_LATENT_CORE_ALIGNMENT_EXPORTABLE_TO_PEFT_LORA",
+      "license": "Apache-2.0",
+      "training_base": "Qwen/Qwen3-1.7B@70d244cc86ccca08cf5af4e1e306ecf908b1ad5e",
+      "dataset": "RampPublic/portallib-tasks@ffc3c0e44f529bf64a5ae62ed5db090952db97ea",
+      "artifact_revision": "v0.2.0",
+      "artifact_commit": "be09be533b5c0418ad20269f19ebb63e9efbc330",
+      "artifact_safetensors_sha256": "732286e119c396c62b8c1d6b115f3ae6eec951a47eaa9bcdf0fee65564ff9688",
+      "architecture": "14 task latents + shared canonical LoRA-generating core + 1.7B alignment; exports q/v rank8 alpha16 PEFT LoRA",
+      "score": 94,
+      "decision": "SELECT_C58",
+      "reasons": [
+        "exact training-time Base revision and dataset revision are published",
+        "native artifact can export standard PEFT adapter without loading the Base",
+        "adapter-first operator viability can prevent a 3.44GB Base download if dead",
+        "same source exposes 14 task latents, enabling high-density raw-free task/operator atlas",
+        "public task/evaluation recipe enables exact natural locked validation without shipping rows",
+        "directly tests portability abstraction, closer to Lucia brain-material goal than another isolated task LoRA"
+      ],
+      "sources": [
+        "https://huggingface.co/RampPublic/portal-qwen3-1.7b",
+        "https://github.com/ramp-public/portallib/blob/main/REPRODUCING.md"
+      ]
+    },
+    {
+      "rank": 2,
+      "id": "a6188466/mini-date-converter-dsl-adapter",
+      "source_type": "STANDARD_PEFT_LORA",
+      "license": "MIT",
+      "training_base": "microsoft/Phi-4-mini-instruct (exact training-time revision not proven in public card)",
+      "architecture": "natural-language time/date to restricted executable DSL",
+      "score": 74,
+      "decision": "HOLD_SECONDARY",
+      "reasons": [
+        "strong deterministic DSL interpreter verifier",
+        "new temporal semantic-parsing question",
+        "Base is substantially larger and exact training-time Base revision is weaker than PorTAL",
+        "does not directly test task-portability abstraction"
+      ],
+      "sources": [
+        "https://huggingface.co/a6188466/mini-date-converter-dsl-adapter",
+        "https://huggingface.co/datasets/a6188466/mini-date-converter-dsl-dataset"
+      ]
+    },
+    {
+      "rank": 3,
+      "id": "ShahzebKhoso/t5-small-opencode-lora",
+      "source_type": "STANDARD_PEFT_LORA",
+      "license": "Apache-2.0",
+      "training_base": "t5-small (exact training-time revision not proven)",
+      "architecture": "T5-small code generation LoRA",
+      "score": 61,
+      "decision": "REJECT_FIRST_E5",
+      "reasons": [
+        "small Base and executable verifier are attractive",
+        "scientific question materially overlaps prior secure-code/code-repair/regex-program-generation lanes",
+        "public evaluation is loss-only rather than functional",
+        "Hub currently reports PEFT task type invalid",
+        "weaker provenance than PorTAL"
+      ],
+      "sources": [
+        "https://huggingface.co/ShahzebKhoso/t5-small-opencode-lora"
+      ]
+    }
+  ],
+  "selected_scientific_question": {
+    "candidate": "C58",
+    "task": "RTE exported from PorTAL Qwen3-1.7B",
+    "question": "Can a shared PorTAL task latent and canonical core materialize a nondegenerate standard PEFT LoRA whose entailment behavior is control-separated on the exact pinned Qwen3-1.7B base and whose causal q/v subspace survives independent generator/verifier holdouts, while raw weights are discarded after extraction?",
+    "novelty": "The primary object is task-latent-to-LoRA portability and causal invariance, not another sequence-classification benchmark.",
+    "maximum_claim_before_independent_worker": "SCOPED_E4_AT_MOST",
+    "positive_E5_requires": [
+      "behavior_green_on_natural_locked_and_independent_procedural_holdout",
+      "random_and_shuffle_control_separation",
+      "causal necessity_and_sufficiency_with_multiple_test_correction",
+      "path_or_subspace robustness",
+      "fresh_process replay",
+      "independent_physical_worker_or_environment replay",
+      "training_time Base provenance retained"
+    ]
+  }
+}

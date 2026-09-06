@@ -1,0 +1,13 @@
+name: R22574 C58 encoded runtime transport check (superseded)
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  superseded:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo 'Superseded: encoded/base64 runtime transport was rejected after source-zero hash/CRC failures.'
+          echo 'Canonical runtime is now plain Python under r22574/runtime_source/.'
+          exit 1
