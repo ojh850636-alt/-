@@ -1,41 +1,46 @@
-name: R22620 C79 CPU candidate metadata audit
+name: R22620 C79 Faroese source-zero witness
 on:
   push:
     branches: [r22620-c79-meta]
 jobs:
-  audit:
+  witness:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Metadata-only exact audit
+      - name: Recover exact model and eval metadata only
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p meta
+          mkdir -p meta/adapter meta/eval
           python - <<'PY'
-          import json, urllib.request, pathlib
-          repos=[
-            'jekunz/smollm-135m-lora-fineweb-faroese',
-            'jekunz/smollm-135m-lora-all-fineweb-icelandic',
-            'hfm8tr/smollm2-135m-smoltalk-lora',
-          ]
+          import json, urllib.request, pathlib, hashlib
+          arepo='jekunz/smollm-135m-lora-fineweb-faroese'
+          arev='e55c7de03389189dcf52a0c27360984eb1eda675'
+          brepo='HuggingFaceTB/SmolLM2-135M-Instruct'
+          drepo='jekunz/FoBLiMP'
+          def jget(url):
+              with urllib.request.urlopen(url,timeout=30) as r: return json.load(r)
+          apiA=jget('https://huggingface.co/api/models/'+arepo)
+          apiB=jget('https://huggingface.co/api/models/'+brepo)
+          apiD=jget('https://huggingface.co/api/datasets/'+drepo)
+          for fn in ['adapter_config.json','README.md']:
+              with urllib.request.urlopen(f'https://huggingface.co/{arepo}/resolve/{arev}/{fn}?download=true',timeout=30) as r:
+                  pathlib.Path('meta/adapter/'+fn).write_bytes(r.read())
+          payload={'schema':'R22620_C79_FAROESE_WITNESS_V1','weight_bytes_requested':0,
+                   'adapter_repo':arepo,'adapter_revision':arev,
+                   'adapter_api_sha':apiA.get('sha'),'base_repo':brepo,'base_api_sha':apiB.get('sha'),
+                   'eval_repo':drepo,'eval_revision':apiD.get('sha'),
+                   'eval_siblings':[s.get('rfilename') for s in apiD.get('siblings',[])],
+                   'training_base_revision_proven':False}
+          p=pathlib.Path('meta/WITNESS.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
           rows=[]
-          for repo in repos:
-              with urllib.request.urlopen('https://huggingface.co/api/models/'+repo, timeout=30) as r: d=json.load(r)
-              row={'repo':repo,'sha':d.get('sha'),'tags':d.get('tags',[]),'siblings':[s.get('rfilename') for s in d.get('siblings',[])]}
-              for fn in ['adapter_config.json','README.md']:
-                  try:
-                      with urllib.request.urlopen(f'https://huggingface.co/{repo}/resolve/{d.get("sha")}/{fn}?download=true', timeout=30) as r:
-                          b=r.read()
-                      pathlib.Path('meta/'+repo.split('/')[1]+'_'+fn.replace('/','_')).write_bytes(b)
-                  except Exception as e:
-                      row[fn+'_error']=repr(e)
-              rows.append(row)
-          pathlib.Path('meta/CANDIDATES.json').write_text(json.dumps({'schema':'R22620_C79_META_V1','weight_bytes_requested':0,'rows':rows},indent=2,sort_keys=True)+'\n')
+          for f in sorted(pathlib.Path('meta').rglob('*')):
+              if f.is_file(): rows.append({'path':f.as_posix(),'bytes':f.stat().st_size,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()})
+          pathlib.Path('meta/MANIFEST.json').write_text(json.dumps(rows,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22620-c79-metadata
+          name: r22620-c79-faroese-witness
           path: meta
           retention-days: 1
           compression-level: 0
