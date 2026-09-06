@@ -1,0 +1,85 @@
+name: R22620 CPU LoRA source-zero discovery
+on:
+  push:
+    branches: [r22620-cpu-discovery]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Scan small SmolLM2 LoRA metadata without model weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json,re,urllib.request,urllib.parse,pathlib,hashlib,time
+          UA={'User-Agent':'LAA-R22620-source-zero-audit'}
+          def get_json(url):
+              req=urllib.request.Request(url,headers=UA)
+              with urllib.request.urlopen(req,timeout=30) as r: return json.load(r)
+          def get_text(url,limit=150000):
+              req=urllib.request.Request(url,headers=UA)
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as r:
+                      b=r.read(limit+1)
+                  return b[:limit].decode('utf-8','replace')
+              except Exception: return ''
+          q=urllib.parse.quote('SmolLM2-135M')
+          models=get_json(f'https://huggingface.co/api/models?search={q}&limit=200&full=true')
+          known={'piyushgupta53/smollm2-135m-english-to-latex-notation-lora','HanfuZhao781/recallclear-smollm2-135m-lora'}
+          rows=[]
+          for m in models:
+              rid=m.get('id','')
+              if not rid or rid in known: continue
+              sib=[s.get('rfilename','') for s in m.get('siblings',[])]
+              if 'adapter_config.json' not in sib or 'adapter_model.safetensors' not in sib: continue
+              rev=m.get('sha')
+              if not rev: continue
+              base=f'https://huggingface.co/{rid}/resolve/{rev}/'
+              cfg_txt=get_text(base+'adapter_config.json',40000)
+              try: cfg=json.loads(cfg_txt)
+              except Exception: continue
+              readme=get_text(base+'README.md',150000) if 'README.md' in sib else ''
+              training_files=[x for x in sib if re.search(r'(train|manifest|provenance|history|recipe|args|state|config)',x,re.I) and x not in {'adapter_config.json'}][:30]
+              hexes=sorted(set(re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])', readme, re.I)))
+              lfs=None
+              for s in m.get('siblings',[]):
+                  if s.get('rfilename')=='adapter_model.safetensors':
+                      lfs=s.get('lfs') or {}
+              card=m.get('cardData') or {}
+              tags=m.get('tags') or []
+              row={
+                'repo':rid,'repo_revision':rev,'license':card.get('license'),
+                'pipeline_tag':m.get('pipeline_tag'),'tags':tags,
+                'base_model_name_or_path':cfg.get('base_model_name_or_path'),
+                'adapter_revision_field':cfg.get('revision'),
+                'peft_type':cfg.get('peft_type'),'task_type':cfg.get('task_type'),
+                'r':cfg.get('r'),'target_modules':cfg.get('target_modules'),
+                'modules_to_save':cfg.get('modules_to_save'),
+                'adapter_lfs':lfs,'training_like_files':training_files,
+                'readme_hex40':hexes[:20],
+                'readme_excerpt':re.sub(r'\s+',' ',readme[:6000]),
+                'card_base_model':card.get('base_model'),'card_datasets':card.get('datasets'),
+              }
+              score=0
+              if cfg.get('revision'): score+=100
+              if hexes: score+=25
+              if any(re.search(r'(manifest|provenance|recipe)',x,re.I) for x in training_files): score+=20
+              if card.get('license') in {'apache-2.0','mit','bsd','cc-by-4.0'}: score+=10
+              if not cfg.get('modules_to_save'): score+=5
+              row['provenance_score']=score
+              rows.append(row)
+          rows.sort(key=lambda x:(-x['provenance_score'],x['repo'].lower()))
+          payload={'schema':'R22620_CPU_DISCOVERY_V1','model_weight_bytes_requested':0,'candidate_count':len(rows),'candidates':rows}
+          p=pathlib.Path('out/candidates.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('out/candidates.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  candidates.json\n')
+          print('candidates',len(rows))
+          for r in rows[:40]: print(r['provenance_score'],r['repo'],r['task_type'],r['base_model_name_or_path'],r['adapter_revision_field'],r['training_like_files'][:4])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22620-cpu-discovery
+          path: out
+          retention-days: 1
+          compression-level: 0
