@@ -1,32 +1,33 @@
-name: R22618 C77 CPU runtime wheelhouse
+name: R22618 C77 CPU runtime minimal wheelhouse
 on:
   push:
     branches: [r22618-c77-cpu-runtime]
 jobs:
   wheels:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Download exact CPU analysis wheels
+      - name: Download only missing runtime wheels
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p wheels
-          python -m pip download --only-binary=:all: --dest wheels \
-            'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1'
+          python -m pip download --only-binary=:all: --no-deps --dest wheels \
+            'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1' \
+            'tokenizers==0.22.1' 'huggingface-hub==0.36.0'
           python - <<'PY'
           import hashlib,json,pathlib
           rows=[]
-          for p in sorted(pathlib.Path('wheels').glob('*')):
+          for p in sorted(pathlib.Path('wheels').glob('*.whl')):
               rows.append({'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          pathlib.Path('wheels/WHEEL_MANIFEST.json').write_text(json.dumps({'schema':'R22618_C77_CPU_WHEELS_V1','python':'3.13','rows':rows},indent=2,sort_keys=True)+'\n')
+          pathlib.Path('wheels/WHEEL_MANIFEST.json').write_text(json.dumps({'schema':'R22618_C77_CPU_WHEELS_MIN_V2','python':'3.13','rows':rows},indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22618-c77-cpu-wheels
+          name: r22618-c77-cpu-wheels-min
           path: wheels
           retention-days: 1
           compression-level: 0
