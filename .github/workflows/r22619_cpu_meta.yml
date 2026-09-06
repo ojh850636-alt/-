@@ -1,0 +1,53 @@
+name: R22619 CPU candidate metadata-only audit
+on:
+  push:
+    branches: [r22619-meta-cpu]
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit four candidates without weight GET
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, urllib.request, urllib.parse, pathlib, hashlib
+          repos = [
+            'spellicer/SmolLM2-135M-Instruct-capital',
+            'akshatamadavi/qwen-pii-masker-lora',
+            'danrdoran/flan-t5-grammar-correction',
+            'hfm8tr/smollm2-135m-smoltalk-lora',
+          ]
+          def get(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22619-metadata-only'})
+              with urllib.request.urlopen(req,timeout=30) as r: return r.read()
+          out=[]
+          for repo in repos:
+              api='https://huggingface.co/api/models/'+repo+'/revision/main?blobs=true'
+              meta=json.loads(get(api))
+              sha=meta.get('sha')
+              sib=[]
+              for s in meta.get('siblings',[]):
+                  row={'name':s.get('rfilename')}
+                  lfs=s.get('lfs') or {}
+                  if lfs:
+                      row.update({'lfs_sha256':lfs.get('sha256'),'bytes':lfs.get('size')})
+                  sib.append(row)
+              small={}
+              for fn in ('adapter_config.json','README.md'):
+                  try:
+                      b=get(f'https://huggingface.co/{repo}/resolve/{sha}/{fn}')
+                      small[fn]={'bytes':len(b),'sha256':hashlib.sha256(b).hexdigest(),'text':b.decode('utf-8','replace')[:24000]}
+                  except Exception as e:
+                      small[fn]={'error':type(e).__name__+':'+str(e)}
+              out.append({'repo':repo,'sha':sha,'library':meta.get('library_name'),'pipeline_tag':meta.get('pipeline_tag'),'tags':meta.get('tags',[]),'cardData':meta.get('cardData',{}),'siblings':sib,'small':small})
+          p=pathlib.Path('r22619_meta.json')
+          p.write_text(json.dumps({'schema':'R22619_CPU_META_AUDIT_V1','weight_get_bytes':0,'candidates':out},indent=2,sort_keys=True)+'\n')
+          print(p.read_text())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22619-cpu-meta
+          path: r22619_meta.json
+          retention-days: 1
