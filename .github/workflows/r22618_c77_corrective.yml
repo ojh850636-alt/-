@@ -1,0 +1,84 @@
+name: R22618 C77 corrective operator matched replay
+on:
+  push:
+    branches: [r22618-c77-cpu-latex]
+jobs:
+  corrective:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Reuse authoritative exact source artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: r22618-c77-exact-source
+          path: source
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: ${{ github.repository }}
+          run-id: 34033022538
+      - name: Verify source and unpack frozen suite plus corrective bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(sha256sum source/adapter/adapter_model.safetensors | cut -d' ' -f1)" = 'bb8086d19ef704e4d195ea4125ea800edb1a9623a7fd49b3472904c500cba60a'
+          test "$(sha256sum source/base/model.safetensors | cut -d' ' -f1)" = '5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c'
+          mkdir analysis
+          base64 -d r22618_c77/bundle.b64 > analysis/primary_bundle.tgz
+          test "$(sha256sum analysis/primary_bundle.tgz | cut -d' ' -f1)" = 'c07ad9acc27fea45287db7e3ac5aceabae6c88e9488e2ea3b04874630e85a333'
+          tar -xzf analysis/primary_bundle.tgz -C analysis
+          base64 -d r22618_c77/corrective_bundle.b64 > analysis/corrective_bundle.tgz
+          test "$(sha256sum analysis/corrective_bundle.tgz | cut -d' ' -f1)" = '2ebfcf361fd497badff740d28429f1e4935e3aa184846556c70596dde7b038c9'
+          tar -xzf analysis/corrective_bundle.tgz -C analysis
+          test "$(sha256sum analysis/c77_corrective.py | cut -d' ' -f1)" = 'e84cfbd14f2af0315a7b659fa93edd0d509a259aafa1756d9413515726c8b3c8'
+          test "$(sha256sum analysis/fluentmath_oracle_a_parent.py | cut -d' ' -f1)" = '1e911d8f7784ed5b5ebc9b8ebe2ecc01e2fbfcc1622b8109ded332945f4bd097'
+          python analysis/c77_suite.py
+          test "$(python - <<'PY'
+          import json
+          print(json.load(open('analysis/C77_SUITE_META.json'))['suite_sha256'])
+          PY
+          )" = 'd9c0b257e76634d8ad28f024b55ebc21260626682d1ea28cadd05c220fec16c3'
+      - name: Install same CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python - <<'PY' || python -m pip install --index-url https://download.pytorch.org/whl/cpu 'torch==2.8.0'
+          import torch
+          print(torch.__version__)
+          PY
+          python -m pip install 'transformers==4.57.1' 'peft==0.20.0' 'safetensors==0.7.0' 'accelerate>=1.10,<2' 'tokenizers>=0.22,<0.23'
+      - name: Run locked corrective replay only
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          TOKENIZERS_PARALLELISM: 'false'
+          OMP_NUM_THREADS: '4'
+          MKL_NUM_THREADS: '4'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir result
+          python -B analysis/c77_corrective.py source result --batch-size 10
+          test -f result/C77_CORRECTIVE_REPLAY.json
+          test "$(python - <<'PY'
+          import json
+          x=json.load(open('result/C77_CORRECTIVE_REPLAY.json'))
+          print(x['raw_generated_text_exported'],x['raw_logits_exported'],x['raw_activations_exported'])
+          PY
+          )" = '0 0 0'
+          python - <<'PY'
+          import hashlib,json,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path('result').glob('*')):
+              if p.is_file(): rows.append({'path':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          pathlib.Path('result/RESULT_MANIFEST.json').write_text(json.dumps({'schema':'C77_CORRECTIVE_RAWFREE_RESULT_MANIFEST_V1','files':rows},indent=2,sort_keys=True)+'\n')
+          PY
+      - name: Upload raw-free corrective results only
+        uses: actions/upload-artifact@v4
+        with:
+          name: r22618-c77-corrective-result
+          path: result
+          retention-days: 1
+          compression-level: 6
