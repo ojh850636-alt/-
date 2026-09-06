@@ -1,0 +1,37 @@
+name: R22619 C78 exact Adapter one-use courier
+on:
+  push:
+    branches: [r22619-c78-adapter]
+jobs:
+  adapter:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download exact Adapter once and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src
+          REPO='damienlusson/gemma-3-270m-it-unsloth-bnb-4bit-jobs-extraction-LoRA'
+          REV='63751205b2c41bc2ae8dfe3c03b8c4932ed21e4e'
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error \
+            "https://huggingface.co/${REPO}/resolve/${REV}/adapter_model.safetensors?download=true" \
+            -o src/adapter_model.safetensors
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error \
+            "https://huggingface.co/${REPO}/resolve/${REV}/adapter_config.json" \
+            -o src/adapter_config.json
+          test "$(stat -c%s src/adapter_model.safetensors)" = '121537408'
+          echo '414f0d5db8d6560a12f5841eb4a7fdc8ce558db37f4fe4e1c3c19a249223f918  src/adapter_model.safetensors' | sha256sum -c -
+          python - <<'PY'
+          import hashlib,json,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path('src').glob('*')):
+              rows.append({'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          pathlib.Path('src/SOURCE_MANIFEST.json').write_text(json.dumps({'schema':'R22619_C78_ADAPTER_ONE_USE_V1','repo':'damienlusson/gemma-3-270m-it-unsloth-bnb-4bit-jobs-extraction-LoRA','revision':'63751205b2c41bc2ae8dfe3c03b8c4932ed21e4e','files':rows},indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22619-c78-adapter-once
+          path: src
+          retention-days: 1
+          compression-level: 0
