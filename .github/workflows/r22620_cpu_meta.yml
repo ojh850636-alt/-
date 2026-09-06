@@ -1,100 +1,40 @@
-name: R22620 C79 capital source-zero preseal
+name: R22620 C79 capital exact adapter courier
 on:
   push:
     branches: [r22620-cpu-meta]
 jobs:
-  preseal:
+  source:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Build exact independent capital suite before model bytes
+      - name: Download exact selected Adapter only after preseal
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p preseal
+          PRESEAL_SHA='bee50b4d7f38b1d899fdecab01ab37a8f9d22da68454741ad2300e5784d542f1'
+          test -n "$PRESEAL_SHA"
+          mkdir -p src/adapter
+          REPO='spellicer/SmolLM2-135M-Instruct-capital'
+          REV='ef68368d888343f1d57830abc501d7288bc9d6cd'
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error \
+            "https://huggingface.co/${REPO}/resolve/${REV}/adapter_model.safetensors?download=true" \
+            -o src/adapter/adapter_model.safetensors
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error \
+            "https://huggingface.co/${REPO}/resolve/${REV}/adapter_config.json?download=true" \
+            -o src/adapter/adapter_config.json
+          test "$(stat -c%s src/adapter/adapter_model.safetensors)" = '3717656'
+          echo '4699dca74c305c5f3cb884c6afd29e2f3945a6b0243158e7afd4e3f082835743  src/adapter/adapter_model.safetensors' | sha256sum -c -
           python - <<'PY'
-          import json, urllib.request, pathlib, hashlib, random, re
-          REV='c8015eebdd94c533358406b0d709f441389e1f2e'
-          URL=f'https://raw.githubusercontent.com/mledoze/countries/{REV}/countries.json'
-          with urllib.request.urlopen(URL, timeout=30) as r: raw=r.read()
-          source_sha=hashlib.sha256(raw).hexdigest()
-          data=json.loads(raw)
-          pairs=[]
-          for x in data:
-            name=(x.get('name') or {}).get('common')
-            caps=x.get('capital') or []
-            if not x.get('independent') or len(caps)!=1 or not name: continue
-            cap=caps[0]
-            if not isinstance(cap,str) or not cap.strip(): continue
-            if len(name)>42 or len(cap)>42: continue
-            if not re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ .'-]+", name): continue
-            if not re.fullmatch(r"[A-Za-zÀ-ÖØ-öø-ÿ .'-]+", cap): continue
-            pairs.append((name,cap))
-          pairs=sorted(set(pairs))
-          # deterministic stable subset spread across alphabetical order
-          if len(pairs)<120: raise SystemExit(f'not enough verified pairs: {len(pairs)}')
-          idx=[round(i*(len(pairs)-1)/79) for i in range(80)]
-          selected=[pairs[i] for i in idx]
-          # ensure no duplicated capitals in selected so reverse relation is deterministic
-          seen=set(); clean=[]
-          for p in selected:
-            if p[1].lower() in seen: continue
-            seen.add(p[1].lower()); clean.append(p)
-          # fill if needed
-          for p in pairs:
-            if len(clean)>=72: break
-            if p in clean or p[1].lower() in seen: continue
-            seen.add(p[1].lower()); clean.append(p)
-          clean=clean[:72]
-          cases=[]
-          # 72 real recall; first 24 Discovery, next 24 Confirmation, last 24 OOD
-          for i,(country,capital) in enumerate(clean):
-            split='DISCOVERY' if i<24 else ('CONFIRMATION' if i<48 else 'OOD')
-            prompt=f'Question: What is the capital of {country}? Answer with only the city name.'
-            cases.append({'id':f'REAL_{i:03d}','family':'REAL_RECALL','split':split,'country':country,'capital':capital,'prompt':prompt,'target':capital})
-          # explicit counterfactual context: use a different verified capital as the fictional target
-          for j,(country,realcap) in enumerate(clean[:48]):
-            fake=clean[(j+17)%len(clean)][1]
-            if fake.lower()==realcap.lower(): fake=clean[(j+23)%len(clean)][1]
-            split='DISCOVERY' if j<16 else ('CONFIRMATION' if j<32 else 'OOD')
-            prompt=(f'Fictional atlas rule: In this fictional atlas, the capital of {country} is {fake}. '
-                    f'Use only the fictional atlas rule, not real-world knowledge. What is the capital of {country}? Answer with only the city name.')
-            cases.append({'id':f'CTX_{j:03d}','family':'COUNTERFACTUAL_CONTEXT','split':split,'country':country,'real_capital':realcap,'context_capital':fake,'prompt':prompt,'target':fake})
-          # reverse relation transfer, held out from Discovery to prevent post-hoc algorithm synthesis
-          for j,(country,capital) in enumerate(clean[24:64]):
-            split='CONFIRMATION' if j<20 else 'OOD'
-            prompt=f'Question: {capital} is the capital of which country? Answer with only the country name.'
-            cases.append({'id':f'REV_{j:03d}','family':'REVERSE_RELATION','split':split,'country':country,'capital':capital,'prompt':prompt,'target':country})
-          # non-country negatives; correct response fixed before model output
-          fictional=['Veloria','Norvane','Caldris','Elarune','Tessara','Orinth','Belvar','Mirevia','Solkara','Davenor','Aureliax','Kestrelia','Vandoril','Zephyria','Lunovar','Meridiax','Torvessa','Quenara','Halcyra','Pryndel','Averonix','Cindoria','Ravellis','Mornavia']
-          for j,name in enumerate(fictional):
-            prompt=f'Question: What is the capital of {name}? If this is not a real country in the reference set, answer exactly: NOT A REAL COUNTRY'
-            cases.append({'id':f'NEG_{j:03d}','family':'NON_COUNTRY_NEGATIVE','split':'NEGATIVE','prompt':prompt,'target':'NOT A REAL COUNTRY'})
-          # exact pre-registered control / generation / causal policy
-          policy={
-            'teacher_forced_primary':['REAL_RECALL','COUNTERFACTUAL_CONTEXT','REVERSE_RELATION'],
-            'generation_subset_rule':'all CONFIRMATION and OOD cases with id number divisible by 3 plus all NEGATIVE',
-            'control_seed':1337,
-            'controls':['BASE','FULL','RANDOM_RANK_MATCHED','LAYER_SHUFFLED'],
-            'dose':[0.0,0.25,0.5,1.0,1.5],
-            'positive_gate':{'confirmation_ood_full_minus_base_ci_lower_gt':0.0,'full_minus_random_ci_lower_gt':0.0,'full_minus_shuffle_ci_lower_gt':0.0},
-            'context_safety_gate':'COUNTERFACTUAL_CONTEXT exact target must not decrease vs BASE and parametric-real-capital override rate must not increase',
-            'reverse_transfer_is_separate':'reverse relation does not count as direct recall capability unless control-separated independently',
-            'negative_gate':'non-country false-capital activation must not increase vs BASE',
-            'causal_entry':'only for a presealed control-separated effect; positive and failure lanes separate',
-            'causal_broad':['ATTENTION_ALL','MLP_ALL','EARLY','MIDDLE','LATE','Q_PROJ','K_PROJ','V_PROJ','O_PROJ','GATE_PROJ','UP_PROJ','DOWN_PROJ'],
-            'claim_ceiling':'BASE_REVISION_HOLD unless training-time exact Base revision independently proven'
-          }
-          payload={'schema':'R22620_C79_CAPITAL_PRESEAL_V1','model_weight_bytes_requested':0,'model_outputs_observed':0,'reference_repo':'mledoze/countries','reference_revision':REV,'reference_countries_json_sha256':source_sha,'reference_blob_sha':'0dbd9fe890b420ad2282920374c879d5bd449a2e','cases':cases,'policy':policy}
-          p=pathlib.Path('preseal/C79_PRESEAL.json');p.write_text(json.dumps(payload,indent=2,sort_keys=True,ensure_ascii=False)+'\n')
-          pathlib.Path('preseal/C79_PRESEAL.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  C79_PRESEAL.json\n')
-          summary={'cases':len(cases),'real':sum(x['family']=='REAL_RECALL' for x in cases),'counterfactual':sum(x['family']=='COUNTERFACTUAL_CONTEXT' for x in cases),'reverse':sum(x['family']=='REVERSE_RELATION' for x in cases),'negative':sum(x['family']=='NON_COUNTRY_NEGATIVE' for x in cases),'source_sha256':source_sha,'preseal_sha256':hashlib.sha256(p.read_bytes()).hexdigest()}
-          pathlib.Path('preseal/SUMMARY.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
-          print(summary)
+          import json,hashlib,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path('src').rglob('*')):
+            if p.is_file(): rows.append({'path':p.as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          payload={'schema':'R22620_C79_CAPITAL_ADAPTER_SOURCE_V1','source_consumed':True,'adapter_repo':'spellicer/SmolLM2-135M-Instruct-capital','adapter_revision':'ef68368d888343f1d57830abc501d7288bc9d6cd','preseal_sha256':'bee50b4d7f38b1d899fdecab01ab37a8f9d22da68454741ad2300e5784d542f1','training_time_base_revision_proven':False,'files':rows}
+          pathlib.Path('src/SOURCE_RECEIPT.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22620-c79-preseal
-          path: preseal
+          name: r22620-c79-capital-adapter
+          path: src
           retention-days: 1
           compression-level: 0
