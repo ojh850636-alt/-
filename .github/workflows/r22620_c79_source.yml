@@ -1,0 +1,96 @@
+name: R22620 C79 EOT durable one-use source courier
+on:
+  push:
+    branches: [r22620-cpu-discovery]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: r22620-c79-one-use-source
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Reserve durable gate before any model-source GET
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os,json,base64,urllib.request
+          repo=os.environ['REPO']; token=os.environ['GH_TOKEN']; run=os.environ['RUN_ID']
+          path='receipts/R22620_C79_GATE.json'; branch='r22620-c79-receipt'
+          url=f'https://api.github.com/repos/{repo}/contents/{path}?ref={branch}'
+          H={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LAA-R22620'}
+          with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r: meta=json.load(r)
+          gate=json.loads(base64.b64decode(meta['content']).decode())
+          if gate.get('reserved') or gate.get('consumed'):
+              raise SystemExit('SOURCE_GATE_CLOSED_BEFORE_GET')
+          gate['reserved']=True; gate['reservation_run_id']=run
+          body=json.dumps({'message':'Reserve R22620 C79 source gate','content':base64.b64encode((json.dumps(gate,indent=2,sort_keys=True)+'\n').encode()).decode(),'sha':meta['sha'],'branch':branch}).encode()
+          req=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{path}',data=body,headers={**H,'Content-Type':'application/json'},method='PUT')
+          with urllib.request.urlopen(req,timeout=30) as r: out=json.load(r)
+          print('RESERVED',out['commit']['sha'])
+          PY
+      - name: Download Adapter once, verify, then mark consumed before Base GET
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/adapter src/base
+          AD='Vurtnec/eot-detector-smollm2'; AR='5972e29513364a0a5a1bda7964cb89c46e2ef464'
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/${AD}/resolve/${AR}/adapter_model.safetensors?download=true" -o src/adapter/adapter_model.safetensors
+          test "$(stat -c%s src/adapter/adapter_model.safetensors)" = '937056'
+          echo 'e9301d1408565366476231034a680e97441ed607fe4f9b0adf465a65ed7e0532  src/adapter/adapter_model.safetensors' | sha256sum -c -
+          curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/${AD}/resolve/${AR}/adapter_config.json?download=true" -o src/adapter/adapter_config.json
+          python - <<'PY'
+          import os,json,base64,urllib.request,hashlib,pathlib
+          repo=os.environ['REPO']; token=os.environ['GH_TOKEN']; run=os.environ['RUN_ID']
+          path='receipts/R22620_C79_GATE.json'; branch='r22620-c79-receipt'
+          url=f'https://api.github.com/repos/{repo}/contents/{path}?ref={branch}'
+          H={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'LAA-R22620'}
+          with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r: meta=json.load(r)
+          gate=json.loads(base64.b64decode(meta['content']).decode())
+          if gate.get('reservation_run_id')!=run or not gate.get('reserved') or gate.get('consumed'):
+              raise SystemExit('SOURCE_GATE_STATE_MISMATCH_AFTER_ADAPTER_GET')
+          p=pathlib.Path('src/adapter/adapter_model.safetensors')
+          gate['consumed']=True; gate['consumed_run_id']=run; gate['observed_adapter_bytes']=p.stat().st_size; gate['observed_adapter_sha256']=hashlib.sha256(p.read_bytes()).hexdigest()
+          body=json.dumps({'message':'Mark R22620 C79 Adapter consumed','content':base64.b64encode((json.dumps(gate,indent=2,sort_keys=True)+'\n').encode()).decode(),'sha':meta['sha'],'branch':branch}).encode()
+          req=urllib.request.Request(f'https://api.github.com/repos/{repo}/contents/{path}',data=body,headers={**H,'Content-Type':'application/json'},method='PUT')
+          with urllib.request.urlopen(req,timeout=30) as r: out=json.load(r)
+          print('CONSUMED',out['commit']['sha'])
+          PY
+      - name: Download exact compatibility Base only after consumed identity is durable
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE='HuggingFaceTB/SmolLM2-135M'; BR='93efa2f097d58c2a74874c7e644dbc9b0cee75a2'
+          hfget() { curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$BASE" "$BR" model.safetensors src/base/model.safetensors
+          test "$(stat -c%s src/base/model.safetensors)" = '269060552'
+          echo '80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1  src/base/model.safetensors' | sha256sum -c -
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
+            hfget "$BASE" "$BR" "$f" "src/base/$f"
+          done
+          python - <<'PY'
+          import pathlib,hashlib,json
+          rows=[]
+          for p in sorted(pathlib.Path('src').rglob('*')):
+              if p.is_file(): rows.append({'path':p.as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          payload={'schema':'R22620_C79_EXACT_SOURCE_V1','adapter_repo':'Vurtnec/eot-detector-smollm2','adapter_revision':'5972e29513364a0a5a1bda7964cb89c46e2ef464','adapter_sha256':'e9301d1408565366476231034a680e97441ed607fe4f9b0adf465a65ed7e0532','base_repo':'HuggingFaceTB/SmolLM2-135M','base_revision':'93efa2f097d58c2a74874c7e644dbc9b0cee75a2','base_sha256':'80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1','training_base_revision_proven':False,'suite_sha256':'088b6c095188921c52f1060ef68c6ca93a00d7c141205f758c9070b359590dcc','contract_sha256':'9a2ba4f9f63185aacdfb47146f45f11cb5eccafb64dbcd6c5ec6c0e097c67724','files':rows}
+          pathlib.Path('src/SOURCE_MANIFEST.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22620-c79-exact-source
+          path: src
+          retention-days: 1
+          compression-level: 0
