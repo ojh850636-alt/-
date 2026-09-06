@@ -1,0 +1,66 @@
+name: R22620 top3 CPU candidate exact metadata audit
+on:
+  push:
+    branches: [r22620-cpu-discovery]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit EOT contradiction capital metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json,re,urllib.request,pathlib,hashlib
+          repos=[
+            'Vurtnec/eot-detector-smollm2',
+            'spellicer/SmolLM2-135M-Instruct-contradiction',
+            'spellicer/SmolLM2-135M-Instruct-capital',
+          ]
+          H={'User-Agent':'LAA-R22620-top3-source-zero'}
+          def jget(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r: return json.load(r)
+          def tget(url,cap=250000):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r: return r.read(cap).decode('utf-8','replace')
+              except Exception as e: return ''
+          rows=[]
+          for repo in repos:
+              api=jget('https://huggingface.co/api/models/'+repo)
+              rev=api['sha']; sib=[x.get('rfilename') for x in api.get('siblings',[])]
+              base=f'https://huggingface.co/{repo}/resolve/{rev}/'
+              cfg=json.loads(tget(base+'adapter_config.json',50000))
+              readme=tget(base+'README.md') if 'README.md' in sib else ''
+              extra={}
+              for fn in ['trainer_state.json','train_results.json','training_history.json','training_manifest.json','manifest.json','provenance.json']:
+                  if fn in sib:
+                      txt=tget(base+fn,200000)
+                      if txt:
+                          extra[fn]={'sha256':hashlib.sha256(txt.encode()).hexdigest(),'text_excerpt':txt[:10000]}
+              am=[x for x in api.get('siblings',[]) if x.get('rfilename')=='adapter_model.safetensors']
+              rows.append({
+                'repo':repo,'repo_revision':rev,'license':(api.get('cardData') or {}).get('license'),
+                'tags':api.get('tags',[]),'pipeline_tag':api.get('pipeline_tag'),
+                'base_model_name_or_path':cfg.get('base_model_name_or_path'),'adapter_revision_field':cfg.get('revision'),
+                'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),
+                'modules_to_save':cfg.get('modules_to_save'),'task_type':cfg.get('task_type'),
+                'adapter_lfs':(am[0].get('lfs') if am else None),
+                'siblings':sib,'readme_sha256':hashlib.sha256(readme.encode()).hexdigest(),
+                'readme_excerpt':re.sub(r'\s+',' ',readme[:16000]),
+                'readme_hex40':sorted(set(re.findall(r'(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])',readme,re.I))),
+                'extra_small_training_evidence':extra,
+              })
+          payload={'schema':'R22620_TOP3_META_V1','model_weight_bytes_requested':0,'candidates':rows}
+          p=pathlib.Path('out/top3.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('out/top3.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  top3.json\n')
+          for r in rows:
+              print(r['repo'],r['repo_revision'],r['base_model_name_or_path'],r['adapter_revision_field'],r['r'],r['target_modules'],r['modules_to_save'],r['readme_hex40'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22620-top3-meta
+          path: out
+          retention-days: 1
+          compression-level: 0
