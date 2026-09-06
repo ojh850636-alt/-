@@ -1,0 +1,63 @@
+name: R22620 C79 EOT exact source-zero witness
+on:
+  push:
+    branches: [r22620-cpu-discovery]
+jobs:
+  witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Recover EOT code labels and immutable source identity without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json,urllib.request,pathlib,hashlib,re
+          H={'User-Agent':'LAA-R22620-C79-source-zero'}
+          AD='Vurtnec/eot-detector-smollm2'
+          BASE='HuggingFaceTB/SmolLM2-135M'
+          DATA='Vurtnec/eot-detection-dataset'
+          TEST='Vurtnec/eot-detection-testset'
+          def jget(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r:return json.load(r)
+          def tget(url,cap=500000):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=30) as r:return r.read(cap).decode('utf-8','replace')
+          ap=jget('https://huggingface.co/api/models/'+AD); bp=jget('https://huggingface.co/api/models/'+BASE)
+          dp=jget('https://huggingface.co/api/datasets/'+DATA); tp=jget('https://huggingface.co/api/datasets/'+TEST)
+          ar=ap['sha']; br=bp['sha']
+          files={}
+          for fn in ['README.md','adapter_config.json','finetune_livekit_eot.py','eval_finetuned_livekit.py','compare_eot_models.py','debug_model_output.py']:
+              if fn in [s.get('rfilename') for s in ap.get('siblings',[])]:
+                  txt=tget(f'https://huggingface.co/{AD}/resolve/{ar}/{fn}?download=true')
+                  files[fn]={'sha256':hashlib.sha256(txt.encode()).hexdigest(),'text':txt}
+          # Raw Git LFS pointer is tiny and does not fetch model bytes.
+          ad_ptr=tget(f'https://huggingface.co/{AD}/raw/{ar}/adapter_model.safetensors',10000)
+          base_ptr=tget(f'https://huggingface.co/{BASE}/raw/{br}/model.safetensors',10000)
+          def parse_ptr(s):
+              m=re.search(r'oid sha256:([0-9a-f]{64})',s); z=re.search(r'size (\d+)',s)
+              return {'sha256':m.group(1) if m else None,'bytes':int(z.group(1)) if z else None,'raw_pointer':s}
+          cfg=json.loads(files['adapter_config.json']['text'])
+          payload={
+            'schema':'R22620_C79_EOT_WITNESS_V1','model_weight_bytes_requested':0,
+            'adapter_repo':AD,'adapter_revision':ar,'adapter_pointer':parse_ptr(ad_ptr),
+            'base_repo':BASE,'base_current_revision':br,'base_pointer':parse_ptr(base_ptr),
+            'training_base_revision_proven':bool(cfg.get('revision')),
+            'adapter_config_revision_field':cfg.get('revision'),
+            'dataset_repo':DATA,'dataset_revision':dp.get('sha'),
+            'test_repo':TEST,'test_revision':tp.get('sha'),
+            'files':files,
+          }
+          p=pathlib.Path('out/WITNESS.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('out/WITNESS.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  WITNESS.json\n')
+          print('adapter',payload['adapter_revision'],payload['adapter_pointer'])
+          print('base',payload['base_current_revision'],payload['base_pointer'])
+          for fn,v in files.items():
+              print('\n###',fn,'\n',v['text'][:7000])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22620-c79-eot-witness
+          path: out
+          retention-days: 1
+          compression-level: 0
