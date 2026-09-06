@@ -1,12 +1,13 @@
 {
-  "schema": "R22620_C79_DURABLE_SOURCE_GATE_V1",
-  "candidate": "Vurtnec/eot-detector-smollm2",
   "adapter_revision": "5972e29513364a0a5a1bda7964cb89c46e2ef464",
   "adapter_sha256": "e9301d1408565366476231034a680e97441ed607fe4f9b0adf465a65ed7e0532",
   "base_revision": "93efa2f097d58c2a74874c7e644dbc9b0cee75a2",
   "base_sha256": "80521b40281d6ce74e35c9282c22539e75aa0ac8578892b2a59955ef78d55da1",
-  "suite_sha256": "088b6c095188921c52f1060ef68c6ca93a00d7c141205f758c9070b359590dcc",
+  "candidate": "Vurtnec/eot-detector-smollm2",
+  "consumed": false,
   "contract_sha256": "9a2ba4f9f63185aacdfb47146f45f11cb5eccafb64dbcd6c5ec6c0e097c67724",
-  "reserved": false,
-  "consumed": false
+  "reservation_run_id": "34057748155",
+  "reserved": true,
+  "schema": "R22620_C79_DURABLE_SOURCE_GATE_V1",
+  "suite_sha256": "088b6c095188921c52f1060ef68c6ca93a00d7c141205f758c9070b359590dcc"
 }
