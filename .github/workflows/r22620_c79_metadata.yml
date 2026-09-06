@@ -1,46 +1,46 @@
-name: R22620 C79 Faroese source-zero witness
+name: R22620 C79 Faroese exact source courier
 on:
   push:
     branches: [r22620-c79-meta]
 jobs:
-  witness:
+  source:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
-      - name: Recover exact model and eval metadata only
+      - name: Download exact selected source once
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p meta/adapter meta/eval
+          mkdir -p src/adapter src/base src/eval
+          AREPO='jekunz/smollm-135m-lora-fineweb-faroese'
+          AREV='e55c7de03389189dcf52a0c27360984eb1eda675'
+          BREPO='HuggingFaceTB/SmolLM2-135M-Instruct'
+          BREV='12fd25f77366fa6b3b4b768ec3050bf629380bac'
+          DREPO='jekunz/FoBLiMP'
+          DREV='78bcbb0454053750bcf5fbf0c74eace5173f1f4a'
+          hfget() { curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$AREPO" "$AREV" adapter_model.safetensors src/adapter/adapter_model.safetensors
+          hfget "$AREPO" "$AREV" adapter_config.json src/adapter/adapter_config.json
+          hfget "$BREPO" "$BREV" model.safetensors src/base/model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
+            hfget "$BREPO" "$BREV" "$f" "src/base/$f"
+          done
+          for f in data/germdetect-00000-of-00001.parquet data/multiblimp-00000-of-00001.parquet data/scala_delete-00000-of-00001.parquet data/scala_flip-00000-of-00001.parquet data/translation_pairs-00000-of-00001.parquet README.md; do
+            out="src/eval/${f//\//_}"
+            hfget "datasets/$DREPO" "$DREV" "$f" "$out"
+          done
           python - <<'PY'
-          import json, urllib.request, pathlib, hashlib
-          arepo='jekunz/smollm-135m-lora-fineweb-faroese'
-          arev='e55c7de03389189dcf52a0c27360984eb1eda675'
-          brepo='HuggingFaceTB/SmolLM2-135M-Instruct'
-          drepo='jekunz/FoBLiMP'
-          def jget(url):
-              with urllib.request.urlopen(url,timeout=30) as r: return json.load(r)
-          apiA=jget('https://huggingface.co/api/models/'+arepo)
-          apiB=jget('https://huggingface.co/api/models/'+brepo)
-          apiD=jget('https://huggingface.co/api/datasets/'+drepo)
-          for fn in ['adapter_config.json','README.md']:
-              with urllib.request.urlopen(f'https://huggingface.co/{arepo}/resolve/{arev}/{fn}?download=true',timeout=30) as r:
-                  pathlib.Path('meta/adapter/'+fn).write_bytes(r.read())
-          payload={'schema':'R22620_C79_FAROESE_WITNESS_V1','weight_bytes_requested':0,
-                   'adapter_repo':arepo,'adapter_revision':arev,
-                   'adapter_api_sha':apiA.get('sha'),'base_repo':brepo,'base_api_sha':apiB.get('sha'),
-                   'eval_repo':drepo,'eval_revision':apiD.get('sha'),
-                   'eval_siblings':[s.get('rfilename') for s in apiD.get('siblings',[])],
-                   'training_base_revision_proven':False}
-          p=pathlib.Path('meta/WITNESS.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          import hashlib,json,pathlib
+          root=pathlib.Path('src')
           rows=[]
-          for f in sorted(pathlib.Path('meta').rglob('*')):
-              if f.is_file(): rows.append({'path':f.as_posix(),'bytes':f.stat().st_size,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()})
-          pathlib.Path('meta/MANIFEST.json').write_text(json.dumps(rows,indent=2,sort_keys=True)+'\n')
+          for p in sorted(x for x in root.rglob('*') if x.is_file()):
+              rows.append({'path':p.as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          payload={'schema':'R22620_C79_EXACT_SOURCE_MANIFEST_V1','adapter_repo':'jekunz/smollm-135m-lora-fineweb-faroese','adapter_revision':'e55c7de03389189dcf52a0c27360984eb1eda675','base_repo':'HuggingFaceTB/SmolLM2-135M-Instruct','base_revision':'12fd25f77366fa6b3b4b768ec3050bf629380bac','eval_repo':'jekunz/FoBLiMP','eval_revision':'78bcbb0454053750bcf5fbf0c74eace5173f1f4a','training_base_revision_proven':False,'files':rows}
+          pathlib.Path('src/SOURCE_MANIFEST.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22620-c79-faroese-witness
-          path: meta
+          name: r22620-c79-faroese-source
+          path: src
           retention-days: 1
           compression-level: 0
