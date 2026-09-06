@@ -1,0 +1,64 @@
+name: R22619 C78 jobs source-zero preflight
+on:
+  push:
+    branches: [r22619-c78-jobs]
+jobs:
+  preflight:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Exact metadata and CPU ABI only - no model weight GET
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1' 'bitsandbytes==0.48.1'
+          python - <<'PY'
+          import json,urllib.request,hashlib,pathlib,sys,torch
+          from transformers import Gemma3ForCausalLM, Gemma3TextConfig
+          from peft import LoraConfig,get_peft_model
+          import bitsandbytes as bnb
+          repos=[
+            'damienlusson/gemma-3-270m-it-unsloth-bnb-4bit-jobs-extraction-LoRA',
+            'unsloth/gemma-3-270m-it-unsloth-bnb-4bit',
+            'unsloth/gemma-3-270m-it',
+          ]
+          def get(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LUCIA-AA-R22619-C78-presource'})
+              with urllib.request.urlopen(req,timeout=30) as r:return r.read()
+          rows=[]
+          for repo in repos:
+              meta=json.loads(get('https://huggingface.co/api/models/'+repo+'/revision/main?blobs=true'))
+              sha=meta['sha']; files=[]
+              for s in meta.get('siblings',[]):
+                  n=s.get('rfilename'); l=s.get('lfs') or {}
+                  if n in ('adapter_model.safetensors','model.safetensors','config.json','tokenizer.json','tokenizer.model','tokenizer_config.json','special_tokens_map.json','chat_template.jinja','generation_config.json'):
+                      files.append({'name':n,'bytes':l.get('size'),'lfs_sha256':l.get('sha256')})
+              cfg=None
+              try:
+                  b=get(f'https://huggingface.co/{repo}/resolve/{sha}/config.json'); cfg=json.loads(b)
+              except: pass
+              rows.append({'repo':repo,'revision':sha,'files':files,'config':cfg})
+          # Tiny source-zero Gemma3+PEFT structural ABI; no external weights.
+          cfg=Gemma3TextConfig(vocab_size=256,hidden_size=64,intermediate_size=128,num_hidden_layers=2,num_attention_heads=4,num_key_value_heads=1,head_dim=16,max_position_embeddings=128,sliding_window=64,sliding_window_pattern=2)
+          model=Gemma3ForCausalLM(cfg)
+          lc=LoraConfig(r=8,lora_alpha=16,target_modules=['q_proj','k_proj','v_proj','o_proj','gate_proj','up_proj','down_proj'],task_type='CAUSAL_LM')
+          pm=get_peft_model(model,lc)
+          x=torch.tensor([[2,3,4,5]],dtype=torch.long)
+          with torch.no_grad(): y=pm(input_ids=x).logits
+          peft_ok=tuple(y.shape)==(1,4,256)
+          # bitsandbytes CPU backend availability probe without external model bytes.
+          bnb_import=True
+          bnb_cpu_backend=str(getattr(bnb,'__version__',''))
+          receipt={'schema':'R22619_C78_PRESOURCE_V1','model_weight_get_bytes':0,'adapter_weight_get_bytes':0,'python':sys.version,'torch':torch.__version__,'transformers':'4.57.1','peft':'0.20.0','bitsandbytes':bnb_cpu_backend,'synthetic_gemma3_peft_forward':peft_ok,'repos':rows}
+          pathlib.Path('c78_presource.json').write_text(json.dumps(receipt,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(receipt,indent=2))
+          assert peft_ok
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22619-c78-presource
+          path: c78_presource.json
+          retention-days: 1
