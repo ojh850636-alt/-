@@ -1,0 +1,26 @@
+# Ignore diagnostic patches and logs
+patches/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+
+# Virtual env
+venv/
+env/
+
+# IDE/editor
+.vscode/
+.idea/
+.env
+__pycache__/
+*.pyc
+
+# Keep downloads directory tracked via .gitkeep
+!/downloads/.gitkeep
+
+# AI quota and webhook logs
+ai_usage.json
+ai_usage_*.json
+tools/*.log
+

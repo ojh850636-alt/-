@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Lucia FileOps UI</title>
+  <style>body{font-family:system-ui,Segoe UI,Roboto,Arial;background:#f7f7f7;padding:16px} #files div{margin:6px 0}</style>
+</head>
+<body>
+  <h1>Lucia FileOps</h1>
+  <div>
+    <button id="wsConnect">Connect WS</button>
+    <button id="createPy">Create .py</button>
+    <button id="listFiles">List Files</button>
+  <button id="quantumRun">Run Quantum (stub)</button>
+
+    <div style="margin-top:1rem;">
+      <h3>AI Chat (optional)</h3>
+      <input id="chatInput" placeholder="Ask Lucia..." style="width:60%" />
+      <button id="sendChat">Send</button>
+  <label style="margin-left:8px"><input type="checkbox" id="useStub"> Force stub</label>
+  <label style="margin-left:8px"><input type="checkbox" id="enableAi"> Enable AI (client)</label>
+  <div style="font-size:0.9rem;color:#666;margin-top:4px">AI available: <strong id="aiAvail"></strong></div>
+      <div id="chatLog" style="border:1px solid #ccc;padding:8px;margin-top:8px;max-height:200px;overflow:auto"></div>
+    </div>
+
+    <div id="files"></div>
+    <pre id="log"></pre>
+  </div>
+
+  <script>
+    let ws;
+    const log = (m)=>{ document.getElementById('log').textContent += m + '\n'; }
+    // initial server-side hint (may be stale) then refresh from /ai/status
+    const aiAvailableHint = {{ 'true' if ai_available else 'false' }};
+    async function refreshAiStatus(){
+      try{
+        const r = await fetch('/ai/status');
+        const j = await r.json();
+        const v = !!j.ai_available;
+        document.getElementById('aiAvail').textContent = v ? 'yes' : 'no';
+        return v;
+      }catch(e){
+        document.getElementById('aiAvail').textContent = aiAvailableHint ? 'maybe' : 'no';
+        return !!aiAvailableHint;
+      }
+    }
+    document.addEventListener('DOMContentLoaded', async ()=>{ 
+      const srv = await refreshAiStatus();
+      const enableBox = document.getElementById('enableAi');
+      enableBox.disabled = !srv; 
+      if(!srv){ enableBox.checked = false }
+    });
+
+    document.getElementById('wsConnect').onclick = ()=>{
+      if(ws && ws.readyState===1){ ws.close(); ws=null; log('WS closed'); return }
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+      ws.onopen = ()=> log('ws open');
+      ws.onmessage = (ev)=> {
+        log('recv: ' + ev.data);
+        try{
+          const m = JSON.parse(ev.data);
+          if(m.type==='file_result' && m.result && m.result.files) renderFiles(m.result.files);
+        }catch(e){ }
+      };
+      ws.onclose = ()=> log('ws closed');
+    }
+
+    document.getElementById('createPy').onclick = ()=>{
+      if(!ws || ws.readyState!==1){ log('WS not connected'); return }
+      ws.send(JSON.stringify({type:'command', text:'파이썬 파일 생성'}));
+    }
+
+    document.getElementById('listFiles').onclick = ()=>{
+      if(!ws || ws.readyState!==1){ log('WS not connected'); return }
+      ws.send(JSON.stringify({type:'command', text:'목록'}));
+    }
+
+    document.getElementById('quantumRun').onclick = async ()=>{
+      const r = await fetch('/quantum/run', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({circuit:'H;MEAS'})});
+      const j = await r.json();
+      const logEl = document.getElementById('log'); logEl.textContent += '\nquantum: '+JSON.stringify(j);
+    }
+
+    document.getElementById('sendChat').onclick = async ()=>{
+      const q = document.getElementById('chatInput').value;
+      if(!q) return;
+      const clientEnable = document.getElementById('enableAi').checked;
+      const useStub = document.getElementById('useStub').checked || (!aiAvailable) || (!clientEnable);
+      const res = await fetch('/ai/chat', {method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify({text:q, use_stub: useStub})});
+      const data = await res.json();
+      const logEl = document.getElementById('chatLog');
+      logEl.innerHTML += '<div><strong>You:</strong> '+q+'</div>';
+      logEl.innerHTML += '<div><strong>Lucia:</strong> '+(data.response||data.message||JSON.stringify(data))+'</div>';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function renderFiles(arr){
+      const div = document.getElementById('files'); div.innerHTML='';
+      arr.forEach(f=>{
+        const el = document.createElement('div');
+        el.innerHTML = `${f.name} (${f.size} bytes) ` +
+          `<a href="/downloads/${f.name}" target="_blank">download</a> ` +
+          `<button data-name="${f.name}" class="del">delete</button>`;
+        div.appendChild(el);
+      });
+      document.querySelectorAll('.del').forEach(b=> b.onclick = (e)=>{
+        const name = e.target.dataset.name; if(!ws || ws.readyState!==1){ log('WS not connected'); return }
+        ws.send(JSON.stringify({type:'file_action', action:'delete', filename: name}));
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,4 @@
+# Optional dependencies (not required for basic file-ops)
+openai
+# quantum libs could be added here
+# qiskit

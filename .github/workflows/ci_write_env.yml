@@ -1,0 +1,21 @@
+name: CI — env writer smoke test
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  write-env-smoke:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run non-interactive env writer smoke test
+        shell: pwsh
+        run: |
+          Set-Location ${{ github.workspace }}\tools
+          # Run the test which invokes the writer; the test uses its own safe keys
+          .\test_write_env.ps1
