@@ -1,0 +1,34 @@
+name: R22619 C78 exact declared Base one-use courier
+on:
+  push:
+    branches: [r22619-c78-base]
+jobs:
+  base:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Download exact declared NF4 Base once and verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src
+          REPO='unsloth/gemma-3-270m-it-unsloth-bnb-4bit'
+          REV='ce8f5b69f631273f9c6007972240d4cee9577bc6'
+          hfget() { curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$REPO/resolve/$REV/$1?download=true" -o "src/$1"; }
+          hfget model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json chat_template.jinja; do hfget "$f"; done
+          test "$(stat -c%s src/model.safetensors)" = '393471884'
+          echo 'd3ae9628a0ed2cfa21b5b8345be4e1d4126794e734f3483dcc275b4735bf5a15  src/model.safetensors' | sha256sum -c -
+          python - <<'PY'
+          import hashlib,json,pathlib
+          rows=[]
+          for p in sorted(pathlib.Path('src').glob('*')):
+              rows.append({'name':p.name,'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          pathlib.Path('src/SOURCE_MANIFEST.json').write_text(json.dumps({'schema':'R22619_C78_BASE_ONE_USE_V1','repo':'unsloth/gemma-3-270m-it-unsloth-bnb-4bit','revision':'ce8f5b69f631273f9c6007972240d4cee9577bc6','files':rows},indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22619-c78-base-once
+          path: src
+          retention-days: 1
+          compression-level: 0
