@@ -35,3 +35,4 @@ jobs:
           path: src
           retention-days: 1
           compression-level: 0
+# authorized single trigger
