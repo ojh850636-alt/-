@@ -1,46 +1,362 @@
-name: R22620 C79 Faroese exact source courier
+name: R22620 C79 Faroese CPU archaeology
 on:
   push:
     branches: [r22620-c79-meta]
+permissions:
+  actions: write
+  contents: read
 jobs:
-  source:
+  analyze:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
-      - name: Download exact selected source once
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU archaeology runtime
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p src/adapter src/base src/eval
-          AREPO='jekunz/smollm-135m-lora-fineweb-faroese'
-          AREV='e55c7de03389189dcf52a0c27360984eb1eda675'
-          BREPO='HuggingFaceTB/SmolLM2-135M-Instruct'
-          BREV='12fd25f77366fa6b3b4b768ec3050bf629380bac'
-          DREPO='jekunz/FoBLiMP'
-          DREV='78bcbb0454053750bcf5fbf0c74eace5173f1f4a'
-          hfget() { curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
-          hfget "$AREPO" "$AREV" adapter_model.safetensors src/adapter/adapter_model.safetensors
-          hfget "$AREPO" "$AREV" adapter_config.json src/adapter/adapter_config.json
-          hfget "$BREPO" "$BREV" model.safetensors src/base/model.safetensors
-          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
-            hfget "$BREPO" "$BREV" "$f" "src/base/$f"
-          done
-          for f in data/germdetect-00000-of-00001.parquet data/multiblimp-00000-of-00001.parquet data/scala_delete-00000-of-00001.parquet data/scala_flip-00000-of-00001.parquet data/translation_pairs-00000-of-00001.parquet README.md; do
-            out="src/eval/${f//\//_}"
-            hfget "datasets/$DREPO" "$DREV" "$f" "$out"
-          done
-          python - <<'PY'
-          import hashlib,json,pathlib
-          root=pathlib.Path('src')
+          python -m pip install --quiet --upgrade pip
+          python -m pip install --quiet 'torch==2.7.1' 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1' 'safetensors>=0.6,<0.8' 'pyarrow>=18,<22'
+      - name: Reuse exact one-use source artifact and analyze
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/source out
+          curl -L --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/9995922932/zip" \
+            -o work/source_artifact.zip
+          unzip -q work/source_artifact.zip -d work/source
+          cat > /tmp/c79.py <<'PY'
+          import os, json, math, random, hashlib, pathlib, statistics, copy
+          from collections import defaultdict
+          import torch
+          import pyarrow.parquet as pq
+          from safetensors import safe_open
+          from transformers import AutoTokenizer, AutoModelForCausalLM
+          from peft import PeftModel
+
+          ROOT=pathlib.Path('work/source')
+          # Artifact ZIP may contain src/* or flattened content; resolve safely.
+          SRC=ROOT/'src' if (ROOT/'src').exists() else ROOT
+          OUT=pathlib.Path('out'); OUT.mkdir(exist_ok=True)
+          SEED=22620
+          random.seed(SEED); torch.manual_seed(SEED)
+          ADAPTER_REV='e55c7de03389189dcf52a0c27360984eb1eda675'
+          BASE_REV='12fd25f77366fa6b3b4b768ec3050bf629380bac'
+          EVAL_REV='78bcbb0454053750bcf5fbf0c74eace5173f1f4a'
+
+          def sha(b): return hashlib.sha256(b).hexdigest()
+          def dump(name,obj):
+              (OUT/name).write_text(json.dumps(obj,indent=2,sort_keys=True,ensure_ascii=False)+'\n')
+          def case_id(src,c,w): return sha((src+'\0'+c+'\0'+w).encode())
+
+          # Verify exact source manifest before any model outputs.
+          mp=SRC/'SOURCE_MANIFEST.json'; manifest=json.loads(mp.read_text())
+          bad=[]
+          for r in manifest['files']:
+              p=SRC/pathlib.Path(r['path']).relative_to('src') if str(r['path']).startswith('src/') else SRC/r['path']
+              if not p.exists() or p.stat().st_size!=r['bytes'] or sha(p.read_bytes())!=r['sha256']:
+                  bad.append(r['path'])
+          if bad: raise SystemExit('SOURCE_MANIFEST_MISMATCH '+repr(bad[:5]))
+
+          # Resolve parquet schema and build deterministic presealed 240-case set.
+          parqs=sorted((SRC/'eval').glob('*.parquet'))
+          if len(parqs)!=5: raise SystemExit(f'EXPECTED_5_PARQUETS_GOT_{len(parqs)}')
+          allcases=[]; schema_receipt=[]
+          for p in parqs:
+              tab=pq.read_table(p); cols=tab.column_names
+              if 'correct_text' not in cols or 'wrong_text' not in cols:
+                  raise SystemExit(f'BAD_SCHEMA {p.name} {cols}')
+              d=tab.to_pydict(); rows=[]
+              for c,w in zip(d['correct_text'],d['wrong_text']):
+                  if not isinstance(c,str) or not isinstance(w,str) or c==w: continue
+                  cid=case_id(p.name,c,w); rows.append((cid,c,w))
+              rows=sorted(rows)[:48]
+              if len(rows)!=48: raise SystemExit(f'INSUFFICIENT_ROWS {p.name} {len(rows)}')
+              for i,(cid,c,w) in enumerate(rows):
+                  phase='DISCOVERY' if i<16 else ('CONFIRMATION' if i<32 else 'OOD')
+                  allcases.append({'id':cid,'source':p.name,'phase':phase,'correct':c,'wrong':w})
+              schema_receipt.append({'source':p.name,'rows_total':tab.num_rows,'columns':cols,'selected':48})
+
+          # Source-free English collateral minimal pairs, fixed before outputs.
+          eng=[]
+          nouns=[('The dog','runs','run'),('The dogs','run','runs'),('A child','plays','play'),('The children','play','plays'),('My friend','is','are'),('My friends','are','is'),('This book','belongs','belong'),('These books','belong','belongs')]
+          tails=[' outside.',' every day.',' near the house.',' after lunch.',' in the morning.',' very quietly.',' at school.',' today.']
+          for a,good,bad in nouns:
+              for tail in tails:
+                  c=a+' '+good+tail; w=a+' '+bad+tail
+                  eng.append({'id':case_id('ENGLISH',c,w),'source':'ENGLISH','phase':'COLLATERAL','correct':c,'wrong':w})
+          assert len(eng)==64
+
+          # Preseal causal cases: first 8 Confirmation + first 8 OOD per source = 80.
+          causal_ids=[]
+          for src in sorted({x['source'] for x in allcases}):
+              cs=[x for x in allcases if x['source']==src and x['phase']=='CONFIRMATION'][:8]
+              os_=[x for x in allcases if x['source']==src and x['phase']=='OOD'][:8]
+              causal_ids += [x['id'] for x in cs+os_]
+          assert len(causal_ids)==80
+          preseal={
+            'schema':'R22620_C79_PRESEAL_V1','adapter_revision':ADAPTER_REV,'base_runtime_revision':BASE_REV,
+            'training_base_revision_proven':False,'eval_revision':EVAL_REV,
+            'model_outputs_observed_at_seal':0,'foblimp_case_ids':[x['id'] for x in allcases],
+            'english_case_ids':[x['id'] for x in eng],'causal_case_ids':causal_ids,
+            'primary_metric':'MEAN_TOKEN_LOGPROB_MARGIN_CORRECT_MINUS_WRONG',
+            'secondary_metric':'SUM_LOGPROB_MARGIN_LENGTH_BIAS_DIAGNOSTIC',
+            'positive_gate':{'full_minus_base_accuracy_min':0.03,'full_minus_control_accuracy_min':0.02,'paired_margin_ci_lower_gt':0.0},
+            'failure_gate':{'full_minus_base_accuracy_max':-0.03,'full_minus_control_accuracy_max':-0.02,'paired_margin_ci_upper_lt':0.0},
+            'english_collateral_red_accuracy_drop_gt':0.05,
+            'controls':['BASE','FULL','RANDOM_NORM','LAYER_SHUFFLE'],
+            'doses':[0.25,0.5,1.5],
+            'broad_causal_groups':['O_PROJ','MLP_ALL','GATE','UP','DOWN','EARLY','MIDDLE','LATE'],
+            'broad_screen_cases':80,'full_confirmation_cases':160,
+            'top_k_full_confirmation':3,
+            'claim_ceiling':'E3_BASE_REVISION_HOLD'
+          }
+          dump('PRESEAL.json',preseal); dump('SCHEMA_RECEIPT.json',schema_receipt)
+
+          # Static operator viability.
+          ap=SRC/'adapter'/'adapter_model.safetensors'; cfg=json.loads((SRC/'adapter'/'adapter_config.json').read_text())
+          tensors={}
+          with safe_open(str(ap),framework='pt',device='cpu') as f:
+              for k in f.keys(): tensors[k]=f.get_tensor(k).float()
+          pairs=[]; energy=defaultdict(float); rank_samples=[]
+          for k,A in tensors.items():
+              if '.lora_A.' not in k: continue
+              kb=k.replace('.lora_A.','.lora_B.')
+              if kb not in tensors: continue
+              B=tensors[kb]
+              alive=bool(torch.isfinite(A).all() and torch.isfinite(B).all() and A.abs().sum()>0 and B.abs().sum()>0)
+              mod=next((m for m in ['gate_proj','up_proj','down_proj','o_proj','q_proj','k_proj','v_proj'] if '.'+m+'.' in k),'OTHER')
+              layer=-1
+              import re
+              mm=re.search(r'\.layers\.(\d+)\.',k)
+              if mm: layer=int(mm.group(1))
+              e=float(torch.linalg.vector_norm(A)*torch.linalg.vector_norm(B)); energy[mod]+=e
+              pairs.append({'a':k,'b':kb,'module':mod,'layer':layer,'alive':alive,'rank_width':int(A.shape[0]),'energy_proxy':e})
+          # Exact numerical ranks on stratified sample (all layers impossible at r256 cost); claim scope explicitly sampled.
+          sample=sorted(pairs,key=lambda x:(x['layer'],x['module']))[::max(1,len(pairs)//24)][:24]
+          for r in sample:
+              A=tensors[r['a']]; B=tensors[r['b']]
+              rank_samples.append({'a':r['a'],'rank_A':int(torch.linalg.matrix_rank(A).item()),'rank_B':int(torch.linalg.matrix_rank(B).item()),'expected':r['rank_width']})
+          static={'schema':'R22620_C79_STATIC_V1','tensor_count':len(tensors),'pair_count':len(pairs),
+                  'alive_pairs':sum(x['alive'] for x in pairs),'dead_pairs':sum(not x['alive'] for x in pairs),
+                  'rank_widths':sorted(set(x['rank_width'] for x in pairs)),'modules':dict(energy),'rank_audit_scope':'STRATIFIED_24_PAIRS','rank_samples':rank_samples,
+                  'static_is_not_causal':True,'config':cfg}
+          dump('STATIC_OPERATOR.json',static)
+          if static['dead_pairs']>0: raise SystemExit('DEAD_OPERATOR')
+
+          # Runtime model loading.
+          base_dir=SRC/'base'; adapter_dir=SRC/'adapter'
+          tok=AutoTokenizer.from_pretrained(str(base_dir),local_files_only=True,trust_remote_code=False)
+          if tok.pad_token_id is None: tok.pad_token=tok.eos_token
+          model=AutoModelForCausalLM.from_pretrained(str(base_dir),local_files_only=True,trust_remote_code=False,torch_dtype=torch.float32)
+          model=PeftModel.from_pretrained(model,str(adapter_dir),local_files_only=True,is_trainable=False)
+          model.eval(); torch.set_grad_enabled(False)
+          orig={n:p.detach().clone() for n,p in model.named_parameters() if 'lora_' in n}
+
+          def set_state(kind,dose=1.0,group=None,only=False):
+              # restore originals
+              for n,p in model.named_parameters():
+                  if n in orig: p.copy_(orig[n])
+              lps=[(n,p) for n,p in model.named_parameters() if n in orig]
+              if kind=='BASE':
+                  for n,p in lps: p.zero_(); return
+              if kind=='RANDOM_NORM':
+                  g=torch.Generator().manual_seed(2262001)
+                  for n,p in lps:
+                      r=torch.randn(p.shape,generator=g,dtype=p.dtype); nr=torch.linalg.vector_norm(r); no=torch.linalg.vector_norm(orig[n]); p.copy_(r*(no/(nr+1e-12)))
+                  return
+              if kind=='LAYER_SHUFFLE':
+                  # shuffle complete A/B tensors across layers within same module and A/B role
+                  buckets=defaultdict(list)
+                  import re
+                  for n,p in lps:
+                      mod=next((m for m in ['gate_proj','up_proj','down_proj','o_proj','q_proj','k_proj','v_proj'] if '.'+m+'.' in n),'OTHER')
+                      role='A' if 'lora_A' in n else 'B'; buckets[(mod,role)].append(n)
+                  rng=random.Random(2262002)
+                  for key,names in buckets.items():
+                      names=sorted(names); vals=[orig[n].clone() for n in names]; rng.shuffle(vals)
+                      for n,v in zip(names,vals): model.get_parameter(n).copy_(v)
+                  return
+              # FULL/dose/group. Scaling delta by B tensors only.
+              if dose!=1.0:
+                  for n,p in lps:
+                      if 'lora_B' in n: p.mul_(dose)
+              if group is not None:
+                  import re
+                  def ingroup(n):
+                      mm=re.search(r'\.layers\.(\d+)\.',n); L=int(mm.group(1)) if mm else -1
+                      if group=='O_PROJ': return '.o_proj.' in n
+                      if group=='MLP_ALL': return any('.'+m+'.' in n for m in ['gate_proj','up_proj','down_proj'])
+                      if group=='GATE': return '.gate_proj.' in n
+                      if group=='UP': return '.up_proj.' in n
+                      if group=='DOWN': return '.down_proj.' in n
+                      if group=='EARLY': return 0<=L<=9
+                      if group=='MIDDLE': return 10<=L<=19
+                      if group=='LATE': return 20<=L<=29
+                      return False
+                  for n,p in lps:
+                      keep=ingroup(n)
+                      if (only and not keep) or ((not only) and keep): p.zero_()
+
+          def sent_scores(texts,batch=8):
+              sums=[]; means=[]
+              for i in range(0,len(texts),batch):
+                  xs=texts[i:i+batch]
+                  z=tok(xs,return_tensors='pt',padding=True,truncation=True,max_length=256,add_special_tokens=True)
+                  ids=z['input_ids']; mask=z['attention_mask']
+                  logits=model(input_ids=ids,attention_mask=mask).logits[:,:-1,:]
+                  target=ids[:,1:]; m=mask[:,1:].bool()
+                  tlog=logits.gather(-1,target.unsqueeze(-1)).squeeze(-1)-torch.logsumexp(logits,dim=-1)
+                  for j in range(len(xs)):
+                      vv=tlog[j][m[j]]; sums.append(float(vv.sum())); means.append(float(vv.mean()))
+              return sums,means
+
+          cases=allcases+eng
+          byid={x['id']:x for x in cases}
+          texts=[]
+          for x in cases: texts += [x['correct'],x['wrong']]
+          cond_results={}
+          def eval_condition(name,kind='FULL',dose=1.0,subset=None,group=None,only=False):
+              set_state(kind,dose=dose,group=group,only=only)
+              use=cases if subset is None else [byid[i] for i in subset]
+              tx=[]
+              for x in use: tx += [x['correct'],x['wrong']]
+              ss,mm=sent_scores(tx)
+              rows=[]
+              for j,x in enumerate(use):
+                  rows.append({'id':x['id'],'source':x['source'],'phase':x['phase'],
+                    'sum_margin':ss[2*j]-ss[2*j+1],'mean_margin':mm[2*j]-mm[2*j+1]})
+              return rows
+
+          for name,kind in [('BASE','BASE'),('FULL','FULL'),('RANDOM_NORM','RANDOM_NORM'),('LAYER_SHUFFLE','LAYER_SHUFFLE')]:
+              cond_results[name]=eval_condition(name,kind)
+
+          # Raw-free scalar per-case evidence only.
+          with (OUT/'BEHAVIOR_CASES.jsonl').open('w') as f:
+              for name,rows in cond_results.items():
+                  for r in rows:
+                      q=dict(r); q['condition']=name; f.write(json.dumps(q,sort_keys=True)+'\n')
+
+          def boot(vals,n=5000,seed=0):
+              rng=random.Random(seed); N=len(vals); arr=[]
+              for _ in range(n): arr.append(sum(vals[rng.randrange(N)] for __ in range(N))/N)
+              arr.sort(); return [arr[int(.025*n)],arr[int(.975*n)]]
+          def agg(rows,which='mean_margin'):
+              v=[r[which] for r in rows]; return {'n':len(v),'accuracy':sum(x>0 for x in v)/len(v),'mean_margin':sum(v)/len(v),'margin_ci':boot(v,seed=SEED)}
+          def filt(rows,phases,sources=None): return [r for r in rows if r['phase'] in phases and (sources is None or r['source'] in sources)]
+          core_ph=['CONFIRMATION','OOD']
+          summary={}
+          for name,rows in cond_results.items():
+              summary[name]={'all_faroese':agg(filt(rows,['DISCOVERY','CONFIRMATION','OOD'])),
+                             'confirm_ood':agg(filt(rows,core_ph)),
+                             'english':agg(filt(rows,['COLLATERAL']))}
+              summary[name]['secondary_sum_confirm_ood']=agg(filt(rows,core_ph),'sum_margin')
+          # paired differences FULL - comparator on case margin and accuracy
+          full={r['id']:r for r in cond_results['FULL']}
+          pairdiff={}
+          for comp in ['BASE','RANDOM_NORM','LAYER_SHUFFLE']:
+              cr={r['id']:r for r in cond_results[comp]}; ids=[r['id'] for r in cond_results['FULL'] if r['phase'] in core_ph]
+              dv=[full[i]['mean_margin']-cr[i]['mean_margin'] for i in ids]
+              ad=(sum(full[i]['mean_margin']>0 for i in ids)-sum(cr[i]['mean_margin']>0 for i in ids))/len(ids)
+              pairdiff[comp]={'n':len(ids),'mean_margin_diff':sum(dv)/len(dv),'margin_diff_ci':boot(dv,seed=SEED+3),'accuracy_diff':ad}
+          pos=(pairdiff['BASE']['accuracy_diff']>=.03 and pairdiff['RANDOM_NORM']['accuracy_diff']>=.02 and pairdiff['LAYER_SHUFFLE']['accuracy_diff']>=.02 and all(pairdiff[c]['margin_diff_ci'][0]>0 for c in pairdiff))
+          fail=(pairdiff['BASE']['accuracy_diff']<=-.03 and pairdiff['RANDOM_NORM']['accuracy_diff']<=-.02 and pairdiff['LAYER_SHUFFLE']['accuracy_diff']<=-.02 and all(pairdiff[c]['margin_diff_ci'][1]<0 for c in pairdiff))
+          base_eng=summary['BASE']['english']['accuracy']; full_eng=summary['FULL']['english']['accuracy']
+          gate={'positive':pos,'failure':fail,'pairdiff':pairdiff,'english_collateral_drop':base_eng-full_eng,'english_collateral_red':(base_eng-full_eng)>.05,
+                'claim_ceiling':'E3_BASE_REVISION_HOLD'}
+          dump('BEHAVIOR_SUMMARY.json',summary); dump('CONTROL_GATE.json',gate)
+
+          # Dose only if a control-separated behavior effect exists.
+          doseout={}
+          if pos or fail:
+              ids=[r['id'] for r in cond_results['FULL'] if r['phase'] in core_ph]
+              for d in [0.25,0.5,1.5]: doseout[str(d)]=agg(eval_condition('DOSE',kind='FULL',dose=d,subset=ids))
+          dump('DOSE.json',doseout)
+
+          # Causal broad screen only after separated behavior, using locked 80 cases.
+          screen={}; confirm={}
+          if pos or fail:
+              full80={r['id']:r for r in eval_condition('FULL80',kind='FULL',subset=causal_ids)}
+              base80={r['id']:r for r in eval_condition('BASE80',kind='BASE',subset=causal_ids)}
+              direction=1 if pos else -1
+              survivors=[]
+              for g in preseal['broad_causal_groups']:
+                  rem=eval_condition('REM',kind='FULL',subset=causal_ids,group=g,only=False)
+                  onlyr=eval_condition('ONLY',kind='FULL',subset=causal_ids,group=g,only=True)
+                  # necessity repair/loss relative FULL: for positive, removal hurts => full-rem >0; failure, removal repairs => rem-full >0
+                  nec=[direction*(full80[r['id']]['mean_margin']-r['mean_margin']) for r in rem]
+                  # sufficiency relative base in same effect direction
+                  suf=[direction*(r['mean_margin']-base80[r['id']]['mean_margin']) for r in onlyr]
+                  rec={'necessity_mean':sum(nec)/len(nec),'necessity_ci':boot(nec,seed=SEED+11),'sufficiency_mean':sum(suf)/len(suf),'sufficiency_ci':boot(suf,seed=SEED+12)}
+                  screen[g]=rec
+                  if rec['necessity_ci'][0]>0: survivors.append((abs(rec['necessity_mean']),g))
+              survivors=sorted(survivors,reverse=True)[:3]
+              ids160=[r['id'] for r in cond_results['FULL'] if r['phase'] in core_ph]
+              full160={r['id']:r for r in eval_condition('FULL160',kind='FULL',subset=ids160)}
+              base160={r['id']:r for r in eval_condition('BASE160',kind='BASE',subset=ids160)}
+              for _,g in survivors:
+                  rem=eval_condition('REM160',kind='FULL',subset=ids160,group=g,only=False)
+                  onlyr=eval_condition('ONLY160',kind='FULL',subset=ids160,group=g,only=True)
+                  nec=[direction*(full160[r['id']]['mean_margin']-r['mean_margin']) for r in rem]
+                  suf=[direction*(r['mean_margin']-base160[r['id']]['mean_margin']) for r in onlyr]
+                  confirm[g]={'necessity_mean':sum(nec)/len(nec),'necessity_ci':boot(nec,seed=SEED+21),'sufficiency_mean':sum(suf)/len(suf),'sufficiency_ci':boot(suf,seed=SEED+22),'e3_localized':boot(nec,seed=SEED+21)[0]>0}
+          dump('CAUSAL_SCREEN.json',screen); dump('CAUSAL_CONFIRMATION.json',confirm)
+
+          e3=any(v.get('e3_localized') for v in confirm.values())
+          inc={'behavior':1 if (pos or fail) else 0,'control_separated_gain':1 if pos else 0,'control_separated_failure':1 if fail else 0,'E3':1 if e3 else 0,'E4':0,'algorithm':0,'student':0,'promotion':0}
+          genes=[]
+          # factual method genes only, tied to observed conditions
+          # detect mean vs sum sign/accuracy disagreement
+          if summary['FULL']['confirm_ood']['accuracy'] != summary['FULL']['secondary_sum_confirm_ood']['accuracy']:
+              genes.append('LENGTH_NORMALIZATION_BEFORE_MINIMAL_PAIR_CLAIM')
+          if gate['english_collateral_red']: genes.append('LOW_RESOURCE_GAIN_CAN_TRADE_OFF_WITH_ENGLISH')
+          if e3: genes.append('LANGUAGE_ADAPTATION_IS_MODULE_CONDITIONAL')
+          brain={'schema':'R22620_C79_BRAIN_MATERIALS_V1','verdict':('CONTROL_SEPARATED_CAPABILITY' if pos else ('CONTROL_SEPARATED_FAILURE' if fail else 'NO_CONTROL_SEPARATED_EFFECT')),
+                 'training_base_revision_hold':True,'claim_ceiling':'E3_BASE_REVISION_HOLD','typed_increment':inc,'method_genes':genes,
+                 'causal_confirmed_groups':[g for g,v in confirm.items() if v.get('e3_localized')],
+                 'english_collateral_red':gate['english_collateral_red'],'no_raw_text_or_weights_in_release':True}
+          dump('BRAIN_MATERIALS.json',brain); dump('CURRENT_C79_AUTHORITY.json',brain)
+
+          # Package self-contained analysis script as audit source.
+          pathlib.Path(OUT/'ANALYSIS_SCRIPT.py').write_text(pathlib.Path('/tmp/c79.py').read_text())
+          # Manifest raw-free outputs.
           rows=[]
-          for p in sorted(x for x in root.rglob('*') if x.is_file()):
-              rows.append({'path':p.as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          payload={'schema':'R22620_C79_EXACT_SOURCE_MANIFEST_V1','adapter_repo':'jekunz/smollm-135m-lora-fineweb-faroese','adapter_revision':'e55c7de03389189dcf52a0c27360984eb1eda675','base_repo':'HuggingFaceTB/SmolLM2-135M-Instruct','base_revision':'12fd25f77366fa6b3b4b768ec3050bf629380bac','eval_repo':'jekunz/FoBLiMP','eval_revision':'78bcbb0454053750bcf5fbf0c74eace5173f1f4a','training_base_revision_proven':False,'files':rows}
-          pathlib.Path('src/SOURCE_MANIFEST.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          for p in sorted(OUT.iterdir()):
+              if p.is_file(): rows.append(f"{sha(p.read_bytes())}  {p.name}")
+          (OUT/'MANIFEST_SHA256.txt').write_text('\n'.join(rows)+'\n')
+          print(json.dumps({'gate':gate,'increment':inc,'brain':brain},indent=2,sort_keys=True))
           PY
-      - uses: actions/upload-artifact@v4
+          python /tmp/c79.py
+          # Remove all raw source bytes locally before artifact upload.
+          rm -rf work /tmp/c79.py
+      - name: Upload raw-free C79 evidence
+        uses: actions/upload-artifact@v4
         with:
-          name: r22620-c79-faroese-source
-          path: src
+          name: r22620-c79-rawfree
+          path: out
           retention-days: 1
-          compression-level: 0
+          compression-level: 9
+      - name: Delete temporary source metadata artifacts after raw-free upload
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for id in 9995922932 9995901621 9995871052; do
+            code=$(curl -sS -o /tmp/del -w '%{http_code}' -X DELETE \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${id}")
+            echo "delete artifact=$id http=$code"
+            test "$code" = 204 || test "$code" = 404
+          done
