@@ -1,0 +1,91 @@
+name: R22619 C78 gated CPU causal vertical
+on:
+  push:
+    branches: [r22619-c78-causal]
+jobs:
+  causal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    permissions:
+      actions: read
+      contents: read
+    env:
+      HF_HUB_OFFLINE: '1'
+      TRANSFORMERS_OFFLINE: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch raw-free behavior authority first
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p behavior out
+          ID=$(gh api /repos/${GITHUB_REPOSITORY}/actions/runs/34044615614/artifacts --jq '.artifacts[] | select(.name=="r22619-c78-behavior-rawfree") | .id' | head -1)
+          test -n "$ID"
+          gh api /repos/${GITHUB_REPOSITORY}/actions/artifacts/${ID}/zip > behavior.zip
+          unzip -q behavior.zip -d behavior
+          R=$(find behavior -name C78_BEHAVIOR_RESULT.json -print -quit); test -n "$R"; cp "$R" behavior/C78_BEHAVIOR_RESULT.json
+          python - <<'PY'
+          import json,pathlib,os
+          o=json.loads(pathlib.Path('behavior/C78_BEHAVIOR_RESULT.json').read_text())
+          green=bool(o.get('control_separated_positive_green',False))
+          with open(os.environ['GITHUB_ENV'],'a') as f:f.write('C78_CAUSAL_GREEN='+('true' if green else 'false')+'\n')
+          if not green:
+              pathlib.Path('out/C78_CAUSAL_NOT_RUN.json').write_text(json.dumps({'schema':'R22619_C78_CAUSAL_NOT_RUN_V1','reason':'BEHAVIOR_CONTROL_GATE_RED','causal_interventions_run':0},indent=2,sort_keys=True)+'\n')
+          print('CAUSAL_GREEN',green)
+          PY
+      - name: Install pinned runtime only if behavior GREEN
+        if: env.C78_CAUSAL_GREEN == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -q 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1' 'bitsandbytes==0.48.1' 'tokenizers==0.22.1' 'huggingface-hub==0.36.0'
+      - name: Reuse exact source artifacts only if behavior GREEN
+        if: env.C78_CAUSAL_GREEN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p _a _b src_adapter src_base
+          gh api /repos/${GITHUB_REPOSITORY}/actions/artifacts/9992478575/zip > adapter.zip
+          gh api /repos/${GITHUB_REPOSITORY}/actions/artifacts/9992533187/zip > base.zip
+          unzip -q adapter.zip -d _a; unzip -q base.zip -d _b
+          A=$(find _a -name adapter_model.safetensors -print -quit); AC=$(find _a -name adapter_config.json -print -quit); B=$(find _b -name model.safetensors -print -quit)
+          cp "$A" src_adapter/adapter_model.safetensors; cp "$AC" src_adapter/adapter_config.json; cp "$B" src_base/model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer.model tokenizer_config.json special_tokens_map.json chat_template.jinja; do X=$(find _b -name "$f" -print -quit); cp "$X" "src_base/$f"; done
+          echo '414f0d5db8d6560a12f5841eb4a7fdc8ce558db37f4fe4e1c3c19a249223f918  src_adapter/adapter_model.safetensors' | sha256sum -c -
+          echo 'd3ae9628a0ed2cfa21b5b8345be4e1d4126794e734f3483dcc275b4735bf5a15  src_base/model.safetensors' | sha256sum -c -
+      - name: Execute precommitted causal vertical only if GREEN
+        if: env.C78_CAUSAL_GREEN == 'true'
+        env:
+          C78_BEHAVIOR_RESULT: behavior/C78_BEHAVIOR_RESULT.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          python r22619/c78_causal.py
+      - name: Delete causal raw source before delivery
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          BEFORE=0
+          for p in src_adapter src_base _a _b adapter.zip base.zip; do if [ -e "$p" ]; then B=$(du -sb "$p" | awk '{print $1}'); BEFORE=$((BEFORE+B)); fi; done
+          rm -rf src_adapter src_base _a _b adapter.zip base.zip behavior.zip ~/.cache/huggingface ~/.cache/torch
+          python - <<PY
+          import json,pathlib
+          targets=['src_adapter','src_base','_a','_b','adapter.zip','base.zip'];rem=[x for x in targets if pathlib.Path(x).exists()]
+          pathlib.Path('out/C78_CAUSAL_DELETION_RECEIPT.json').write_text(json.dumps({'schema':'R22619_C78_CAUSAL_RAW_DELETION_V1','raw_bytes_deleted':int('$BEFORE'),'remaining_targets':rem,'hf_redownload':0,'raw_git_commit':0},indent=2,sort_keys=True)+'\n');assert not rem
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: r22619-c78-causal-rawfree
+          path: out
+          retention-days: 1
