@@ -1,0 +1,58 @@
+name: R22622 C82 CPU candidate metadata audit
+on:
+  push:
+    branches: [r22622-c82-article]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Metadata-only compare three candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          python - <<'PY'
+          import json, urllib.request, pathlib, hashlib
+          repos=[
+            'soumitsr/SmolLM2-135M-Instruct-article-digestor-lora',
+            'vivekkopthsd/finlora-adapter',
+            'PratikBuilds/pocket-weather-theater-smollm2-135m-lora',
+          ]
+          rows=[]
+          for repo in repos:
+              with urllib.request.urlopen('https://huggingface.co/api/models/'+repo, timeout=30) as r:
+                  d=json.load(r)
+              sha=d['sha']
+              cfg_url=f'https://huggingface.co/{repo}/resolve/{sha}/adapter_config.json?download=true'
+              with urllib.request.urlopen(cfg_url, timeout=30) as r:
+                  cfg=json.load(r)
+              readme=''
+              try:
+                  with urllib.request.urlopen(f'https://huggingface.co/{repo}/resolve/{sha}/README.md?download=true', timeout=30) as r:
+                      readme=r.read().decode('utf-8','replace')
+              except Exception:
+                  pass
+              rows.append({
+                'repo':repo,'sha':sha,'private':d.get('private'),'gated':d.get('gated'),
+                'library_name':d.get('library_name'),'pipeline_tag':d.get('pipeline_tag'),'tags':d.get('tags',[]),
+                'siblings':[s.get('rfilename') for s in d.get('siblings',[])],
+                'adapter_config':cfg,'readme_sha256':hashlib.sha256(readme.encode()).hexdigest(),
+                'readme_prefix':readme[:4000],
+              })
+          payload={
+            'schema':'R22622_C82_METADATA_AUDIT_V1',
+            'weight_bytes_requested':0,
+            'candidates':rows,
+            'selected':'soumitsr/SmolLM2-135M-Instruct-article-digestor-lora',
+            'selection_reason':'new selective-compression/information-preservation fingerprint; deterministic synthetic key-unit verifier; CPU 135M'
+          }
+          p=pathlib.Path('meta/CANDIDATES.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('meta/CANDIDATES.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  CANDIDATES.json\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22622-c82-metadata
+          path: meta
+          retention-days: 1
+          compression-level: 0
