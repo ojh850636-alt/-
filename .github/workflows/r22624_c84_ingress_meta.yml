@@ -13,7 +13,7 @@ jobs:
           set -euo pipefail
           mkdir -p meta
           python - <<'PY'
-          import json, urllib.request, pathlib, hashlib
+          import json, urllib.request, pathlib, hashlib, re
           UA={'User-Agent':'LAA-R22624-ingress-meta'}
           AD='Zayed024/nanozero-countdown-lora'; ADREV='8ef7101c63f7f93a4599445654b1eb2425e00846'
           BASE='Qwen/Qwen2.5-0.5B-Instruct'
@@ -29,13 +29,15 @@ jobs:
             with urllib.request.urlopen(req,timeout=timeout) as r:return {k.lower():v for k,v in r.headers.items()}
           adapi=jget('https://huggingface.co/api/models/'+AD+'?full=true')
           assert adapi['sha']==ADREV
+          siblings=[s.get('rfilename') for s in adapi.get('siblings',[]) if s.get('rfilename')]
+          assert siblings==['.gitattributes','README.md','nanozero_countdown_lora.npz']
           readme=small(f'https://huggingface.co/{AD}/resolve/{ADREV}/README.md?download=true').decode('utf-8','replace')
-          assert 'Qwen/Qwen2.5-0.5B-Instruct' in readme and 'not a PEFT-format adapter' in readme
+          plain=re.sub(r'[*_`]+','',readme)
+          assert 'Qwen/Qwen2.5-0.5B-Instruct' in plain and 'not a PEFT-format adapter' in plain and 'plain .npz' in plain
           npzh=head(f'https://huggingface.co/{AD}/resolve/{ADREV}/nanozero_countdown_lora.npz?download=true')
           baseapi=jget('https://huggingface.co/api/models/'+BASE+'?full=true')
           baserev=baseapi['sha']
           bh=head(f'https://huggingface.co/{BASE}/resolve/{baserev}/model.safetensors?download=true')
-          # Code identity from GitHub API. No binary/model body involved.
           commit=jget('https://api.github.com/repos/'+CODE_REPO+'/commits/'+CODE_REV)
           assert commit['sha']==CODE_REV
           tree=jget('https://api.github.com/repos/'+CODE_REPO+'/contents?ref='+CODE_REV)
@@ -48,6 +50,7 @@ jobs:
               'repo':AD,'revision':ADREV,'filename':'nanozero_countdown_lora.npz','source_type':'CUSTOM_NPZ_LORA',
               'head':{k:npzh.get(k) for k in ['content-length','etag','x-repo-commit','x-linked-etag','x-linked-size','location'] if npzh.get(k)},
               'license':'apache-2.0','base_declared_in_model_card':BASE,'exact_training_base_revision_proven':False,
+              'siblings':siblings,
             },
             'compatibility_base':{
               'repo':BASE,'revision':baserev,'filename':'model.safetensors',
