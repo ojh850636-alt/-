@@ -1,0 +1,76 @@
+name: R22624 C85 exact LFS metadata and task witness
+on:
+  push:
+    branches: [r22624-c85-underdog]
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prove exact content digests from LFS pointers without learned body GET
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          python - <<'PY'
+          import json, urllib.request, pathlib, hashlib, re
+          UA={'User-Agent':'LAA-R22624-C85-metadata'}
+          AD='sammoftah/underdog-lab-smollm2-360m-lora'
+          ADREV='6e40f48915868a8b34a32c8b3de16f8fc9524766'
+          BASE='HuggingFaceTB/SmolLM2-360M-Instruct'
+          def get(url,timeout=45,limit=None):
+              req=urllib.request.Request(url,headers=UA)
+              with urllib.request.urlopen(req,timeout=timeout) as r:
+                  return r.read() if limit is None else r.read(limit)
+          def jget(url,timeout=45): return json.loads(get(url,timeout).decode())
+          def lfs_pointer(repo,rev,name):
+              b=get(f'https://huggingface.co/{repo}/raw/{rev}/{name}',limit=4096)
+              s=b.decode('utf-8','strict')
+              assert s.startswith('version https://git-lfs.github.com/spec/v1\n'), (repo,name,s[:80])
+              mo=re.search(r'^oid sha256:([0-9a-f]{64})$',s,re.M); ms=re.search(r'^size (\d+)$',s,re.M)
+              assert mo and ms, s
+              return {'sha256':mo.group(1),'bytes':int(ms.group(1)),'pointer_sha256':hashlib.sha256(b).hexdigest(),'pointer_text':s}
+          adapi=jget('https://huggingface.co/api/models/'+AD+'?full=true&config=true')
+          assert adapi['sha']==ADREV
+          sib=[x.get('rfilename') for x in adapi.get('siblings',[]) if x.get('rfilename')]
+          assert 'adapter_model.safetensors' in sib and 'adapter_config.json' in sib
+          cfg=json.loads(get(f'https://huggingface.co/{AD}/resolve/{ADREV}/adapter_config.json?download=true',limit=65536).decode())
+          readme=get(f'https://huggingface.co/{AD}/resolve/{ADREV}/README.md?download=true',limit=65536).decode('utf-8','replace')
+          assert cfg.get('base_model_name_or_path')==BASE
+          tags=adapi.get('tags') or []
+          lic=[t.split(':',1)[1] for t in tags if t.startswith('license:')]
+          assert 'apache-2.0' in lic
+          adptr=lfs_pointer(AD,ADREV,'adapter_model.safetensors')
+          baseapi=jget('https://huggingface.co/api/models/'+BASE+'?full=true&config=true')
+          baserev=baseapi['sha']
+          bsib=[x.get('rfilename') for x in baseapi.get('siblings',[]) if x.get('rfilename')]
+          assert 'model.safetensors' in bsib
+          baseptr=lfs_pointer(BASE,baserev,'model.safetensors')
+          payload={
+            'schema':'R22624_C85_EXACT_METADATA_V1',
+            'learned_weight_body_bytes_requested':0,
+            'candidate':AD,'adapter_revision':ADREV,'adapter_content':adptr,
+            'adapter_config':cfg,'adapter_license':'apache-2.0','adapter_siblings':sib,
+            'compatibility_base':BASE,'compatibility_base_revision':baserev,'base_content':baseptr,
+            'training_base_revision_proven':bool(cfg.get('revision')),
+            'base_revision_field':cfg.get('revision'),
+            'task_fingerprint':'EVIDENCE_SPAN_GROUNDED_STRUCTURED_FACTOR_EXTRACTION_WITH_ABSTENTION_AND_CALIBRATION',
+            'task_contract':{
+              'input':'free-text football match context',
+              'output':'JSON structured factors with type/team/severity/certainty/evidence plus unsupported_claims/ambiguities',
+              'independent_verifier_possible':True,
+              'public_card_scores_science_credit':0,
+            },
+            'readme_prefix':readme,
+            'hard_hold':'TRAINING_BASE_REVISION_UNPROVEN' if not cfg.get('revision') else None,
+          }
+          p=pathlib.Path('meta/C85_EXACT_METADATA.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True,ensure_ascii=False)+'\n',encoding='utf-8')
+          pathlib.Path('meta/C85_EXACT_METADATA.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  C85_EXACT_METADATA.json\n')
+          print(json.dumps({'adapter_rev':ADREV,'adapter_sha256':adptr['sha256'],'adapter_bytes':adptr['bytes'],'base_rev':baserev,'base_sha256':baseptr['sha256'],'base_bytes':baseptr['bytes'],'training_base_revision_proven':bool(cfg.get('revision')),'weight_body_bytes_requested':0},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c85-metadata
+          path: meta
+          retention-days: 1
+          compression-level: 0
