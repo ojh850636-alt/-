@@ -1,0 +1,84 @@
+name: R22624 C84 CPU metadata-only broad discovery
+on:
+  push:
+    branches: [r22624-c84-cpu]
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Search CPU-feasible PEFT candidates without learned weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          python - <<'PY'
+          import json, urllib.request, urllib.parse, pathlib, hashlib, time
+          searches = [
+            'SmolLM2-135M LoRA',
+            'SmolLM2-135M PEFT',
+            'SmolLM2-360M LoRA',
+            'SmolLM2-360M PEFT',
+            'Qwen2.5-0.5B LoRA',
+            'Qwen2.5-0.5B PEFT',
+          ]
+          seen={}
+          def jget(url, timeout=30):
+              req=urllib.request.Request(url, headers={'User-Agent':'LAA-R22624-metadata-only'})
+              with urllib.request.urlopen(req, timeout=timeout) as r:
+                  return json.load(r)
+          for q in searches:
+              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true&config=true'
+              try: rows=jget(url, 45)
+              except Exception as e:
+                  print('SEARCH_FAIL',q,repr(e)); continue
+              for d in rows:
+                  mid=d.get('modelId') or d.get('id')
+                  if not mid: continue
+                  sib=[s.get('rfilename') for s in d.get('siblings',[]) if s.get('rfilename')]
+                  tags=d.get('tags') or []
+                  has_adapter=('adapter_model.safetensors' in sib and 'adapter_config.json' in sib)
+                  if not has_adapter: continue
+                  key=mid
+                  seen[key]={
+                    'model_id':mid,'sha':d.get('sha'),'private':d.get('private'),'gated':d.get('gated'),
+                    'disabled':d.get('disabled'),'library_name':d.get('library_name'),'pipeline_tag':d.get('pipeline_tag'),
+                    'downloads':d.get('downloads'),'likes':d.get('likes'),'lastModified':d.get('lastModified'),
+                    'tags':tags,'siblings':sib,
+                  }
+          # Fetch only small adapter_config / README bytes, never learned weights.
+          out=[]
+          for mid,row in sorted(seen.items()):
+              rev=row.get('sha') or 'main'
+              base='https://huggingface.co/'+mid+'/resolve/'+rev+'/'
+              cfg=None; readme=''
+              try:
+                  req=urllib.request.Request(base+'adapter_config.json?download=true', headers={'User-Agent':'LAA-R22624-metadata-only'})
+                  with urllib.request.urlopen(req, timeout=30) as r: cfg=json.loads(r.read().decode('utf-8'))
+              except Exception as e: row['adapter_config_error']=repr(e)
+              try:
+                  req=urllib.request.Request(base+'README.md?download=true', headers={'User-Agent':'LAA-R22624-metadata-only'})
+                  with urllib.request.urlopen(req, timeout=30) as r: readme=r.read(32768).decode('utf-8','replace')
+              except Exception: pass
+              row['adapter_config']=cfg
+              row['readme_prefix']=readme
+              row['weight_bytes_requested']=0
+              out.append(row)
+          payload={
+            'schema':'R22624_C84_CPU_BROAD_METADATA_DISCOVERY_V1',
+            'searches':searches,
+            'candidate_count':len(out),
+            'weight_bytes_requested':0,
+            'candidates':out,
+          }
+          p=pathlib.Path('meta/C84_BROAD_DISCOVERY.json')
+          p.write_text(json.dumps(payload,indent=2,sort_keys=True,ensure_ascii=False)+'\n',encoding='utf-8')
+          pathlib.Path('meta/C84_BROAD_DISCOVERY.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  C84_BROAD_DISCOVERY.json\n')
+          print('CANDIDATES',len(out))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c84-broad-metadata
+          path: meta
+          retention-days: 1
+          compression-level: 0
