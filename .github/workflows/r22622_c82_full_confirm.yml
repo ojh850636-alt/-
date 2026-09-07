@@ -1,0 +1,148 @@
+name: R22622 C82 one-shot full confirmation
+on:
+  push:
+    branches: [r22622-c82-binding]
+    paths: [r22622_trigger/full_confirm_v1]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  confirm:
+    strategy:
+      fail-fast: false
+      matrix:
+        hypothesis: [MIDDLE,ATTENTION_ALL,MLP_ALL]
+        mode: [ABLATE,ONLY]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install exact CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet --disable-pip-version-check 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1'
+      - name: Recover authoritative source and verify screen-selected top3
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10008640619/zip" -o source.zip
+          mkdir source_bundle && unzip -q source.zip -d source_bundle
+          echo '21988110b092b8635c206529d47ec55fd5395eaec92ed8f391df49328f2e997e  source_bundle/src/adapter/adapter_model.safetensors' | sha256sum -c -
+          echo '5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c  source_bundle/src/base/model.safetensors' | sha256sum -c -
+          curl -L --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10009270570/zip" -o screen.zip
+          mkdir screen && unzip -q screen.zip -d screen
+          python - <<'PY'
+          import json
+          d=json.load(open('screen/C82_CAUSAL_SCREEN_SUMMARY.json'))
+          assert d['preseal_sha256']=='40b06afbd2a4b04606152870cc435dcbe5cf2f2a72b318c3af803cb1f44e4dc4'
+          assert d['precommitted_top3_for_full_confirmation']==['MIDDLE','ATTENTION_ALL','MLP_ALL'],d['precommitted_top3_for_full_confirmation']
+          assert d['failed_v1_science_output_count']==0
+          PY
+      - name: Fetch exact primary and full-confirm runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error 'https://raw.githubusercontent.com/ojh850636-alt/-/af4a277f661911d7bfe67b58c3d58df5b53149bf/r22622_tools/c82_matrix_runner.py' -o c82_matrix_runner.py
+          curl -L --fail --silent --show-error 'https://raw.githubusercontent.com/ojh850636-alt/-/282c883ae5974f39c6d96aed668ded83085c2ba4/r22622_tools/c82_full_confirm.py' -o c82_full_confirm.py
+          test -s c82_matrix_runner.py && test -s c82_full_confirm.py
+      - name: Run fixed 32-case necessity or candidate-only sufficiency arm
+        env:
+          HYPOTHESIS: ${{ matrix.hypothesis }}
+          MODE: ${{ matrix.mode }}
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          TOKENIZERS_PARALLELISM: 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python c82_full_confirm.py
+          test -s "result/${HYPOTHESIS}_${MODE}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c82-full-${{ matrix.hypothesis }}-${{ matrix.mode }}
+          path: result
+          retention-days: 1
+          compression-level: 0
+
+  aggregate:
+    needs: confirm
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: c82-full-*
+          path: full_results
+          merge-multiple: true
+      - name: Recover authoritative primary scalars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10009023662/zip" -o primary.zip
+          mkdir primary && unzip -q primary.zip -d primary
+          test -s primary/C82_BINDING_PERCASE_SCALARS.json
+      - name: Apply presealed full-confirmation rule with Holm correction
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p summary
+          python - <<'PY'
+          import json,pathlib,random
+          hyps=['MIDDLE','ATTENTION_ALL','MLP_ALL']
+          primary=json.load(open('primary/C82_BINDING_PERCASE_SCALARS.json'))['rows']
+          ids=sorted({r['id'] for r in primary if r['condition']=='FULL' and r['split'] in {'Confirmation','OOD'}}); assert len(ids)==32
+          base={r['id']:float(r['metrics']['total_binding_score']) for r in primary if r['condition']=='BASE' and r['id'] in ids}
+          full={r['id']:float(r['metrics']['total_binding_score']) for r in primary if r['condition']=='FULL' and r['id'] in ids}
+          assert len(base)==len(full)==32
+          arm={}
+          rawfree=[]
+          for p in sorted(pathlib.Path('full_results').glob('*.json')):
+              d=json.load(open(p)); assert len(d['rows'])==32
+              key=(d['hypothesis'],d['mode']); assert key not in arm
+              arm[key]={r['id']:float(r['metrics']['total_binding_score']) for r in d['rows']}; assert set(arm[key])==set(ids)
+              rawfree.extend({'id':r['id'],'split':r['split'],'hypothesis':d['hypothesis'],'mode':d['mode'],'metrics':r['metrics']} for r in d['rows'])
+          assert len(arm)==6
+          def stats(vals,seed):
+              n=len(vals); mu=sum(vals)/n; rng=random.Random(seed); boots=[]
+              for _ in range(10000): boots.append(sum(vals[rng.randrange(n)] for __ in range(n))/n)
+              boots.sort(); ci=[boots[249],boots[9749]]
+              rng2=random.Random(seed+1000); ge=0; B=100000
+              for _ in range(B):
+                  pm=sum((v if rng2.random()<0.5 else -v) for v in vals)/n
+                  if pm>=mu-1e-15: ge+=1
+              return {'mean':mu,'ci95':ci,'one_sided_signflip_p':(ge+1)/(B+1),'n':n}
+          rows=[]
+          for i,h in enumerate(hyps):
+              nec=[full[j]-arm[(h,'ABLATE')][j] for j in ids]
+              suf=[arm[(h,'ONLY')][j]-base[j] for j in ids]
+              rows.append({'hypothesis':h,'necessity':stats(nec,2262230+i),'sufficiency':stats(suf,2262240+i)})
+          def holm(field):
+              order=sorted(range(len(rows)),key=lambda i:rows[i][field]['one_sided_signflip_p']); running=0.0; m=len(rows)
+              for rank,i in enumerate(order):
+                  raw=min(1.0,(m-rank)*rows[i][field]['one_sided_signflip_p']); running=max(running,raw); rows[i][field]['holm_adjusted_p']=running
+          holm('necessity'); holm('sufficiency')
+          for r in rows:
+              r['necessity_pass']=r['necessity']['ci95'][0]>0 and r['necessity']['holm_adjusted_p']<0.05
+              r['sufficiency_pass']=r['sufficiency']['ci95'][0]>0 and r['sufficiency']['holm_adjusted_p']<0.05
+              r['both_pass']=r['necessity_pass'] and r['sufficiency_pass']
+          both=[r['hypothesis'] for r in rows if r['both_pass']]
+          e3=[r['hypothesis'] for r in rows if r['necessity_pass']]
+          out={'schema':'R22622_C82_FULL_CONFIRM_SUMMARY_V1','preseal_sha256':'40b06afbd2a4b04606152870cc435dcbe5cf2f2a72b318c3af803cb1f44e4dc4','screen_top3':hyps,'locked_cases':ids,'rows':rows,'necessity_localized_E3_candidates':e3,'necessity_and_sufficiency_candidates':both,'matched_random_authorized':bool(both),'minimality_authorized':bool(both),'raw_model_text_retained':False}
+          pathlib.Path('summary/C82_FULL_CONFIRM_SUMMARY.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('summary/C82_FULL_CONFIRM_PERCASE_SCALARS.json').write_text(json.dumps({'schema':'R22622_C82_FULL_CONFIRM_PERCASE_SCALARS_V1','rows':sorted(rawfree,key=lambda x:(x['hypothesis'],x['mode'],x['id']))},indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22622-c82-full-confirm-summary
+          path: summary
+          retention-days: 1
+          compression-level: 0
