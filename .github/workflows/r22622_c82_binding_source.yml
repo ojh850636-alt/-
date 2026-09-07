@@ -1,0 +1,77 @@
+name: R22622 C82 compositional-binding exact source
+on:
+  push:
+    branches: [r22622-c82-binding]
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Source-zero manifest and upload-schema self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf fixture && mkdir -p fixture/src/adapter fixture/src/base fixture/out
+          printf 'x' > fixture/src/adapter/adapter_model.safetensors
+          printf '{}' > fixture/src/adapter/adapter_config.json
+          printf '[]' > fixture/src/adapter/training_rows.jsonl
+          printf 'y' > fixture/src/base/model.safetensors
+          python - <<'PY'
+          import pathlib,hashlib,json
+          root=pathlib.Path('fixture/src')
+          rows=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file(): rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          need={'adapter/adapter_model.safetensors','adapter/adapter_config.json','adapter/training_rows.jsonl','base/model.safetensors'}
+          got={x['path'] for x in rows}
+          assert need <= got, (need-got)
+          pathlib.Path('fixture/out/SOURCE_MANIFEST.json').write_text(json.dumps({'files':rows},sort_keys=True)+'\n')
+          assert pathlib.Path('fixture/out/SOURCE_MANIFEST.json').is_file()
+          PY
+          test -s fixture/out/SOURCE_MANIFEST.json
+          rm -rf fixture
+      - name: Download exact selected source once and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/adapter src/base out
+          ADAPTER_REPO='PratikBuilds/pocket-weather-theater-smollm2-135m-lora'
+          ADAPTER_REV='ab969704325b3d6ec73c93393430ce84f58a5c8e'
+          BASE_REPO='HuggingFaceTB/SmolLM2-135M-Instruct'
+          BASE_REV='12fd25f77366fa6b3b4b768ec3050bf629380bac'
+          hfget(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors src/adapter/adapter_model.safetensors
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json src/adapter/adapter_config.json
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" chat_template.jinja src/adapter/chat_template.jinja
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" training_rows.jsonl src/adapter/training_rows.jsonl
+          hfget "$BASE_REPO" "$BASE_REV" model.safetensors src/base/model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do hfget "$BASE_REPO" "$BASE_REV" "$f" "src/base/$f"; done
+          ADAPTER_REV="$ADAPTER_REV" BASE_REV="$BASE_REV" python - <<'PY'
+          import pathlib,hashlib,json,os
+          root=pathlib.Path('src'); rows=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file(): rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          need={'adapter/adapter_model.safetensors','adapter/adapter_config.json','adapter/training_rows.jsonl','base/model.safetensors'}
+          got={x['path'] for x in rows}; assert need <= got, need-got
+          cfg=json.load(open('src/adapter/adapter_config.json'))
+          out={
+            'schema':'R22622_C82_SOURCE_V1',
+            'adapter_repo':'PratikBuilds/pocket-weather-theater-smollm2-135m-lora',
+            'adapter_revision':os.environ['ADAPTER_REV'],
+            'base_repo':'HuggingFaceTB/SmolLM2-135M-Instruct',
+            'base_revision':os.environ['BASE_REV'],
+            'training_base_revision_proven':bool(cfg.get('revision')),
+            'adapter_config':cfg,
+            'files':rows,
+          }
+          pathlib.Path('out/SOURCE_MANIFEST.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+          test -s out/SOURCE_MANIFEST.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22622-c82-source
+          path: |
+            out
+            src
+          retention-days: 1
+          compression-level: 0
