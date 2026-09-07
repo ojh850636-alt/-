@@ -1,0 +1,53 @@
+name: R22621 C81 three-way metadata audit
+on:
+  push:
+    branches: [r22621-c81]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Audit exactly three CPU candidates without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, urllib.request, pathlib
+          repos=[
+            'Miladsaeedi70/smollm2-135m-scientific-sft-lora',
+            'hfm8tr/smollm2-135m-smoltalk-lora',
+            'CrystalRaindropsFall/smollm2-gsm8k-curriculum-complexity',
+          ]
+          rows=[]
+          def jget(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22621-meta'})
+              with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          def tget(url):
+              req=urllib.request.Request(url,headers={'User-Agent':'LAA-R22621-meta'})
+              try:
+                  with urllib.request.urlopen(req,timeout=30) as r:return r.read(50000).decode('utf-8','replace')
+              except Exception:return ''
+          for repo in repos:
+              d=jget('https://huggingface.co/api/models/'+repo)
+              sha=d['sha']
+              cfg=json.loads(tget(f'https://huggingface.co/{repo}/resolve/{sha}/adapter_config.json?download=true'))
+              readme=tget(f'https://huggingface.co/{repo}/resolve/{sha}/README.md?download=true')
+              rows.append({
+                'repo':repo,'revision':sha,'license_tags':[x for x in d.get('tags',[]) if x.startswith('license:')],
+                'library_name':d.get('library_name'),'pipeline_tag':d.get('pipeline_tag'),
+                'base_model':cfg.get('base_model_name_or_path'),'training_base_revision':cfg.get('revision'),
+                'rank':cfg.get('r'),'alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),
+                'readme_excerpt':readme[:16000],
+              })
+          payload={'schema':'R22621_C81_THREE_WAY_META_V1','weight_bytes_requested':0,'candidates':rows,
+            'selection':'Miladsaeedi70/smollm2-135m-scientific-sft-lora',
+            'selection_reason':'novel eight-mode scientific task routing; 135M CPU; deterministic self-contained verifier; lower overlap than GSM8K and higher verifier determinism than generic SmolTalk'}
+          pathlib.Path('out/CANDIDATE_AUDIT.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22621-c81-meta
+          path: out
+          retention-days: 1
+          compression-level: 0
