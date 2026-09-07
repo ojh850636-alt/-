@@ -1,80 +1,116 @@
-name: R22624 C84 exact source after source-zero selftest
+name: R22624 C84 exact one-use source
 on:
   push:
     branches: [r22624-c84-cpu-audit]
+permissions:
+  contents: write
+concurrency:
+  group: r22624-c84-source-oneuse
+  cancel-in-progress: false
 jobs:
   source:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Source-zero manifest/upload schema self-test
+      - name: Source-zero preseal and schema self-test
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test -f r22624/R22624_C84_PRESEAL.json || exit 31
+          # A durable consumed ref blocks every later source GET.
+          code=$(curl -sS -o /tmp/ref.json -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/ref/heads/r22624-c84-consumed")
+          if [ "$code" = 200 ]; then
+            echo 'C84_SOURCE_ALREADY_CONSUMED'; exit 77
+          fi
+          test "$code" = 404
+          mkdir -p seal out src/adapter src/base
+          curl -L --retry 4 --fail --silent --show-error \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/1fafb5ea815a7781f4bdd33178c34db171e7a9cd/r22624/R22624_C84_PRESEAL.json" \
+            -o seal/R22624_C84_PRESEAL.json
           python - <<'PY'
           import json,pathlib,tempfile,hashlib
-          p=pathlib.Path('r22624/R22624_C84_PRESEAL.json')
-          d=json.loads(p.read_text())
+          p=pathlib.Path('seal/R22624_C84_PRESEAL.json'); d=json.loads(p.read_text())
           assert d['schema']=='LAA_R22624_C84_PYTHON_SYNTH_PRESEAL_V1'
+          assert d['candidate']=='Mhammad2023/SmolLM2-FT-BigCode-Python-Lora'
           assert d['case_count']==24
           assert d['model_output_bytes_at_seal']==0 and d['learned_weight_bytes_at_seal']==0
           assert [sum(c['split']==s for c in d['cases']) for s in ['DISCOVERY','CONFIRMATION','OOD']]==[8,8,8]
-          # dry-run the exact relative manifest schema before any learned-weight GET
           with tempfile.TemporaryDirectory() as td:
               root=pathlib.Path(td); (root/'adapter').mkdir(); (root/'base').mkdir()
-              (root/'adapter'/'adapter_model.safetensors').write_bytes(b'x')
-              (root/'base'/'model.safetensors').write_bytes(b'y')
-              rows=[]
-              for q in sorted(root.rglob('*')):
-                  if q.is_file(): rows.append({'path':q.relative_to(root).as_posix(),'bytes':q.stat().st_size,'sha256':hashlib.sha256(q.read_bytes()).hexdigest()})
-              assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
-              assert any(x['path']=='base/model.safetensors' for x in rows)
+              (root/'adapter'/'adapter_model.safetensors').write_bytes(b'x'); (root/'base'/'model.safetensors').write_bytes(b'y')
+              rows=[q.relative_to(root).as_posix() for q in root.rglob('*') if q.is_file()]
+              assert 'adapter/adapter_model.safetensors' in rows and 'base/model.safetensors' in rows
           print('PRESEAL_SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
           print('SOURCEZERO_SCHEMA_SELFTEST_PASS')
           PY
-      - name: Download exact selected source once and manifest
+      - name: One Adapter GET, durable consume mark, static viability, then Base
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          mkdir -p src/adapter src/base out
           ADAPTER_REPO='Mhammad2023/SmolLM2-FT-BigCode-Python-Lora'
           ADAPTER_REV=$(python - <<'PY'
           import json,urllib.request
           print(json.load(urllib.request.urlopen('https://huggingface.co/api/models/Mhammad2023/SmolLM2-FT-BigCode-Python-Lora'))['sha'])
           PY
           )
-          BASE_REPO=$(ADAPTER_REV="$ADAPTER_REV" python - <<'PY'
-          import json,urllib.request,os
-          u=f"https://huggingface.co/Mhammad2023/SmolLM2-FT-BigCode-Python-Lora/resolve/{os.environ['ADAPTER_REV']}/adapter_config.json?download=true"
-          print(json.load(urllib.request.urlopen(u))['base_model_name_or_path'])
+          hfget(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors src/adapter/adapter_model.safetensors
+          # Immediately make the one-use consumption durable before identity/static checks.
+          payload=$(python - <<'PY'
+          import json,os
+          print(json.dumps({'ref':'refs/heads/r22624-c84-consumed','sha':os.environ['GITHUB_SHA']}))
+          PY
+          )
+          code=$(curl -sS -o /tmp/mark.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
+            -H 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/refs" -d "$payload")
+          test "$code" = 201
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json src/adapter/adapter_config.json
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" README.md src/adapter/README.md
+          ADAPTER_REV="$ADAPTER_REV" python - <<'PY'
+          import json,struct,pathlib,os
+          p=pathlib.Path('src/adapter/adapter_model.safetensors')
+          with p.open('rb') as f:
+              n=struct.unpack('<Q',f.read(8))[0]; h=json.loads(f.read(n))
+          cfg=json.load(open('src/adapter/adapter_config.json'))
+          keys=[k for k in h if k!='__metadata__']; A=[k for k in keys if '.lora_A.' in k]; B=[k for k in keys if '.lora_B.' in k]
+          assert cfg.get('peft_type')=='LORA' and cfg.get('task_type')=='CAUSAL_LM'
+          assert cfg.get('r')==6 and not cfg.get('modules_to_save')
+          assert len(A)>0 and len(A)==len(B)
+          # Every A/B factor must expose the declared rank dimension 6.
+          assert all(6 in h[k]['shape'] for k in A+B)
+          pathlib.Path('out/STATIC_VIABILITY.json').write_text(json.dumps({'schema':'R22624_C84_STATIC_VIABILITY_V1','adapter_revision':os.environ['ADAPTER_REV'],'tensor_count':len(keys),'a_count':len(A),'b_count':len(B),'declared_rank':6,'shape_rank_width_pass':True,'modules_to_save_absent':True},indent=2,sort_keys=True)+'\n')
+          PY
+          BASE_REPO=$(python - <<'PY'
+          import json
+          print(json.load(open('src/adapter/adapter_config.json'))['base_model_name_or_path'])
           PY
           )
           BASE_REV=$(BASE_REPO="$BASE_REPO" python - <<'PY'
-          import json,urllib.request,urllib.parse,os
-          repo=os.environ['BASE_REPO']
-          print(json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+repo))['sha'])
+          import json,urllib.request,os
+          print(json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+os.environ['BASE_REPO']))['sha'])
           PY
           )
-          hfget(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
-          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors src/adapter/adapter_model.safetensors
-          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json src/adapter/adapter_config.json
-          hfget "$ADAPTER_REPO" "$ADAPTER_REV" README.md src/adapter/README.md
           hfget "$BASE_REPO" "$BASE_REV" model.safetensors src/base/model.safetensors
           for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
             if curl -L --retry 4 --retry-delay 1 --fail --silent --show-error "https://huggingface.co/$BASE_REPO/resolve/$BASE_REV/$f?download=true" -o "src/base/$f"; then :; else rm -f "src/base/$f"; fi
           done
-          cp r22624/R22624_C84_PRESEAL.json out/R22624_C84_PRESEAL.json
+          cp seal/R22624_C84_PRESEAL.json out/R22624_C84_PRESEAL.json
           ADAPTER_REV="$ADAPTER_REV" BASE_REPO="$BASE_REPO" BASE_REV="$BASE_REV" python - <<'PY'
           import json,hashlib,pathlib,os
           root=pathlib.Path('src'); rows=[]
           for p in sorted(root.rglob('*')):
               if p.is_file(): rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
-          cfg=json.load(open('src/adapter/adapter_config.json'))
-          pre=pathlib.Path('out/R22624_C84_PRESEAL.json')
+          cfg=json.load(open('src/adapter/adapter_config.json')); pre=pathlib.Path('out/R22624_C84_PRESEAL.json')
           out={'schema':'R22624_C84_EXACT_SOURCE_MANIFEST_V1','adapter_repo':'Mhammad2023/SmolLM2-FT-BigCode-Python-Lora','adapter_revision':os.environ['ADAPTER_REV'],'base_repo':os.environ['BASE_REPO'],'compatibility_base_revision':os.environ['BASE_REV'],'training_base_revision_proven':bool(cfg.get('revision')),'declared_training_revision':cfg.get('revision'),'preseal_sha256':hashlib.sha256(pre.read_bytes()).hexdigest(),'files':rows}
-          assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
-          assert any(x['path']=='base/model.safetensors' for x in rows)
+          assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows); assert any(x['path']=='base/model.safetensors' for x in rows)
           pathlib.Path('out/SOURCE_MANIFEST.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
           PY
       - uses: actions/upload-artifact@v4
