@@ -1,0 +1,54 @@
+name: R22624 C84 metadata-only CPU candidate audit
+on:
+  push:
+    branches: [r22624-c84-cpu-audit]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Search public HF metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          python - <<'PY'
+          import json, urllib.parse, urllib.request, pathlib, hashlib, time
+          queries=[
+            'SmolLM2-135M lora translation',
+            'SmolLM2-135M lora grammar',
+            'SmolLM2-135M lora ner',
+            'SmolLM2-135M lora date',
+            'SmolLM2-135M lora unit conversion',
+            'SmolLM2-135M lora extraction',
+            'SmolLM2-135M lora classification',
+          ]
+          seen={}
+          for q in queries:
+              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=40&full=true'
+              try:
+                  with urllib.request.urlopen(url,timeout=40) as r: rows=json.load(r)
+              except Exception as e:
+                  continue
+              for d in rows:
+                  rid=d.get('id') or d.get('modelId')
+                  if not rid: continue
+                  sib=[s.get('rfilename') for s in d.get('siblings',[]) if s.get('rfilename')]
+                  if not any(x.endswith('adapter_model.safetensors') for x in sib):
+                      continue
+                  row=seen.setdefault(rid,{
+                      'repo':rid,'sha':d.get('sha'),'pipeline_tag':d.get('pipeline_tag'),
+                      'library_name':d.get('library_name'),'tags':d.get('tags',[]),'siblings':sib,'matched_queries':[]})
+                  row['matched_queries'].append(q)
+              time.sleep(0.2)
+          rows=sorted(seen.values(), key=lambda x:(len(x['matched_queries']),x['repo']), reverse=True)
+          payload={'schema':'R22624_C84_CPU_METADATA_SEARCH_V1','weight_bytes_requested':0,'query_count':len(queries),'candidate_count':len(rows),'candidates':rows}
+          p=pathlib.Path('meta/CANDIDATE_SEARCH.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('meta/CANDIDATE_SEARCH.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  CANDIDATE_SEARCH.json\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c84-metadata
+          path: meta
+          retention-days: 1
+          compression-level: 0
