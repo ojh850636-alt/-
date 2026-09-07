@@ -5,53 +5,49 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
-      - name: Search public HF metadata only
+      - name: Task-first HF search then Base-filter
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p meta
+          rm -rf meta && mkdir -p meta
           python - <<'PY'
           import json, urllib.parse, urllib.request, pathlib, hashlib, time
-          queries=['SmolLM2-135M','SmolLM2 135M','SmolLM2 LoRA','smollm2 peft','135m adapter']
+          queries=['translation lora','grammar lora','date lora','unit conversion lora','entity extraction lora','intent lora','sentiment lora','summarization lora','question answering lora','regex lora','normalization lora','classification lora','code lora','structured extraction lora']
           seen={}
+          def getjson(url,timeout=20):
+              with urllib.request.urlopen(url,timeout=timeout) as r:return json.load(r)
+          def getbytes(repo,rev,name,limit=180000):
+              u=f'https://huggingface.co/{repo}/resolve/{rev}/{name}?download=true'
+              with urllib.request.urlopen(u,timeout=25) as r:return r.read(limit)
           for q in queries:
-              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true'
-              try:
-                  with urllib.request.urlopen(url,timeout=40) as r: rows=json.load(r)
-              except Exception:
-                  continue
+              try: rows=getjson('https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true',40)
+              except Exception: continue
               for d in rows:
-                  rid=d.get('id') or d.get('modelId')
-                  if not rid: continue
+                  rid=d.get('id') or d.get('modelId'); rev=d.get('sha')
+                  if not rid or not rev: continue
                   sib=[s.get('rfilename') for s in d.get('siblings',[]) if s.get('rfilename')]
-                  tags=d.get('tags',[]) or []
-                  if not any(x.endswith('adapter_model.safetensors') for x in sib): continue
-                  if 'smollm2' not in (rid+' '+' '.join(tags)).lower(): continue
-                  row=seen.setdefault(rid,{'repo':rid,'sha':d.get('sha'),'pipeline_tag':d.get('pipeline_tag'),'library_name':d.get('library_name'),'tags':tags,'siblings':sib,'matched_queries':[]})
-                  row['matched_queries'].append(q)
-              time.sleep(0.2)
-          rows=sorted(seen.values(), key=lambda x:(-len(x['matched_queries']),x['repo']))
-          # fetch small README/config for up to 40 candidates; learned weight bytes remain zero
-          enriched=[]
-          for row in rows[:40]:
-              repo,rev=row['repo'],row['sha']
-              for fn,key in [('adapter_config.json','adapter_config'),('README.md','readme')]:
-                  try:
-                      u=f'https://huggingface.co/{repo}/resolve/{rev}/{fn}?download=true'
-                      with urllib.request.urlopen(u,timeout=20) as r: b=r.read(180000)
-                      if fn.endswith('.json'): row[key]=json.loads(b.decode('utf-8','replace'))
-                      else: row[key]=b.decode('utf-8','replace')[:12000]
-                  except Exception: row[key]=None
-              enriched.append(row)
-          payload={'schema':'R22624_C84_CPU_METADATA_SEARCH_V2','weight_bytes_requested':0,'query_count':len(queries),'candidate_count':len(rows),'candidates':enriched}
+                  if 'adapter_model.safetensors' not in sib: continue
+                  if rid in seen:
+                      seen[rid]['matched_queries'].append(q); continue
+                  try: cfg=json.loads(getbytes(rid,rev,'adapter_config.json').decode('utf-8','replace'))
+                  except Exception: continue
+                  base=str(cfg.get('base_model_name_or_path') or '')
+                  if 'smollm2' not in base.lower(): continue
+                  row={'repo':rid,'sha':rev,'pipeline_tag':d.get('pipeline_tag'),'library_name':d.get('library_name'),'tags':d.get('tags',[]) or [],'siblings':sib,'matched_queries':[q],'adapter_config':cfg}
+                  try: row['readme']=getbytes(rid,rev,'README.md').decode('utf-8','replace')[:14000]
+                  except Exception: row['readme']=None
+                  seen[rid]=row
+              time.sleep(0.1)
+          rows=sorted(seen.values(),key=lambda x:(-len(x['matched_queries']),x['repo']))
+          payload={'schema':'R22624_C84_TASKFIRST_BASEFILTER_V3','weight_bytes_requested':0,'query_count':len(queries),'candidate_count':len(rows),'candidates':rows}
           p=pathlib.Path('meta/CANDIDATE_SEARCH.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
           pathlib.Path('meta/CANDIDATE_SEARCH.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  CANDIDATE_SEARCH.json\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22624-c84-metadata-v2
+          name: r22624-c84-metadata-v3
           path: meta
           retention-days: 1
           compression-level: 0
