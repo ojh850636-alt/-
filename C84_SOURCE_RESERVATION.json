@@ -1,0 +1,13 @@
+{
+  "schema": "R22624_C84_SOURCE_RESERVATION_V1",
+  "candidate": "Zayed024/nanozero-countdown-lora",
+  "adapter_revision": "8ef7101c63f7f93a4599445654b1eb2425e00846",
+  "adapter_filename": "nanozero_countdown_lora.npz",
+  "compatibility_base": "Qwen/Qwen2.5-0.5B-Instruct",
+  "compatibility_base_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "training_base_revision_proven": false,
+  "reserved": true,
+  "consumed_marker_must_be_absent_before_get": true,
+  "source_body_gets_authorized": 1,
+  "public_card_score_science_credit": 0
+}
