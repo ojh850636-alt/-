@@ -1,0 +1,126 @@
+name: R22622 C82 one-shot causal screen
+on:
+  push:
+    branches: [r22622-c82-binding]
+    paths: [r22622_trigger/causal_screen_v1]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  screen:
+    strategy:
+      fail-fast: false
+      matrix:
+        hypothesis: [ATTENTION_ALL,MLP_ALL,Q_PROJ,K_PROJ,V_PROJ,O_PROJ,GATE_PROJ,UP_PROJ,DOWN_PROJ,EARLY,MIDDLE,LATE]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Install exact CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet --disable-pip-version-check 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1'
+      - name: Recover authoritative C82 source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10008640619/zip" -o source.zip
+          mkdir source_bundle && unzip -q source.zip -d source_bundle
+          echo '21988110b092b8635c206529d47ec55fd5395eaec92ed8f391df49328f2e997e  source_bundle/src/adapter/adapter_model.safetensors' | sha256sum -c -
+          echo '5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c  source_bundle/src/base/model.safetensors' | sha256sum -c -
+      - name: Fetch exact primary and causal runners
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error 'https://raw.githubusercontent.com/ojh850636-alt/-/af4a277f661911d7bfe67b58c3d58df5b53149bf/r22622_tools/c82_matrix_runner.py' -o c82_matrix_runner.py
+          curl -L --fail --silent --show-error 'https://raw.githubusercontent.com/ojh850636-alt/-/bfc940b5f6f777a1bb1fa5f055e05ae549ed1527/r22622_tools/c82_causal_screen.py' -o c82_causal_screen.py
+          test -s c82_matrix_runner.py && test -s c82_causal_screen.py
+      - name: Run presealed hypothesis on fixed 16 cases
+        env:
+          HYPOTHESIS: ${{ matrix.hypothesis }}
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          TOKENIZERS_PARALLELISM: 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python c82_causal_screen.py
+          test -s "result/${HYPOTHESIS}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c82-causal-screen-${{ matrix.hypothesis }}
+          path: result
+          retention-days: 1
+          compression-level: 0
+
+  aggregate:
+    needs: screen
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: c82-causal-screen-*
+          path: screen_results
+          merge-multiple: true
+      - name: Recover authoritative primary per-case scalar evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10009023662/zip" -o primary.zip
+          mkdir primary && unzip -q primary.zip -d primary
+          test -s primary/C82_BINDING_PERCASE_SCALARS.json
+      - name: Apply presealed screen rule, Holm correction, and deterministic top-3 selection
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p summary
+          python - <<'PY'
+          import json,pathlib,random,math
+          screen_ids=['C00','C02','C04','C06','C08','C10','C12','C14','O00','O02','O04','O06','O08','O10','O12','O14']
+          primary=json.load(open('primary/C82_BINDING_PERCASE_SCALARS.json'))['rows']
+          full={r['id']:float(r['metrics']['total_binding_score']) for r in primary if r['condition']=='FULL' and r['id'] in screen_ids}
+          assert len(full)==16
+          rows=[]
+          for p in sorted(pathlib.Path('screen_results').glob('*.json')):
+              d=json.load(open(p)); assert len(d['rows'])==16
+              vals=[full[r['id']]-float(r['metrics']['total_binding_score']) for r in d['rows']]
+              assert {r['id'] for r in d['rows']}==set(screen_ids)
+              n=len(vals); mean=sum(vals)/n
+              rng=random.Random(2262220+len(rows)); boots=[]
+              for _ in range(10000): boots.append(sum(vals[rng.randrange(n)] for __ in range(n))/n)
+              boots.sort(); ci=[boots[249],boots[9749]]
+              rng2=random.Random(2262250+len(rows)); obs=mean; ge=0; B=50000
+              for _ in range(B):
+                  pm=sum((v if rng2.random()<0.5 else -v) for v in vals)/n
+                  if pm>=obs-1e-15: ge+=1
+              pval=(ge+1)/(B+1)
+              rows.append({'hypothesis':d['hypothesis'],'zeroed_B_tensors':d['zeroed_B_tensors'],'necessity_mean':mean,'ci95':ci,'one_sided_signflip_p':pval,'n':n})
+          assert len(rows)==12,len(rows)
+          # Holm-Bonferroni adjusted p values.
+          order=sorted(range(len(rows)),key=lambda i:rows[i]['one_sided_signflip_p'])
+          adj=[None]*len(rows); running=0.0; m=len(rows)
+          for rank,i in enumerate(order):
+              raw=min(1.0,(m-rank)*rows[i]['one_sided_signflip_p']); running=max(running,raw); adj[i]=running
+          for i,r in enumerate(rows):
+              r['holm_adjusted_p']=adj[i]
+              r['screen_survivor']=r['necessity_mean']>=0.05 and r['ci95'][0]>0 and r['holm_adjusted_p']<0.05
+          survivors=sorted([r for r in rows if r['screen_survivor']],key=lambda r:(-r['necessity_mean'],r['hypothesis']))
+          top3=[r['hypothesis'] for r in survivors[:3]]
+          out={'schema':'R22622_C82_CAUSAL_SCREEN_SUMMARY_V1','preseal_sha256':'40b06afbd2a4b04606152870cc435dcbe5cf2f2a72b318c3af803cb1f44e4dc4','screen_cases':screen_ids,'rows':sorted(rows,key=lambda r:r['hypothesis']),'survivors':[r['hypothesis'] for r in survivors],'precommitted_top3_for_full_confirmation':top3,'full_confirmation_authorized':bool(top3),'raw_model_text_retained':False}
+          pathlib.Path('summary/C82_CAUSAL_SCREEN_SUMMARY.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22622-c82-causal-screen-summary
+          path: summary
+          retention-days: 1
+          compression-level: 0
