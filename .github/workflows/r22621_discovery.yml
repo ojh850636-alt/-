@@ -1,0 +1,62 @@
+name: R22621 CPU LoRA metadata discovery
+on:
+  push:
+    branches: [r22621-c81]
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Discover CPU-feasible PEFT candidates without weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          python - <<'PY'
+          import json, urllib.parse, urllib.request, pathlib, re
+
+          searches=['SmolLM2-135M','SmolLM2-135M-Instruct','SmolLM2-360M','SmolLM2-360M-Instruct']
+          seen={}
+          def get_json(url):
+              req=urllib.request.Request(url, headers={'User-Agent':'LAA-R22621-metadata-only'})
+              with urllib.request.urlopen(req, timeout=30) as r: return json.load(r)
+          def get_text(url):
+              req=urllib.request.Request(url, headers={'User-Agent':'LAA-R22621-metadata-only'})
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r: return r.read(40000).decode('utf-8','replace')
+              except Exception: return ''
+
+          for q in searches:
+              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true'
+              for d in get_json(url):
+                  rid=d.get('id') or d.get('modelId')
+                  if not rid or rid in seen: continue
+                  sib=[x.get('rfilename','') for x in d.get('siblings',[])]
+                  if 'adapter_model.safetensors' not in sib or 'adapter_config.json' not in sib: continue
+                  tags=d.get('tags',[]) or []
+                  if not any(t in tags for t in ['peft','lora','adapter-transformers']) and d.get('library_name')!='peft': continue
+                  sha=d.get('sha')
+                  if not sha: continue
+                  cfg_url=f'https://huggingface.co/{rid}/resolve/{sha}/adapter_config.json?download=true'
+                  readme_url=f'https://huggingface.co/{rid}/resolve/{sha}/README.md?download=true'
+                  try: cfg=json.loads(get_text(cfg_url))
+                  except Exception: cfg={}
+                  readme=get_text(readme_url)
+                  base=cfg.get('base_model_name_or_path')
+                  if base and not any(x in base for x in ['SmolLM2-135M','SmolLM2-360M']): continue
+                  seen[rid]={
+                    'repo':rid,'sha':sha,'library_name':d.get('library_name'),'pipeline_tag':d.get('pipeline_tag'),
+                    'tags':tags,'base_model':base,'training_base_revision':cfg.get('revision'),
+                    'r':cfg.get('r'),'lora_alpha':cfg.get('lora_alpha'),'target_modules':cfg.get('target_modules'),
+                    'readme_excerpt':readme[:12000], 'weight_bytes_requested':0,
+                  }
+          rows=sorted(seen.values(), key=lambda x:x['repo'].lower())
+          payload={'schema':'R22621_CPU_DISCOVERY_V1','weight_bytes_requested':0,'count':len(rows),'candidates':rows}
+          pathlib.Path('out/DISCOVERY.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22621-discovery
+          path: out
+          retention-days: 1
+          compression-level: 0
