@@ -1,75 +1,9 @@
-name: R22624 C84 exact custom-NPZ ingress metadata
+name: R22624 C84 ingress metadata (frozen)
 on:
   push:
-    branches: [r22624-c84-cpu]
+    branches: [r22624-c84-ingress-meta-disabled]
 jobs:
-  meta:
+  frozen:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Freeze Adapter Base and code identity without learned-weight body GET
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p meta
-          python - <<'PY'
-          import json, urllib.request, pathlib, hashlib, re
-          UA={'User-Agent':'LAA-R22624-ingress-meta'}
-          AD='Zayed024/nanozero-countdown-lora'; ADREV='8ef7101c63f7f93a4599445654b1eb2425e00846'
-          BASE='Qwen/Qwen2.5-0.5B-Instruct'
-          CODE_REPO='Zayed024/nanozero-jax'; CODE_REV='ab69ec12f7ba92c030e9f96650e83bbc8263b38c'
-          def jget(url,timeout=45):
-            req=urllib.request.Request(url,headers=UA)
-            with urllib.request.urlopen(req,timeout=timeout) as r:return json.load(r)
-          def small(url,limit=65536,timeout=45):
-            req=urllib.request.Request(url,headers=UA)
-            with urllib.request.urlopen(req,timeout=timeout) as r:return r.read(limit)
-          def head(url,timeout=45):
-            req=urllib.request.Request(url,headers=UA,method='HEAD')
-            with urllib.request.urlopen(req,timeout=timeout) as r:return {k.lower():v for k,v in r.headers.items()}
-          adapi=jget('https://huggingface.co/api/models/'+AD+'?full=true')
-          assert adapi['sha']==ADREV
-          siblings=[s.get('rfilename') for s in adapi.get('siblings',[]) if s.get('rfilename')]
-          assert siblings==['.gitattributes','README.md','nanozero_countdown_lora.npz']
-          readme=small(f'https://huggingface.co/{AD}/resolve/{ADREV}/README.md?download=true').decode('utf-8','replace')
-          plain=re.sub(r'[*_`]+','',readme)
-          assert 'Qwen/Qwen2.5-0.5B-Instruct' in plain and 'not a PEFT-format adapter' in plain and 'plain .npz' in plain
-          npzh=head(f'https://huggingface.co/{AD}/resolve/{ADREV}/nanozero_countdown_lora.npz?download=true')
-          baseapi=jget('https://huggingface.co/api/models/'+BASE+'?full=true')
-          baserev=baseapi['sha']
-          bh=head(f'https://huggingface.co/{BASE}/resolve/{baserev}/model.safetensors?download=true')
-          commit=jget('https://api.github.com/repos/'+CODE_REPO+'/commits/'+CODE_REV)
-          assert commit['sha']==CODE_REV
-          tree=jget('https://api.github.com/repos/'+CODE_REPO+'/contents?ref='+CODE_REV)
-          files={x['name']:{'blob_sha':x['sha'],'bytes':x['size']} for x in tree if x['type']=='file'}
-          assert 'nanozero.py' in files and 'LICENSE' in files and 'countdown.py' in files
-          payload={
-            'schema':'R22624_C84_EXACT_INGRESS_METADATA_V1',
-            'learned_weight_body_bytes_requested':0,
-            'adapter':{
-              'repo':AD,'revision':ADREV,'filename':'nanozero_countdown_lora.npz','source_type':'CUSTOM_NPZ_LORA',
-              'head':{k:npzh.get(k) for k in ['content-length','etag','x-repo-commit','x-linked-etag','x-linked-size','location'] if npzh.get(k)},
-              'license':'apache-2.0','base_declared_in_model_card':BASE,'exact_training_base_revision_proven':False,
-              'siblings':siblings,
-            },
-            'compatibility_base':{
-              'repo':BASE,'revision':baserev,'filename':'model.safetensors',
-              'head':{k:bh.get(k) for k in ['content-length','etag','x-repo-commit','x-linked-etag','x-linked-size','location'] if bh.get(k)},
-              'training_revision_credit':False,
-            },
-            'reference_code':{'repo':CODE_REPO,'revision':CODE_REV,'files':files,'science_credit':0,'purpose':'format/operator semantics witness only'},
-            'operator_semantics':{'keys':'{layer}__{wq|wk|wv|wo}__{A|B}','delta':'(x @ A) @ B','expected_rank':16,'projections':['wq','wk','wv','wo']},
-            'hard_hold':'TRAINING_BASE_REVISION_UNPROVEN',
-            'causal_ceiling':'NO_AUTHORITATIVE_CAUSAL_WITHOUT_EXACT_TRAINING_BASE_REVISION',
-            'public_card_performance_science_credit':0,
-          }
-          p=pathlib.Path('meta/C84_EXACT_INGRESS_METADATA.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
-          pathlib.Path('meta/C84_EXACT_INGRESS_METADATA.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  C84_EXACT_INGRESS_METADATA.json\n')
-          print(json.dumps({'adapter_rev':ADREV,'base_rev':baserev,'npz_head':payload['adapter']['head'],'base_head':payload['compatibility_base']['head'],'code_rev':CODE_REV,'weight_body_bytes':0},indent=2))
-          PY
-      - uses: actions/upload-artifact@v4
-        with:
-          name: r22624-c84-ingress-metadata
-          path: meta
-          retention-days: 1
-          compression-level: 0
+      - run: echo 'Exact ingress metadata already sealed; no active-branch rerun.'
