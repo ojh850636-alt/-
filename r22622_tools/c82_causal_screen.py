@@ -4,6 +4,8 @@ from transformers import AutoTokenizer,AutoModelForCausalLM
 from peft import PeftModel
 
 # Reuse the exact precommitted primary suite/scorer source without executing its model section.
+os.environ.setdefault('SHARD','0')
+os.environ.setdefault('CONDITION','FULL')
 primary_src=pathlib.Path('c82_matrix_runner.py').read_text()
 prefix=primary_src.split("tok=AutoTokenizer.from_pretrained")[0]
 ns={}
