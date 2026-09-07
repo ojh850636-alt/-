@@ -1,0 +1,88 @@
+name: R22621 C81 scientific-router exact source
+on:
+  push:
+    branches: [r22621-c81]
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Pre-GET manifest schema self-test and exact metadata gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fixture/adapter fixture/base preflight
+          printf 'fixture-adapter' > fixture/adapter/adapter_model.safetensors
+          printf 'fixture-base' > fixture/base/model.safetensors
+          python - <<'PY'
+          import hashlib, json, pathlib, urllib.request
+          def rows_for(root):
+              root=pathlib.Path(root)
+              rows=[]
+              for p in sorted(root.rglob('*')):
+                  if p.is_file():
+                      rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+              return rows
+          rows=rows_for('fixture')
+          assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
+          assert any(x['path']=='base/model.safetensors' for x in rows)
+          ADAPTER='Miladsaeedi70/smollm2-135m-scientific-sft-lora'
+          EXPECTED_ADAPTER='c344de0f75239d4de9341f7d38a580cdd8b10d25'
+          BASE='HuggingFaceTB/SmolLM2-135M-Instruct'
+          EXPECTED_BASE='12fd25f77366fa6b3b4b768ec3050bf629380bac'
+          def api(repo):
+              req=urllib.request.Request('https://huggingface.co/api/models/'+repo,headers={'User-Agent':'LAA-R22621-source-gate'})
+              with urllib.request.urlopen(req,timeout=30) as r:return json.load(r)
+          a=api(ADAPTER); b=api(BASE)
+          assert a.get('sha')==EXPECTED_ADAPTER,(a.get('sha'),EXPECTED_ADAPTER)
+          assert b.get('sha')==EXPECTED_BASE,(b.get('sha'),EXPECTED_BASE)
+          sib_a={x.get('rfilename') for x in a.get('siblings',[])}
+          sib_b={x.get('rfilename') for x in b.get('siblings',[])}
+          assert {'adapter_model.safetensors','adapter_config.json'} <= sib_a
+          assert 'model.safetensors' in sib_b
+          pathlib.Path('preflight/PREGET_GATE.json').write_text(json.dumps({
+            'schema':'R22621_C81_PREGET_GATE_V1','manifest_fixture_pass':True,
+            'adapter_repo':ADAPTER,'adapter_revision':EXPECTED_ADAPTER,
+            'base_repo':BASE,'compatibility_base_revision':EXPECTED_BASE,
+            'training_base_revision_proven':False,'weight_bytes_requested':0
+          },indent=2,sort_keys=True)+'\n')
+          PY
+          rm -rf fixture
+      - name: One-use exact source GET and post-GET manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/adapter src/base out
+          ADAPTER_REPO='Miladsaeedi70/smollm2-135m-scientific-sft-lora'
+          ADAPTER_REV='c344de0f75239d4de9341f7d38a580cdd8b10d25'
+          BASE_REPO='HuggingFaceTB/SmolLM2-135M-Instruct'
+          BASE_REV='12fd25f77366fa6b3b4b768ec3050bf629380bac'
+          hfget(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors src/adapter/adapter_model.safetensors
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json src/adapter/adapter_config.json
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" README.md src/adapter/README.md
+          hfget "$BASE_REPO" "$BASE_REV" model.safetensors src/base/model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
+            hfget "$BASE_REPO" "$BASE_REV" "$f" "src/base/$f"
+          done
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('src'); rows=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file(): rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
+          assert any(x['path']=='base/model.safetensors' for x in rows)
+          cfg=json.load(open(root/'adapter/adapter_config.json'))
+          assert cfg.get('r')==16
+          out={'schema':'R22621_C81_SOURCE_V1','adapter_repo':'Miladsaeedi70/smollm2-135m-scientific-sft-lora','adapter_revision':'c344de0f75239d4de9341f7d38a580cdd8b10d25','base_repo':'HuggingFaceTB/SmolLM2-135M-Instruct','compatibility_base_revision':'12fd25f77366fa6b3b4b768ec3050bf629380bac','training_base_revision_proven':False,'adapter_config':cfg,'files':rows}
+          pathlib.Path('out/SOURCE_MANIFEST.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22621-c81-source
+          path: |
+            preflight
+            out
+            src
+          retention-days: 1
+          compression-level: 0
