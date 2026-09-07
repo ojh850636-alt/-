@@ -14,41 +14,44 @@ jobs:
           mkdir -p meta
           python - <<'PY'
           import json, urllib.parse, urllib.request, pathlib, hashlib, time
-          queries=[
-            'SmolLM2-135M lora translation',
-            'SmolLM2-135M lora grammar',
-            'SmolLM2-135M lora ner',
-            'SmolLM2-135M lora date',
-            'SmolLM2-135M lora unit conversion',
-            'SmolLM2-135M lora extraction',
-            'SmolLM2-135M lora classification',
-          ]
+          queries=['SmolLM2-135M','SmolLM2 135M','SmolLM2 LoRA','smollm2 peft','135m adapter']
           seen={}
           for q in queries:
-              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=40&full=true'
+              url='https://huggingface.co/api/models?search='+urllib.parse.quote(q)+'&limit=100&full=true'
               try:
                   with urllib.request.urlopen(url,timeout=40) as r: rows=json.load(r)
-              except Exception as e:
+              except Exception:
                   continue
               for d in rows:
                   rid=d.get('id') or d.get('modelId')
                   if not rid: continue
                   sib=[s.get('rfilename') for s in d.get('siblings',[]) if s.get('rfilename')]
-                  if not any(x.endswith('adapter_model.safetensors') for x in sib):
-                      continue
-                  row=seen.setdefault(rid,{
-                      'repo':rid,'sha':d.get('sha'),'pipeline_tag':d.get('pipeline_tag'),
-                      'library_name':d.get('library_name'),'tags':d.get('tags',[]),'siblings':sib,'matched_queries':[]})
+                  tags=d.get('tags',[]) or []
+                  if not any(x.endswith('adapter_model.safetensors') for x in sib): continue
+                  if 'smollm2' not in (rid+' '+' '.join(tags)).lower(): continue
+                  row=seen.setdefault(rid,{'repo':rid,'sha':d.get('sha'),'pipeline_tag':d.get('pipeline_tag'),'library_name':d.get('library_name'),'tags':tags,'siblings':sib,'matched_queries':[]})
                   row['matched_queries'].append(q)
               time.sleep(0.2)
-          rows=sorted(seen.values(), key=lambda x:(len(x['matched_queries']),x['repo']), reverse=True)
-          payload={'schema':'R22624_C84_CPU_METADATA_SEARCH_V1','weight_bytes_requested':0,'query_count':len(queries),'candidate_count':len(rows),'candidates':rows}
+          rows=sorted(seen.values(), key=lambda x:(-len(x['matched_queries']),x['repo']))
+          # fetch small README/config for up to 40 candidates; learned weight bytes remain zero
+          enriched=[]
+          for row in rows[:40]:
+              repo,rev=row['repo'],row['sha']
+              for fn,key in [('adapter_config.json','adapter_config'),('README.md','readme')]:
+                  try:
+                      u=f'https://huggingface.co/{repo}/resolve/{rev}/{fn}?download=true'
+                      with urllib.request.urlopen(u,timeout=20) as r: b=r.read(180000)
+                      if fn.endswith('.json'): row[key]=json.loads(b.decode('utf-8','replace'))
+                      else: row[key]=b.decode('utf-8','replace')[:12000]
+                  except Exception: row[key]=None
+              enriched.append(row)
+          payload={'schema':'R22624_C84_CPU_METADATA_SEARCH_V2','weight_bytes_requested':0,'query_count':len(queries),'candidate_count':len(rows),'candidates':enriched}
           p=pathlib.Path('meta/CANDIDATE_SEARCH.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
           pathlib.Path('meta/CANDIDATE_SEARCH.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  CANDIDATE_SEARCH.json\n')
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: r22624-c84-metadata
+          name: r22624-c84-metadata-v2
           path: meta
           retention-days: 1
           compression-level: 0
