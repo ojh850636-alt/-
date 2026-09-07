@@ -1,0 +1,153 @@
+name: R22622 C82 compositional binding matrix
+on:
+  push:
+    branches: [r22622-c82-binding]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4,5]
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Install exact CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.10.0'
+          python -m pip install --quiet --disable-pip-version-check 'transformers==4.57.1' 'peft==0.20.0' 'accelerate==1.10.1'
+          python - <<'PY'
+          import torch,transformers,peft,accelerate
+          print({'torch':torch.__version__,'transformers':transformers.__version__,'peft':peft.__version__,'accelerate':accelerate.__version__})
+          PY
+      - name: Recover exact one-use source bundle without new HF GET
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/10008640619/zip" \
+            -o source.zip
+          mkdir source_bundle
+          unzip -q source.zip -d source_bundle
+          test -s source_bundle/src/adapter/adapter_model.safetensors
+          test -s source_bundle/src/base/model.safetensors
+          echo '21988110b092b8635c206529d47ec55fd5395eaec92ed8f391df49328f2e997e  source_bundle/src/adapter/adapter_model.safetensors' | sha256sum -c -
+          echo '5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c  source_bundle/src/base/model.safetensors' | sha256sum -c -
+      - name: Fetch exact precommitted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --silent --show-error \
+            'https://raw.githubusercontent.com/ojh850636-alt/-/af4a277f661911d7bfe67b58c3d58df5b53149bf/r22622_tools/c82_matrix_runner.py' \
+            -o c82_matrix_runner.py
+          test -s c82_matrix_runner.py
+      - name: Run all four precommitted conditions for shard
+        env:
+          SHARD: ${{ matrix.shard }}
+          HF_HUB_OFFLINE: '1'
+          TRANSFORMERS_OFFLINE: '1'
+          TOKENIZERS_PARALLELISM: 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for c in BASE FULL RANDOM_NORM_MATCHED LAYER_SHUFFLED; do
+            echo "=== shard=${SHARD} condition=${c} ==="
+            CONDITION="$c" python c82_matrix_runner.py
+          done
+          test "$(find result -maxdepth 1 -name '*.json' | wc -l)" -eq 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c82-results-shard-${{ matrix.shard }}
+          path: result
+          retention-days: 1
+          compression-level: 0
+
+  aggregate:
+    needs: matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: c82-results-shard-*
+          path: all_results
+          merge-multiple: true
+      - name: Build raw-free control summary and per-case scalars
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p summary
+          python - <<'PY'
+          import json,pathlib,statistics,random,math
+          files=sorted(pathlib.Path('all_results').glob('*.json'))
+          assert len(files)==24, len(files)
+          by={}; raw=[]
+          for p in files:
+              d=json.load(open(p)); assert len(d['rows'])==8
+              for r in d['rows']:
+                  key=(r['condition'],r['id'])
+                  assert key not in by,key
+                  by[key]=r; raw.append(r)
+          conds=['BASE','FULL','RANDOM_NORM_MATCHED','LAYER_SHUFFLED']
+          ids=sorted({r['id'] for r in raw})
+          assert len(ids)==48
+          for c in conds: assert sum(1 for k in by if k[0]==c)==48
+          metric_names=['weather_exact','prop_exact','first_sentence_weather_prop','mood_exact','secret_exact','twist_exact','quoted_line','prop_speaker','word_limit_55','endword_exact','total_binding_score','cross_case_intrusions','word_count']
+          splits=['Discovery','Confirmation','OOD']
+          means={}
+          for c in conds:
+              means[c]={}
+              for sp in ['ALL']+splits:
+                  rr=[r for r in raw if r['condition']==c and (sp=='ALL' or r['split']==sp)]
+                  means[c][sp]={m:sum(float(r['metrics'][m]) for r in rr)/len(rr) for m in metric_names}
+                  means[c][sp]['n']=len(rr)
+          gate_ids=sorted({r['id'] for r in raw if r['condition']=='FULL' and r['split'] in {'Confirmation','OOD'}})
+          assert len(gate_ids)==32
+          def ci(vals,seed):
+              n=len(vals); mu=sum(vals)/n; rng=random.Random(seed); boots=[]
+              for _ in range(10000):
+                  s=sum(vals[rng.randrange(n)] for __ in range(n))/n; boots.append(s)
+              boots.sort(); return {'mean':mu,'ci95':[boots[249],boots[9749]],'n':n}
+          comparisons={}
+          for j,c in enumerate(['BASE','RANDOM_NORM_MATCHED','LAYER_SHUFFLED']):
+              vals=[by[('FULL',i)]['metrics']['total_binding_score']-by[(c,i)]['metrics']['total_binding_score'] for i in gate_ids]
+              comparisons[f'FULL_MINUS_{c}']=ci(vals,2262210+j)
+          gate=all(v['ci95'][0]>0 for v in comparisons.values())
+          percase=[]
+          for r in sorted(raw,key=lambda x:(x['condition'],x['id'])):
+              percase.append({'id':r['id'],'split':r['split'],'condition':r['condition'],'metrics':r['metrics']})
+          summary={
+            'schema':'R22622_C82_BINDING_CONTROL_SUMMARY_V1',
+            'suite_sha256':'c669ef40aeae402be40404487f405a024f17e45181e7f20398515ec9a7edb0e9',
+            'source_adapter_sha256':'21988110b092b8635c206529d47ec55fd5395eaec92ed8f391df49328f2e997e',
+            'source_base_sha256':'5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c',
+            'training_base_revision_proven':False,
+            'conditions':conds,
+            'cases':48,
+            'means':means,
+            'primary_gate_scope':'Confirmation+OOD 32 cases',
+            'primary_gate_rule':'paired bootstrap 95% CI lower bound > 0 for FULL-BASE, FULL-RANDOM_NORM_MATCHED, FULL-LAYER_SHUFFLED total_binding_score',
+            'comparisons':comparisons,
+            'primary_control_separated_gain_green':gate,
+            'causal_authorized':gate,
+            'raw_model_text_retained_in_summary':False,
+          }
+          pathlib.Path('summary/C82_BINDING_CONTROL_SUMMARY.json').write_text(json.dumps(summary,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('summary/C82_BINDING_PERCASE_SCALARS.json').write_text(json.dumps({'schema':'R22622_C82_BINDING_PERCASE_SCALARS_V1','rows':percase},indent=2,sort_keys=True)+'\n')
+          print(json.dumps(summary,indent=2,sort_keys=True))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22622-c82-binding-summary
+          path: summary
+          retention-days: 1
+          compression-level: 0
