@@ -1,0 +1,43 @@
+name: R22624 C84 CPU candidate metadata audit
+on:
+  push:
+    branches: [r22624-c84-cypher2]
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Metadata-only audit 3 CPU candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p meta
+          python - <<'PY'
+          import json, urllib.request, pathlib, hashlib
+          repos=[
+            'Harshini1008/smollm2-135m-text2cypher',
+            'ereniko/SmolLLM2-135M-Code',
+            'Miladsaeedi70/smollm2-135m-scientific-sft-lora',
+          ]
+          rows=[]
+          for repo in repos:
+              with urllib.request.urlopen('https://huggingface.co/api/models/'+repo,timeout=30) as r: d=json.load(r)
+              rows.append({'repo':repo,'sha':d.get('sha'),'private':d.get('private'),'gated':d.get('gated'),'library_name':d.get('library_name'),'pipeline_tag':d.get('pipeline_tag'),'tags':d.get('tags',[]),'siblings':[s.get('rfilename') for s in d.get('siblings',[])]})
+          sel=repos[0]; sel_sha=next(x['sha'] for x in rows if x['repo']==sel)
+          def getsmall(repo,rev,name,out):
+              u=f'https://huggingface.co/{repo}/resolve/{rev}/{name}?download=true'
+              with urllib.request.urlopen(u,timeout=60) as r: pathlib.Path(out).write_bytes(r.read())
+          getsmall(sel,sel_sha,'adapter_config.json','meta/adapter_config.json')
+          try: getsmall(sel,sel_sha,'README.md','meta/README.md')
+          except Exception: pass
+          cfg=json.load(open('meta/adapter_config.json'))
+          payload={'schema':'R22624_C84_METADATA_AUDIT_V1','weight_bytes_requested':0,'candidates':rows,'selected':sel,'selected_revision':sel_sha,'selected_adapter_config':cfg,'selection_reason':'novel natural-language to executable Cypher graph program; synthetic graph execution verifier; CPU 135M','training_base_revision_proven':bool(cfg.get('revision'))}
+          p=pathlib.Path('meta/CANDIDATE_AUDIT.json'); p.write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          pathlib.Path('meta/CANDIDATE_AUDIT.sha256').write_text(hashlib.sha256(p.read_bytes()).hexdigest()+'  CANDIDATE_AUDIT.json\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c84-metadata
+          path: meta
+          retention-days: 1
+          compression-level: 0
