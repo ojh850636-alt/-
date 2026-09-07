@@ -1,0 +1,87 @@
+name: R22624 C84 exact source after source-zero selftest
+on:
+  push:
+    branches: [r22624-c84-cpu-audit]
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Source-zero manifest/upload schema self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f r22624/R22624_C84_PRESEAL.json || exit 31
+          python - <<'PY'
+          import json,pathlib,tempfile,hashlib
+          p=pathlib.Path('r22624/R22624_C84_PRESEAL.json')
+          d=json.loads(p.read_text())
+          assert d['schema']=='LAA_R22624_C84_PYTHON_SYNTH_PRESEAL_V1'
+          assert d['case_count']==24
+          assert d['model_output_bytes_at_seal']==0 and d['learned_weight_bytes_at_seal']==0
+          assert [sum(c['split']==s for c in d['cases']) for s in ['DISCOVERY','CONFIRMATION','OOD']]==[8,8,8]
+          # dry-run the exact relative manifest schema before any learned-weight GET
+          with tempfile.TemporaryDirectory() as td:
+              root=pathlib.Path(td); (root/'adapter').mkdir(); (root/'base').mkdir()
+              (root/'adapter'/'adapter_model.safetensors').write_bytes(b'x')
+              (root/'base'/'model.safetensors').write_bytes(b'y')
+              rows=[]
+              for q in sorted(root.rglob('*')):
+                  if q.is_file(): rows.append({'path':q.relative_to(root).as_posix(),'bytes':q.stat().st_size,'sha256':hashlib.sha256(q.read_bytes()).hexdigest()})
+              assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
+              assert any(x['path']=='base/model.safetensors' for x in rows)
+          print('PRESEAL_SHA256',hashlib.sha256(p.read_bytes()).hexdigest())
+          print('SOURCEZERO_SCHEMA_SELFTEST_PASS')
+          PY
+      - name: Download exact selected source once and manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p src/adapter src/base out
+          ADAPTER_REPO='Mhammad2023/SmolLM2-FT-BigCode-Python-Lora'
+          ADAPTER_REV=$(python - <<'PY'
+          import json,urllib.request
+          print(json.load(urllib.request.urlopen('https://huggingface.co/api/models/Mhammad2023/SmolLM2-FT-BigCode-Python-Lora'))['sha'])
+          PY
+          )
+          BASE_REPO=$(ADAPTER_REV="$ADAPTER_REV" python - <<'PY'
+          import json,urllib.request,os
+          u=f"https://huggingface.co/Mhammad2023/SmolLM2-FT-BigCode-Python-Lora/resolve/{os.environ['ADAPTER_REV']}/adapter_config.json?download=true"
+          print(json.load(urllib.request.urlopen(u))['base_model_name_or_path'])
+          PY
+          )
+          BASE_REV=$(BASE_REPO="$BASE_REPO" python - <<'PY'
+          import json,urllib.request,urllib.parse,os
+          repo=os.environ['BASE_REPO']
+          print(json.load(urllib.request.urlopen('https://huggingface.co/api/models/'+repo))['sha'])
+          PY
+          )
+          hfget(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_model.safetensors src/adapter/adapter_model.safetensors
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" adapter_config.json src/adapter/adapter_config.json
+          hfget "$ADAPTER_REPO" "$ADAPTER_REV" README.md src/adapter/README.md
+          hfget "$BASE_REPO" "$BASE_REV" model.safetensors src/base/model.safetensors
+          for f in config.json generation_config.json tokenizer.json tokenizer_config.json special_tokens_map.json merges.txt vocab.json; do
+            if curl -L --retry 4 --retry-delay 1 --fail --silent --show-error "https://huggingface.co/$BASE_REPO/resolve/$BASE_REV/$f?download=true" -o "src/base/$f"; then :; else rm -f "src/base/$f"; fi
+          done
+          cp r22624/R22624_C84_PRESEAL.json out/R22624_C84_PRESEAL.json
+          ADAPTER_REV="$ADAPTER_REV" BASE_REPO="$BASE_REPO" BASE_REV="$BASE_REV" python - <<'PY'
+          import json,hashlib,pathlib,os
+          root=pathlib.Path('src'); rows=[]
+          for p in sorted(root.rglob('*')):
+              if p.is_file(): rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':hashlib.sha256(p.read_bytes()).hexdigest()})
+          cfg=json.load(open('src/adapter/adapter_config.json'))
+          pre=pathlib.Path('out/R22624_C84_PRESEAL.json')
+          out={'schema':'R22624_C84_EXACT_SOURCE_MANIFEST_V1','adapter_repo':'Mhammad2023/SmolLM2-FT-BigCode-Python-Lora','adapter_revision':os.environ['ADAPTER_REV'],'base_repo':os.environ['BASE_REPO'],'compatibility_base_revision':os.environ['BASE_REV'],'training_base_revision_proven':bool(cfg.get('revision')),'declared_training_revision':cfg.get('revision'),'preseal_sha256':hashlib.sha256(pre.read_bytes()).hexdigest(),'files':rows}
+          assert any(x['path']=='adapter/adapter_model.safetensors' for x in rows)
+          assert any(x['path']=='base/model.safetensors' for x in rows)
+          pathlib.Path('out/SOURCE_MANIFEST.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c84-source
+          path: |
+            out
+            src
+          retention-days: 1
+          compression-level: 0
