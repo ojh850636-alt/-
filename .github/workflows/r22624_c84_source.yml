@@ -1,0 +1,138 @@
+name: R22624 C84 one-use custom-NPZ exact source
+on:
+  push:
+    branches: [r22624-c84-cpu]
+permissions:
+  contents: write
+concurrency:
+  group: r22624-c84-oneuse-source
+  cancel-in-progress: false
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Source-zero runtime and manifest self-test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet 'numpy==2.3.3'
+          python - <<'PY'
+          import numpy as np, tempfile, pathlib, json, hashlib
+          with tempfile.TemporaryDirectory() as td:
+            p=pathlib.Path(td)/'toy.npz'
+            np.savez(p, **{'0__wq__A':np.ones((8,2),np.float32),'0__wq__B':np.ones((2,8),np.float32)})
+            with np.load(p,allow_pickle=False) as z:
+              assert sorted(z.files)==['0__wq__A','0__wq__B']
+              assert z['0__wq__A'].shape==(8,2) and z['0__wq__B'].shape==(2,8)
+            root=pathlib.Path(td); rows=[]
+            for f in sorted(root.rglob('*')):
+              if f.is_file(): rows.append({'path':f.relative_to(root).as_posix(),'bytes':f.stat().st_size,'sha256':hashlib.sha256(f.read_bytes()).hexdigest()})
+            assert rows and all(not x['path'].startswith('/') for x in rows)
+          print('SOURCE_ZERO_NPZ_AND_MANIFEST_SELFTEST_PASS')
+          PY
+      - name: One-use gate then exact Adapter and Base capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          REPO='ojh850636-alt/-'
+          GATE_BRANCH='r22624-c84-gate'
+          AD='Zayed024/nanozero-countdown-lora'
+          ADREV='8ef7101c63f7f93a4599445654b1eb2425e00846'
+          AD_FILE='nanozero_countdown_lora.npz'
+          AD_BYTES='8698614'
+          AD_SHA='6daf28c1928bad540bab0f765fa706e1b96d39071caaf78d17ff0474ef316d69'
+          BASE='Qwen/Qwen2.5-0.5B-Instruct'
+          BASEREV='7ae557604adf67be50417f59c2c2f167def9a775'
+          BASE_BYTES='988097824'
+          BASE_SHA='bb5ff7e71536bbce6378f6d4bb523a77f1e9455965702d18bec33f599d5851f7'
+          api="https://api.github.com/repos/${REPO}/contents"
+          hfa(){ curl -L --retry 5 --retry-delay 2 --fail --silent --show-error "https://huggingface.co/$1/resolve/$2/$3?download=true" -o "$4"; }
+          exists(){ curl -sS -o /tmp/exist -w '%{http_code}' -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' "${api}/$1?ref=${GATE_BRANCH}"; }
+          test "$(exists C84_SOURCE_RESERVATION.json)" = 200
+          test "$(exists C84_SOURCE_ATTEMPT_STARTED.json)" = 404
+          test "$(exists C84_SOURCE_CONSUMED.json)" = 404
+          put_marker(){
+            local path="$1" content="$2"
+            payload=$(python - "$content" "$GATE_BRANCH" <<'PY'
+          import sys,json,base64
+          content=sys.argv[1].encode(); branch=sys.argv[2]
+          print(json.dumps({'message':'R22624 C84 durable '+sys.argv[1][:24],'content':base64.b64encode(content).decode(),'branch':branch}))
+          PY
+            )
+            code=$(curl -sS -o /tmp/put -w '%{http_code}' -X PUT -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' -H 'Content-Type: application/json' "${api}/${path}" -d "$payload")
+            test "$code" = 201
+          }
+          # Conservative one-attempt lease: once this exists, no rerun may issue Adapter GET.
+          attempt=$(python - <<'PY'
+          import json,datetime
+          print(json.dumps({'schema':'R22624_C84_SOURCE_ATTEMPT_V1','attempt_started':True,'adapter_get_authorized_once':True,'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()},sort_keys=True))
+          PY
+          )
+          put_marker C84_SOURCE_ATTEMPT_STARTED.json "$attempt"
+          mkdir -p src/adapter src/base out
+          # Exactly one learned Adapter body GET.
+          hfa "$AD" "$ADREV" "$AD_FILE" "src/adapter/$AD_FILE"
+          consumed=$(python - <<PY
+          import json,datetime,os
+          print(json.dumps({'schema':'R22624_C84_SOURCE_CONSUMED_V1','adapter_get_completed':True,'observed_bytes':os.path.getsize('src/adapter/$AD_FILE'),'utc':datetime.datetime.now(datetime.timezone.utc).isoformat()},sort_keys=True))
+          PY
+          )
+          put_marker C84_SOURCE_CONSUMED.json "$consumed"
+          test "$(stat -c%s src/adapter/$AD_FILE)" = "$AD_BYTES"
+          echo "$AD_SHA  src/adapter/$AD_FILE" | sha256sum -c -
+          # Config is non-weight and is needed to validate exact factor geometry before Base weight GET.
+          hfa "$BASE" "$BASEREV" config.json src/base/config.json
+          python - <<'PY'
+          import numpy as np,json,pathlib,re,math,hashlib
+          p=pathlib.Path('src/adapter/nanozero_countdown_lora.npz'); cfg=json.load(open('src/base/config.json'))
+          hidden=int(cfg['hidden_size']); layers=int(cfg['num_hidden_layers']); hd=int(cfg.get('head_dim',hidden//int(cfg['num_attention_heads']))); kv=int(cfg['num_key_value_heads'])*hd
+          expected_layers=list(range(layers)); expected_projs=['wk','wo','wq','wv']
+          with np.load(p,allow_pickle=False) as z:
+            assert len(z.files)==layers*4*2, (len(z.files),layers)
+            seen={}; ranks=[]; norms=[]; finite=nonzero=0
+            for k in z.files:
+              m=re.fullmatch(r'(\d+)__(wq|wk|wv|wo)__(A|B)',k); assert m,k
+              li=int(m.group(1)); pr=m.group(2); side=m.group(3); a=np.asarray(z[k]); seen.setdefault((li,pr),{})[side]=a
+            assert sorted({li for li,_ in seen})==expected_layers
+            assert sorted({pr for _,pr in seen})==expected_projs
+            for (li,pr),ab in sorted(seen.items()):
+              assert set(ab)=={'A','B'}
+              A=ab['A']; B=ab['B']; out=hidden if pr in ('wq','wo') else kv
+              assert A.shape==(hidden,16),(li,pr,A.shape,(hidden,16)); assert B.shape==(16,out),(li,pr,B.shape,(16,out))
+              assert np.isfinite(A).all() and np.isfinite(B).all(); finite+=1
+              assert np.any(A!=0) and np.any(B!=0); nonzero+=1
+              ra=int(np.linalg.matrix_rank(A)); rb=int(np.linalg.matrix_rank(B)); assert ra==16 and rb==16,(li,pr,ra,rb); ranks.append((ra,rb))
+              ga=A.astype(np.float64).T@A.astype(np.float64); gb=B.astype(np.float64)@B.astype(np.float64).T
+              norms.append(float(np.sqrt(max(float(np.sum(ga*gb.T)),0.0))))
+          out={'schema':'R22624_C84_STATIC_PREFLIGHT_V1','status':'PASS','layers':layers,'complete_pairs':len(seen),'arrays':layers*8,'finite_pairs':finite,'nonzero_pairs':nonzero,'actual_rank16_pairs':len(ranks),'rank_bad':0,'projections':expected_projs,'operator_fro_min':min(norms),'operator_fro_max':max(norms),'operator_fro_mean':sum(norms)/len(norms),'raw_factor_values_exported':False,'reconstructable_delta_exported':False}
+          pathlib.Path('out/C84_STATIC_PREFLIGHT.json').write_text(json.dumps(out,indent=2,sort_keys=True)+'\n')
+          print(json.dumps(out,indent=2))
+          PY
+          # Static GREEN -> exact compatibility Base body GET once.
+          hfa "$BASE" "$BASEREV" model.safetensors src/base/model.safetensors
+          test "$(stat -c%s src/base/model.safetensors)" = "$BASE_BYTES"
+          echo "$BASE_SHA  src/base/model.safetensors" | sha256sum -c -
+          for f in generation_config.json tokenizer.json tokenizer_config.json merges.txt vocab.json; do hfa "$BASE" "$BASEREV" "$f" "src/base/$f"; done
+          python - <<'PY'
+          import pathlib,hashlib,json
+          root=pathlib.Path('src'); rows=[]
+          for p in sorted(root.rglob('*')):
+            if p.is_file():
+              h=hashlib.sha256()
+              with open(p,'rb') as f:
+                for b in iter(lambda:f.read(1<<20),b''): h.update(b)
+              rows.append({'path':p.relative_to(root).as_posix(),'bytes':p.stat().st_size,'sha256':h.hexdigest()})
+          payload={'schema':'R22624_C84_EXACT_SOURCE_MANIFEST_V1','adapter_repo':'Zayed024/nanozero-countdown-lora','adapter_revision':'8ef7101c63f7f93a4599445654b1eb2425e00846','adapter_filename':'nanozero_countdown_lora.npz','adapter_sha256':'6daf28c1928bad540bab0f765fa706e1b96d39071caaf78d17ff0474ef316d69','adapter_bytes':8698614,'source_type':'CUSTOM_NPZ_LORA','compatibility_base_repo':'Qwen/Qwen2.5-0.5B-Instruct','compatibility_base_revision':'7ae557604adf67be50417f59c2c2f167def9a775','compatibility_base_sha256':'bb5ff7e71536bbce6378f6d4bb523a77f1e9455965702d18bec33f599d5851f7','compatibility_base_bytes':988097824,'exact_training_base_revision_proven':False,'hard_hold':'TRAINING_BASE_REVISION_UNPROVEN','files':rows}
+          pathlib.Path('out/C84_SOURCE_MANIFEST.json').write_text(json.dumps(payload,indent=2,sort_keys=True)+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r22624-c84-exact-source
+          path: |
+            src
+            out
+          retention-days: 1
+          compression-level: 0
