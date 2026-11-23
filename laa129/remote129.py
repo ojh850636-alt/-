@@ -33,6 +33,11 @@ def sha_file(p):
 def load_lock():
     lock=json.loads(LOCK.read_text(encoding='utf-8'))
     if sha_file(SUITE)!=lock['suite_file_sha256']:raise ValueError('SUITE_LOCK_MISMATCH')
+    code_sha=sha_file(Path(__file__))
+    if code_sha!=lock['code_sha256']:
+        amendment=json.loads((ROOT/'amendment129.json').read_text(encoding='utf-8'))
+        if amendment.get('before_sha256')!=lock['code_sha256'] or amendment.get('after_sha256')!=code_sha or amendment.get('model_forward_before_amendment')!=0 or amendment.get('source_revision')!=lock['adapter_revision']:
+            raise ValueError('UNAUTHORIZED_PREOUTPUT_AMENDMENT')
     suite=[json.loads(line) for line in SUITE.read_text(encoding='utf-8').splitlines() if line.strip()]
     if len(suite)!=224 or len({r['id'] for r in suite})!=224:raise ValueError('SUITE_INVALID')
     if lock['base_repo']!='FacebookAI/roberta-base' or lock['candidate_task']!='cola':raise ValueError('BAD_SOURCE')
@@ -63,6 +68,7 @@ def checked_sources(lock,root):
 
 PAT=re.compile(r'^(?:base_model\.model\.)?(.+?)\.lora_([AB])(?:\.default)?\.weight$')
 HEAD=re.compile(r'^(?:base_model\.model\.)?classifier\.modules_to_save\.[^.]+\.(.+)$')
+HEAD_DIRECT=re.compile(r'^(?:base_model\.model\.)?classifier\.((?:dense|out_proj)\.(?:weight|bias))$')
 
 def read_adapter(path,expected_count=72):
     pairs=collections.defaultdict(dict);head={};tensor_count=0
@@ -70,7 +76,7 @@ def read_adapter(path,expected_count=72):
         for k in f.keys():
             t=f.get_tensor(k).to(torch.float32)
             if not bool(torch.isfinite(t).all()):raise ValueError('NONFINITE_TENSOR')
-            a=PAT.fullmatch(k);b=HEAD.fullmatch(k)
+            a=PAT.fullmatch(k);b=HEAD.fullmatch(k) or HEAD_DIRECT.fullmatch(k)
             if a:pairs[a.group(1)][a.group(2)]=t
             elif b:head[b.group(1)]=t
             else:raise ValueError('UNSUPPORTED_ADAPTER_COMPONENT:'+k[:100])
