@@ -1,0 +1,63 @@
+name: LAA129 Raw-Free Causal Screen
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['.github/workflows/laa129_run.yml']
+permissions:
+  contents: read
+jobs:
+  cpu-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: CPU-only dependencies (non-executable source allowlist)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import importlib.util,subprocess,sys
+          if importlib.util.find_spec('torch') is None:
+            subprocess.check_call([sys.executable,'-m','pip','install','--disable-pip-version-check','torch==2.6.0','--index-url','https://download.pytorch.org/whl/cpu'])
+          PY
+          python -m pip install --disable-pip-version-check \
+            'transformers==4.57.1' 'peft==0.17.1' 'accelerate==1.14.0' \
+            'huggingface_hub==0.36.0' 'hf-xet>=1.1,<2' 'safetensors==0.7.0' \
+            'tokenizers==0.22.1' 'numpy==2.3.5'
+          python - <<'PY'
+          import torch,transformers,peft,huggingface_hub,safetensors
+          print('CPU_ENV',torch.__version__,transformers.__version__,peft.__version__)
+          PY
+      - name: Run locked RoBERTa two-seed model / delete raw first
+        shell: bash
+        env:
+          CUDA_VISIBLE_DEVICES: ''
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          export HF_HOME="${RUNNER_TEMP}/laa129-hf-${GITHUB_RUN_ID}"
+          export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
+          trap 'rm -rf "${HF_HOME}"' EXIT
+          python -B laa129/remote129.py
+          rm -rf "${HF_HOME}"
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          p=Path('result129.json')
+          result=json.loads(p.read_text())
+          assert result['raw_isolation_exit_absence']
+          assert not Path(os.environ['HF_HOME']).exists()
+          assert not result['raw_logits_in_delivery']
+          assert not result['raw_activations_in_delivery']
+          result['raw_hub_cache_absence']=True
+          p.write_text(json.dumps(result,sort_keys=True,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print('RAW_DELETED_BEFORE_DELIVERY',True)
+          PY
+      - name: Upload scalar and categorical receipt ONLY
+        uses: actions/upload-artifact@v4
+        with:
+          name: laa129-receipts
+          path: result129.json
+          retention-days: 1
