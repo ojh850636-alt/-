@@ -74,6 +74,7 @@ def build_model(root,cap):
     from transformers import BertConfig,BertForSequenceClassification,BertTokenizerFast
     from safetensors.torch import load_file
     from r128.adapter import parse_lora_tensors,Controller,stat_operator
+    from r128.compat import bridge_layernorm_aliases
     torch.manual_seed(224)
     torch.set_num_threads(min(4,max(1,os.cpu_count() or 2)))
     bdir=Path(root)/'base'
@@ -81,6 +82,8 @@ def build_model(root,cap):
     cfg.num_labels=2;cfg.problem_type='single_label_classification'
     model=BertForSequenceClassification(cfg)
     base_sd=load_file(cap['base_file'],device='cpu')
+    # PRE-OUTPUT AMEND128: byte-preserving legacy alias bridge (never silent).
+    base_sd,ln_aliases=bridge_layernorm_aliases(base_sd,model.state_dict().keys())
     info=model.load_state_dict(base_sd,strict=False)
     un_loaded=[x for x in info.missing_keys if not x.startswith('classifier.')]
     if un_loaded: raise RuntimeError('BASE_UNEXPECTED_MISSING:'+str(un_loaded[:4]))
@@ -93,7 +96,7 @@ def build_model(root,cap):
     factors,aux=parse_lora_tensors(sd,expected_rank=8)
     del sd
     ctrl=Controller(model,factors,aux,alpha=16)
-    return model,tok,ctrl,stat_operator(factors,alpha=16),len(factors)
+    return model,tok,ctrl,stat_operator(factors,alpha=16),len(factors),len(ln_aliases)
 
 def exact_one_sided_reverse(old,new,y):
     from r128.logic import paired
@@ -103,7 +106,7 @@ def run_cpu(isolate,source,suite,policy):
     import torch
     from r128.adapter import Controller,selection
     from r128.logic import paired,paired_bootstrap,gate,digest
-    model,tok,ctrl,site_stats,nsites=build_model(isolate,source)
+    model,tok,ctrl,site_stats,nsites,norm_aliases=build_model(isolate,source)
     if nsites<30: raise RuntimeError('LOW_OPERATOR_SITE_COUNT')
     y=[0 if c['expected_label']=='ENTAILS' else 1 for c in suite]
     splits=[c['split'] for c in suite]
@@ -200,6 +203,7 @@ def run_cpu(isolate,source,suite,policy):
               'conditions':conditions,'by_split':bysplit,'gates':gates,
               'dose':dose_results,'broad_site_screen':diagnostic,'static_by_family':site_bands,
               'aux_trained_head_tensor_count':len(ctrl.aux),'active_operator_sites':len(ctrl.factors),
+              'legacy_layernorm_alias_count':norm_aliases,
               'claim_boundary':{'paired_behavior_e2_eligible':True,'causal_e3_e4_e5_supported':False,
                 'algorithm_transfer':False,'trained_student':False,'lucia_promotion':False,
                 'evidence_not_independent':'ALL_240_FROM_R127_AUTHOR_GENERATOR',
