@@ -1,0 +1,54 @@
+name: LAA128 One Use RTE CPU Evidence
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - '.github/workflows/laa128.yml'
+      - 'r128/**'
+      - 'suite128.jsonl'
+      - 'data/POLICY128.json'
+permissions:
+  contents: read
+jobs:
+  rte-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pinned CPU-only engine
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          python -m pip install --disable-pip-version-check 'transformers==4.57.1' 'huggingface-hub==0.36.0' 'safetensors==0.7.0' 'tokenizers==0.22.1' 'numpy==2.3.5'
+      - name: Verify precommitted local tests and input hashes
+        shell: bash
+        run: |
+          export PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES=''
+          python -B -m unittest discover -s tests -p 'test*128.py' -q
+          python -B - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          s=json.loads(Path('data/PRESEAL128.json').read_text())
+          for p,want in s['files'].items():
+              got=hashlib.sha256(Path(p).read_bytes()).hexdigest()
+              if got!=want:raise ValueError('SOURCE_SEAL_MISMATCH:'+p)
+          assert hashlib.sha256(Path('suite128.jsonl').read_bytes()).hexdigest()==s['suite_sha256']
+          assert s['model_outputs_at_seal']==0 and s['new_binary_bytes_at_seal']==0
+          print('SOURCE_AND_SUITE_SEAL_PASS')
+          PY
+      - name: Capture pinned RTE and evaluate paired CPU conditions
+        shell: bash
+        run: |
+          export PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES='' TOKENIZERS_PARALLELISM=false HF_HUB_DISABLE_TELEMETRY=1
+          python -B -m r128.worker --suite suite128.jsonl --policy data/POLICY128.json --out out128
+      - name: Publish only aggregated raw-free JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LAA128-AGGREGATE-ONLY
+          path: out128/*.json
+          if-no-files-found: warn
+          retention-days: 1
