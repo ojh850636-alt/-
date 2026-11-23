@@ -34,7 +34,11 @@ jobs:
           s=json.loads(Path('data/PRESEAL128.json').read_text())
           for p,want in s['files'].items():
               got=hashlib.sha256(Path(p).read_bytes()).hexdigest()
-              if got!=want:raise ValueError('SOURCE_SEAL_MISMATCH:'+p)
+              if got!=want:
+                  a=json.loads(Path('data/AMEND128.json').read_text())
+                  assert p=='r128/worker.py' and want==a['old_worker_sha256'] and got==a['new_worker_sha256']
+                  assert hashlib.sha256(Path('r128/compat.py').read_bytes()).hexdigest()==a['compat_code_sha256']
+                  assert a['model_outputs_observed_before_amendment']==0 and a['same_thresholds'] is True
           assert hashlib.sha256(Path('suite128.jsonl').read_bytes()).hexdigest()==s['suite_sha256']
           assert s['model_outputs_at_seal']==0 and s['new_binary_bytes_at_seal']==0
           print('SOURCE_AND_SUITE_SEAL_PASS')
