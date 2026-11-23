@@ -1,0 +1,67 @@
+{
+  "adapter_repo": "october25kim/lora-merge-prereg-roberta-base",
+  "adapter_revision": "8896fca8a657e47d4d144853f0123aff77292fd4",
+  "base_repo": "FacebookAI/roberta-base",
+  "base_revision": "e2da8e2f811d1448a5b465c236feacd80ffbac7b",
+  "base_sha256": "5bde1d28afb363d0103324efeb5afc8b2b397fe5e04beabb9b1ef355255ade81",
+  "base_size": 498818054,
+  "causal_exploration_gate": "if abs(FULL-HEAD_ONLY)>=0.08 in confirmation/ood/contrast for a seed; 12 layer + 5 projection + 3 retain-only + 9 matched broad random",
+  "causal_scope_cap": "EXPLORATORY_E3_ONLY; no E4 without path patch, Holm, minimality, independent worker",
+  "explicit_user_authority": "2026-11-24 user asks continuing LAA and independent tests without local GPU",
+  "external_training_model_algorithm_proven": false,
+  "frozen_at": "before first R131 external model forward",
+  "generator_sha256": "b86abec0e002e220030db5c2628c88ebde148df8a3db1de257f020bcca3169e7",
+  "ingress_policy": "One-use TREC source, safetensors-only base/adapter no trust_remote_code; delete cache and weights before JSON export",
+  "label_names": [
+    "ABBR",
+    "ENTY",
+    "DESC",
+    "HUM",
+    "LOC",
+    "NUM"
+  ],
+  "label_ontology": "CogComp/trec class label definition train_meta coarse_label; labels 0 ABBR 1 ENTY 2 DESC 3 HUM 4 LOC 5 NUM",
+  "model_output_seen_before_seal": 0,
+  "oracle_sha256": "5752ed5ca119d27b2eaaaa7fbe3758a1bd58df0c6a93fc02a978e98d3550b0dd",
+  "parent_zip_sha256": "1979931ef323378af0fd49aa4240301c7a5dcb2ed73f98005b3aead9c42ada7d",
+  "positive_promotion_allowed": false,
+  "precommitted_behavior_gate": {
+    "OOS_high_confidence_record": true,
+    "anti_shortcut_contrast_pair": true,
+    "discovery_not_promotion": true,
+    "required": [
+      "both_seeds_full_minus_head_positive_confirmation",
+      "both_seeds_full_minus_head_positive_generator_ood",
+      "both_seeds_full_beats_shuffled_confirmation",
+      "both_seeds_full_beats_random_confirmation"
+    ]
+  },
+  "project": "LUCIA_ADAPTER_ARCHAEOLOGY",
+  "remote_code_sha256": "57835c85fab43d1ee4148cc0611aa705374b37e9746ebbcbd0f7118357eaa805",
+  "schema": "LAA_R131_PREOUTPUT_LOCK_V1",
+  "scientific_question": "Does TREC LoRA, holding the trained head constant, improve scientific question answer-type selection across six exact labels and held-out renderer under anti-shortcut contrasts; which layers and projections localize the effect?",
+  "seed_sources": {
+    "0": {
+      "sha256": "cb26dc66b404e7fa029fb7fe7f52aecc11794e67941de9c4f2ae365514a62f4d",
+      "size": 7710104,
+      "subfolder": "trec/seed0"
+    },
+    "1": {
+      "sha256": "549a27712f7417d8bb39b5f4f6ed2ac6f65270434533b9917e9839122fdd0545",
+      "size": 7710104,
+      "subfolder": "trec/seed1"
+    }
+  },
+  "source_metadata_provenance": "R129 metadata-only, 2026-11-24 pinned model card/official dataset",
+  "source_origin_independence": "ONE_AUTHOR_MULTI_TEMPLATE; NEVER claim 480 i.i.d trials",
+  "source_scope": "trec/seed0+trec/seed1",
+  "splits": {
+    "CONFIRMATION": 144,
+    "CONTRAST": 96,
+    "DISCOVERY": 96,
+    "GENERATOR_OOD": 96,
+    "NEGATIVE": 48
+  },
+  "suite_sha256": "6ff346b470a0b1af9f8c81eccf98b964f50798281b0358e197fe987648038408",
+  "two_renderers_independent_origins": false
+}
