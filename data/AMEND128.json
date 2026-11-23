@@ -1,0 +1,26 @@
+{
+  "changed_reason": "Pinned BERT source has old LayerNorm gamma/beta names, torch 2.5.1 BertModel expects weight/bias. Runtime-only rename, same tensor bytes.",
+  "claim_boundaries_unchanged": true,
+  "compat_code_sha256": "c77cc4403fb3197d01d97e1682bea5de3d35327137f75a535b4efa1c6deb1fe7",
+  "first_attempt": {
+    "GitHub_run_id": 45165067189,
+    "error": "BASE_UNEXPECTED_MISSING_LEGACY_LAYERNORM_KEYS",
+    "phase": "MODEL_BEHAVIOR",
+    "raw_temp_deleted_self_reported": true,
+    "source_bytes_retrieved": true,
+    "status": "HOLD_NO_CLAIM"
+  },
+  "model_outputs_observed_before_amendment": 0,
+  "new_test": "tests/test_compat128.py",
+  "new_worker_sha256": "c4ee7b93a5394e19a7ea9aad82ed5d877916aeec4613a56da6cc87914352d7b9",
+  "no_posthoc_gate_edit": true,
+  "old_worker_sha256": "2b6c3434b23fd8af9930552906b133ca0e945e246a2caa11579a27e4c71a1394",
+  "parent_preseal_sha256": "082408c430fb8b238c6be0c84e9a7238679a79d25a120164d3fd8c59276cfdf6",
+  "public_source_reacquire_attempts": 2,
+  "same_scientific_question": true,
+  "same_source_sha": true,
+  "same_suite": true,
+  "same_thresholds": true,
+  "schema": "LAA128_PRE_OUTPUT_COMPATIBILITY_AMENDMENT_1",
+  "scientific_sample_count": 1
+}
