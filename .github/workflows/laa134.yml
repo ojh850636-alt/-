@@ -1,0 +1,56 @@
+name: LAA134 MRPC Physics Equivalence CPU Forensics
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths:
+      - .github/workflows/laa134.yml
+      - laa134/**
+permissions:
+  contents: read
+jobs:
+  physics-equivalence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      CUDA_VISIBLE_DEVICES: ''
+      TOKENIZERS_PARALLELISM: 'false'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU and pinned serialization stack
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check 'numpy==2.3.5' 'safetensors==0.7.0' 'huggingface-hub==0.36.0' 'transformers==4.57.1' 'peft==0.17.1' 'accelerate==1.14.0' 'tokenizers==0.22.1' 'hf-xet>=1.1,<2'
+          python - <<'PY'
+          import torch,transformers,peft
+          assert not torch.cuda.is_available()
+          print('R134_CPU_RUNTIME',torch.__version__,transformers.__version__,peft.__version__)
+          PY
+      - name: Frozen two-seed raw-free MRPC experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          export HF_HOME="${RUNNER_TEMP}/laa134-src-${GITHUB_RUN_ID}"
+          export HUGGINGFACE_HUB_CACHE="${HF_HOME}/hub"
+          trap 'rm -rf "${HF_HOME}"' EXIT
+          python -B laa134/remote134.py
+          rm -rf "${HF_HOME}"
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          p=Path('result134.json');v=json.loads(p.read_text('utf8'))
+          assert v['neural_forward_executed'] and v['raw_isolation_exit_absence']
+          assert not Path(os.environ['HF_HOME']).exists()
+          assert len(v['predictions'])>=6400
+          assert all(not v[x] for x in ('raw_logits_exported','raw_activations_exported','model_weights_exported','supported_e4','supported_e5','algorithm','student','lucia_import'))
+          print('RAW_FREE_RECEIPT_OK',len(v['predictions']))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laa134-rawfree
+          path: result134.json
+          retention-days: 1
+          if-no-files-found: error
