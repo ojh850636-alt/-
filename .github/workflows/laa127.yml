@@ -1,0 +1,120 @@
+name: LAA127 Scalar-Only Source Audit
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['.github/workflows/laa127.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  static-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install frozen readers
+        run: python -m pip install 'numpy==2.3.5' 'safetensors==0.7.0' 'huggingface-hub==0.36.0' 'hf-xet>=1.1,<2'
+      - name: Exact source and scalar-only operator audit
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os,re,json,hashlib,tempfile,math
+          from pathlib import Path
+          import numpy as np
+          from huggingface_hub import HfApi,hf_hub_download
+          from safetensors import safe_open
+          REPO='october25kim/lora-merge-prereg-bert-base-uncased'
+          SOURCES={'scitail/seed0':'b928086bfba9a328efdde0a862f9eb2141b4b521b7ab651e25560408af08fadb','scitail/seed1':'cd5280508c0f660c33813e6915c98be4d0a94b89f7ee697865334bea5f565e57'}
+          PRESEAL='6f7dadde0357d5738b8e2698391d679ee3363d2bb8df6f3111d2d7da739f6bc6'
+          SUITE='746aab149b2844da731bec52db8101b1d0277f7e6be918cbe86cf4e7f3ff0e31'
+          def sha(path):
+            h=hashlib.sha256()
+            with open(path,'rb') as f:
+              for b in iter(lambda:f.read(1024*1024),b''): h.update(b)
+            return h.hexdigest()
+          def stat(pair,scale):
+            A,B=pair['A'],pair['B'];x=float(np.sum((B.T@B)*(A@A.T).T))*scale*scale
+            return max(0.,x)
+          def dot(p,q,s,t):
+            A,B=p['A'],p['B'];C,D=q['A'],q['B']
+            if A.shape[1]!=C.shape[1] or B.shape[0]!=D.shape[0]:raise ValueError('OPERATOR_SHAPE_DRIFT')
+            return float(np.sum((B.T@D)*(A@C.T)))*s*t
+          def read(file,config):
+            c=json.loads(Path(config).read_text())
+            if c.get('peft_type')!='LORA' or c.get('use_dora') or c.get('use_rslora') or c.get('bias','none')!='none' or c.get('rank_pattern') or c.get('alpha_pattern'):
+              raise ValueError('UNSUPPORTED_VARIANT')
+            r=int(c['r']);alpha=float(c['lora_alpha']);s=alpha/r
+            p={};aux=[];rx=re.compile(r'^(.*)\.lora_([AB])(?:\.[^.]+)?\.weight$')
+            with safe_open(str(file),framework='np',device='cpu') as t:
+              for k in t.keys():
+                match=rx.fullmatch(k)
+                v=np.asarray(t.get_tensor(k))
+                if not np.all(np.isfinite(v)):raise ValueError('NONFINITE')
+                if match:
+                  name,part=match.groups()
+                  if part in p.setdefault(name,{}):raise ValueError('DUPLICATE')
+                  p[name][part]=np.asarray(v,dtype=np.float64)
+                else:
+                  if '.lora_embedding_' in k: raise ValueError('UNSUPPORTED_EMBEDDING')
+                  aux.append({'shape':list(v.shape),'elements':int(v.size)})
+            if not p or any(set(x)!={'A','B'} for x in p.values()):raise ValueError('UNPAIRED')
+            if any(x['A'].ndim!=2 or x['B'].ndim!=2 or x['A'].shape[0]!=x['B'].shape[1] for x in p.values()):raise ValueError('BAD_RANK')
+            return p,s,c,aux
+          info=HfApi().model_info(REPO,revision='main',files_metadata=True)
+          if not re.fullmatch(r'[0-9a-f]{40}',info.sha):raise ValueError('NO_FULL_REVISION')
+          out=Path('r127_result');out.mkdir(exist_ok=True)
+          sources=[];parts=[]
+          with tempfile.TemporaryDirectory(prefix='aa127-raw-') as raw:
+            os.environ['HF_HOME']=str(Path(raw)/'hf_cache')
+            for sub,want in SOURCES.items():
+              args=dict(repo_id=REPO,revision=info.sha,subfolder=sub,local_dir=raw)
+              f=Path(hf_hub_download(filename='adapter_model.safetensors',**args))
+              c=Path(hf_hub_download(filename='adapter_config.json',**args))
+              m=Path(hf_hub_download(filename='train_meta.json',**args))
+              if f.stat().st_size>64000000 or sha(f)!=want:raise ValueError('SOURCE_HASH_OR_SIZE')
+              pairs,scale,config,aux=read(f,c)
+              parts.append((pairs,scale,config,aux))
+              sources.append({'seed_folder':sub,'weight_sha256':sha(f),'weight_bytes':f.stat().st_size,
+                              'config_sha256':sha(c),'train_meta_sha256':sha(m),
+                              'config_base':config.get('base_model_name_or_path'),
+                              'revision_field':config.get('revision'),
+                              'rank':config['r'],'alpha':config['lora_alpha'],
+                              'target_modules':config.get('target_modules'),
+                              'modules_to_save':config.get('modules_to_save'),
+                              'auxiliary_tensor_count':len(aux),
+                              'auxiliary_elements':sum(x['elements'] for x in aux)})
+            a,s,ca,ax=parts[0];b,t,cb,bx=parts[1]
+            if set(a)!=set(b):raise ValueError('SITE_SET_DRIFT')
+            rows=[]
+            for key in sorted(a):
+              x=stat(a[key],s);y=stat(b[key],t);xy=dot(a[key],b[key],s,t)
+              cosine=xy/math.sqrt(x*y) if x>1e-16 and y>1e-16 else None
+              if cosine is not None and abs(cosine)>1+1e-6:raise ValueError('INVALID_COSINE')
+              rows.append({'site':key,'seed0_sq':round(x,8),'seed1_sq':round(y,8),
+                           'operator_cosine':round(max(-1,min(1,cosine)),7) if cosine is not None else None,
+                           'zero_seed0':x<=1e-16,'zero_seed1':y<=1e-16})
+            r={'schema':'LAA127_SCALAR_ONLY_V1','source':'HUGGINGFACE_EXACT_ONE_PASS',
+                'repo':REPO,'adapter_revision_exact':info.sha,'preseal_sha256':PRESEAL,'suite_sha256':SUITE,
+                'base_card_reference_revision':'86b5e0934494bd15c9632b12f734a8a67f723594',
+                'training_time_base_revision_proven':False,'license_card_only':'MIT',
+                'source_receipts':sources,'sites':rows,'site_count':len(rows),
+                'zero_seed0':sum(x['zero_seed0'] for x in rows),
+                'zero_seed1':sum(x['zero_seed1'] for x in rows),
+                'neural_forward_count':0,'causal_intervention_count':0,
+                'evidence_grade':'E1_STATIC_NOT_CAUSAL','student_count':0,'promoted_count':0}
+            (out/'STATIC127.json').write_text(json.dumps(r,indent=2,sort_keys=True)+'\n')
+          # No raw tensors survive the TemporaryDirectory. Only scalar files uploaded.
+          (out/'CLEANUP127.json').write_text(json.dumps({'temporary_source_deleted':True,'raw_weight_uploaded':False,
+            'static_report_sha256':sha(out/'STATIC127.json'),'original_source_preserved_in_repo':False},indent=2)+'\n')
+          print('AA127_DONE',len(rows),'zero0',r['zero_seed0'],'zero1',r['zero_seed1'])
+          PY
+      - name: Upload scalar receipts only
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aa127-scalars
+          path: r127_result/
+          retention-days: 1
+          if-no-files-found: error
