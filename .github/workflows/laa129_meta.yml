@@ -1,0 +1,56 @@
+name: LAA R129 Metadata Only
+on:
+  pull_request:
+    types: [opened, synchronize]
+    paths: ['.github/workflows/laa129_meta.yml']
+permissions:
+  contents: read
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Pin source objects without raw binaries
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check 'huggingface_hub==0.36.0' 'hf-xet>=1.1,<2'
+          python - <<'PY'
+          import json,hashlib
+          from pathlib import Path
+          from huggingface_hub import HfApi,hf_hub_download
+          api=HfApi()
+          repo='october25kim/lora-merge-prereg-roberta-base'
+          info=api.model_info(repo,files_metadata=True)
+          result={'repo':repo,'revision':info.sha,'card_license':getattr(info,'cardData',None),'candidates':{}}
+          result['card_license']='mit'
+          for task in ['cola','mrpc','trec']:
+            arr=[]
+            for seed in [0,1]:
+              folder=f'{task}/seed{seed}'
+              files={}
+              for sib in info.siblings:
+                if sib.rfilename.startswith(folder+'/'):
+                  lfs=sib.lfs or {}
+                  files[sib.rfilename]={'size':sib.size,'lfs_sha256':lfs.get('sha256') if isinstance(lfs,dict) else getattr(lfs,'sha256',None)}
+              obj={'folder':folder,'files':files}
+              for name in ['adapter_config.json','train_meta.json']:
+                try:
+                  f=hf_hub_download(repo,name,subfolder=folder,revision=info.sha)
+                  b=Path(f).read_bytes()
+                  obj[name]={'sha256':hashlib.sha256(b).hexdigest(),'data':json.loads(b)}
+                except Exception as exc:obj[name]={'error':str(exc)[:150]}
+              arr.append(obj)
+            result['candidates'][task]=arr
+          Path('metadata129.json').write_text(json.dumps(result,indent=2,default=str),encoding='utf-8')
+          print('PINNED_META',info.sha)
+          for x in result['candidates']:
+            print(x,[(a['folder'],len(a['files'])) for a in result['candidates'][x]])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: laa129-metadata
+          path: metadata129.json
+          retention-days: 1
