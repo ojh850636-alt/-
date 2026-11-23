@@ -1,0 +1,64 @@
+{
+  "base_sha256": "68d45e234eb4a928074dfd868cead0219ab85354cc53d20e772753c6bb9169d3",
+  "behavior_gate": {
+    "max_p": 0.01,
+    "min_control_margin": 0.02,
+    "min_delta": 0.05,
+    "split_checks": [
+      "CONFIRMATION",
+      "FAMILY_OOD"
+    ]
+  },
+  "binary_downloads_at_seal": 0,
+  "case_suite_sha256": "746aab149b2844da731bec52db8101b1d0277f7e6be918cbe86cf4e7f3ff0e31",
+  "controls": [
+    "BASE",
+    "HEAD_ONLY",
+    "LORA_ONLY",
+    "FULL",
+    "RANDOM_SAME_HEAD",
+    "SHUFFLED_SAME_HEAD"
+  ],
+  "dose": [
+    0.0,
+    0.25,
+    0.5,
+    1.0,
+    1.5
+  ],
+  "failure_gate": {
+    "max_p": 0.01,
+    "min_drop": 0.05
+  },
+  "intervention": {
+    "dataset_split": [
+      "DISCOVERY",
+      "CONFIRMATION"
+    ],
+    "evidence_cap": "E2_DIRECTIONAL_SCREEN_ONLY_NOT_E4",
+    "groups": [
+      "ALL",
+      "ATTENTION",
+      "MLP",
+      "POOLER",
+      "LAYER_BAND_EARLY",
+      "LAYER_BAND_MIDDLE",
+      "LAYER_BAND_LATE"
+    ],
+    "holm_required_for_E4": true,
+    "independent_worker_required_for_E5": true
+  },
+  "label_map": {
+    "0": "ENTAILS",
+    "1": "NOT_ENTAILS"
+  },
+  "legal_scope": "NO_RAW_WEIGHTS_NO_TOKENIZER_NO_MODEL_LOGITS_NO_ACTIVATIONS_IN_DELIVERY",
+  "model_outputs_at_seal": 0,
+  "no_promotion_without_independent_causal_and_safety": true,
+  "preoutput": true,
+  "round": "R128",
+  "safety_gate": "COLLATERAL_AND_TRUE_NATURAL_OOD_NOT_OBSERVED_HOLD",
+  "schema": "LAA128_BEHAVIOR_AND_INTERVENTION_PRECOMMIT_V1",
+  "science_question": "RTE_SEQUENCE_CLASSIFIER_TRANSFER_TO_PRECOMMITTED_SCIENTIFIC_ENTAILMENT_FIRST_SEEN_FAMILIES; HEAD_VS_LORA_SEPARATION",
+  "source_binding": "4f9b3e87b79196ce31a0fc192c5e477794481cafb6513d50bf512a1bd6ca00d2"
+}
