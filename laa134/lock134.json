@@ -1,0 +1,60 @@
+{
+  "adaptation_seed_count": 2,
+  "adapters": {
+    "0": {
+      "config_sha256": "531dc7c54820022b82fe420b26cbc297cebf33196487efd6b232993c0c99adef",
+      "meta_sha256": "28c634345c0d4b574908daa00b30f6648b121d973c786c382ef5db4afa129fca",
+      "sha256": "b0c57ed06d19419e2dbf8e2a456a67fa24c0222483589015d55c608901dfd813",
+      "size": 7697800
+    },
+    "1": {
+      "config_sha256": "6859eb6749e5e8cfb209c20115ef02e660f66a34eaecfb9f380102f8c6d35c61",
+      "meta_sha256": "5133b66db1173b30544f0d40cae3a694272486a1c040aa4c5dd353d7743a0f4a",
+      "sha256": "d2d8657aa734c587c2f0a944d39009fe5aa4c752aad2077407e66dd1ab13e63c",
+      "size": 7697800
+    }
+  },
+  "admission_positive": {
+    "beat_random_and_shuffled_by": 0.08,
+    "max_negative_high_confidence_fraction": 0.25,
+    "min_gain_vs_HEAD_ONLY_confirmation": 0.12,
+    "min_gain_vs_HEAD_ONLY_law_ood": 0.08,
+    "minimum_two_independent_external_authors": 2,
+    "requires_training_time_base_pin": true
+  },
+  "allow_post_output_change_threshold": false,
+  "base_repo": "FacebookAI/roberta-base",
+  "base_rev": "e2da8e2f811d1448a5b465c236feacd80ffbac7b",
+  "base_sha256": "5bde1d28afb363d0103324efeb5afc8b2b397fe5e04beabb9b1ef355255ade81",
+  "base_size": 498818054,
+  "claim_ceiling": "E3_EXPLORATORY_SCOPED_SINGLE_AUTHOR",
+  "evidence_strata": [
+    "DISCOVERY",
+    "CONFIRMATION",
+    "LAW_OOD",
+    "STYLE_OOD",
+    "CONTRAST",
+    "NEGATIVE"
+  ],
+  "external_runtime_isolation": "GitHub Actions CPU only; no Git commit of weights",
+  "fine_entry_precommitted": "abs(FULL-HEAD_ONLY Confirmation)>=0.12 AND abs(FULL-max(RANDOM,SHUFFLED))>=0.08",
+  "fine_intervention": "broad/layer/projection + random site; no positive E4/E5 without independent validation",
+  "frozen_tests_and_source_contract": true,
+  "labeled_count": 288,
+  "negative_count": 32,
+  "no_saved_source_weights_or_raw_activations": true,
+  "pre_output_model_forward_count": 0,
+  "r132_parent_gap_known": "R132 executable archive missing; README/HISTORY recovered; do not fabricate",
+  "raw_base_adapter_present_at_seal": false,
+  "remote_code_sha256": "e5b9a91caa437ea48827adff121f91bad3cae249563ba94032bab6bf0d508a81",
+  "round": "R134",
+  "sample_count": 320,
+  "schema": "LAA134_PREOUTPUT_SCIENCE_LOCK_V1",
+  "signed_failure_lane_precommitted": true,
+  "source_license_declared": "MIT",
+  "source_repo": "october25kim/lora-merge-prereg-roberta-base",
+  "source_rev": "8896fca8a657e47d4d144853f0123aff77292fd4",
+  "source_shared_producer_not_independent": true,
+  "suite_sha256": "1024c7c5948be6fa56829d42120fbe91ad820bbec6a678935b9c35aa0100b386",
+  "task": "MODEL_INDEPENDENT_PHYSICS_STATEMENT_EQUIVALENCE_VS_MRPC"
+}
