@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           export PYTHONDONTWRITEBYTECODE=1 CUDA_VISIBLE_DEVICES=''
-          python -B -m unittest discover -s tests -p 'test*128.py' -q
+          python -B -m unittest tests.test_logic128 tests.test_operator128 tests.test_compat128 -q
           python -B - <<'PY'
           import json,hashlib
           from pathlib import Path
