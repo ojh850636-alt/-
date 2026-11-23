@@ -1,0 +1,33 @@
+{
+  "amendment": "PRE_MODEL_OUTPUT_HF_CACHE_ROOT_TIGHTENING_1",
+  "base_sha256": "68d45e234eb4a928074dfd868cead0219ab85354cc53d20e772753c6bb9169d3",
+  "causal_claim_from_group_screen": "FORBIDDEN",
+  "files": {
+    "data/POLICY128.json": "30847d2426f0699cfbffc5e440d7585180fd867ea4b605aacc43e59053c59514",
+    "r128/adapter.py": "73c744baca4db3fa245b14e0bfb25a8424aac839a58fd0e9785d5957b41548cb",
+    "r128/logic.py": "d3ea58d61bd03723231916c87f992b421f60bd47290d0fd977610855d326ad80",
+    "r128/worker.py": "2b6c3434b23fd8af9930552906b133ca0e945e246a2caa11579a27e4c71a1394"
+  },
+  "gate_file": "data/POLICY128.json",
+  "model_outputs_at_seal": 0,
+  "new_binary_bytes_at_seal": 0,
+  "only_python_cpu": true,
+  "parent_sha256": "c30057ddc541ada40538ebf53e59dd83de7cdf1ba169c015dbefab9c583832e0",
+  "planned_conditions": [
+    "BASE",
+    "HEAD_ONLY",
+    "LORA_ONLY",
+    "FULL",
+    "RANDOM_SAME_HEAD",
+    "SHUFFLED_SAME_HEAD"
+  ],
+  "prevent_retroactive_threshold_changes": true,
+  "public_outputs_no_weights": true,
+  "round": "R128",
+  "schema": "LAA128_OUTPUT_INDEPENDENT_PRESEAL",
+  "scientific_question": "Can trained RTE LoRA, isolated from its saved classifier head, transfer physics entailment to first-seen law families?",
+  "source_proof": "public exact model card and pinned sha; not training-time byte proof",
+  "source_sha256": "4f9b3e87b79196ce31a0fc192c5e477794481cafb6513d50bf512a1bd6ca00d2",
+  "suite_sha256": "746aab149b2844da731bec52db8101b1d0277f7e6be918cbe86cf4e7f3ff0e31",
+  "utc_created_claim": "BEFORE_PUBLIC_RTE_ADAPTER_BINARY_CAPTURE_AND_BEFORE_FORWARD"
+}
