@@ -1,0 +1,22 @@
+{
+  "change": "Only remote unittest subset; parent P127.zip not present in public temporary PR but final ZIP retains P127.zip and full parent tests",
+  "claim_increment_to_date": 0,
+  "first_amend_sha256": "94f4412345178a46080ad8310dfd88a9274514ac9ed4b21795b769b9b0836a1b",
+  "first_preseal_sha256": "082408c430fb8b238c6be0c84e9a7238679a79d25a120164d3fd8c59276cfdf6",
+  "first_scientific_source_download": "run 45165067189 actual source SHA verified, zero neural outputs; root name compatibility HOLD",
+  "model_outputs_at_change": 0,
+  "new_binary_fetch_to_date": 1,
+  "new_workflow_behavior": "execute tests.test_logic128, tests.test_operator128, tests.test_compat128; exact preseal and amendment hash checks remain",
+  "old_workflow_behavior": "discover all *128.py tests including local-only parent archive test; remote lacks P127.zip",
+  "schema": "LAA128_PRE_OUTPUT_EXECUTION_WRAPPER_AMENDMENT_2",
+  "science_suite_and_policy_unchanged": true,
+  "second_attempt": "run 45165964740 failed unit import before source fetch; zero binary and zero neural outputs",
+  "second_attempt_new_binary_fetch": 0,
+  "source_files_unchanged": [
+    "r128/worker.py",
+    "r128/adapter.py",
+    "r128/logic.py",
+    "r128/compat.py"
+  ],
+  "workflow_sha256": "c7186532966118f7b193773edf20fb15272edd7cf23545f8c4b0c524fa3d691b"
+}
