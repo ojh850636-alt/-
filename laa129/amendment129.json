@@ -1,0 +1,15 @@
+{
+  "after_sha256": "f820b5a8dcd95e0cbf5e89b4976b545686ab6c9d932ffe89173b7cf722463157",
+  "before_sha256": "a322169039a8a5d206d5cd1bc4b4284c0b5d2b261766c470d287ee525fee8c70",
+  "changes_to_model_weights": false,
+  "changes_to_science_suite": false,
+  "changes_to_threshold": false,
+  "initial_failure": "UNSUPPORTED_ADAPTER_COMPONENT:base_model.model.classifier.dense.bias",
+  "model_forward_before_amendment": 0,
+  "original_source_ingress_attempt_run_id": 45232102782,
+  "reason": "PEFT modules_to_save classifier weights serialized with direct classifier.dense.* / classifier.out_proj.* keys; preserve same learned head without renaming raw source",
+  "schema": "LAA129_PREOUTPUT_COMPAT_AMENDMENT_V1",
+  "scope": "ONE_REGEX_ALLOWLIST_FIX_ONLY",
+  "source_revision": "8896fca8a657e47d4d144853f0123aff77292fd4",
+  "status": "BEFORE_MODEL_OUTPUT_COMPATIBILITY_AMENDMENT_NO_SCIENTIFIC_RESULT"
+}
