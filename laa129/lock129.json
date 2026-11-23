@@ -1,0 +1,60 @@
+{
+  "adapter_revision": "8896fca8a657e47d4d144853f0123aff77292fd4",
+  "algorithm_student_promotion_allowed": false,
+  "base_repo": "FacebookAI/roberta-base",
+  "base_revision": "e2da8e2f811d1448a5b465c236feacd80ffbac7b",
+  "base_sha256": "5bde1d28afb363d0103324efeb5afc8b2b397fe5e04beabb9b1ef355255ade81",
+  "base_size": 498818054,
+  "behavior_positive_if": "both seeds positive conditional LoRA on CONFIRMATION and OOD, McNemar one-sided p<0.05 each, plus FULL better than SHUFFLED and RANDOM on both held-outs",
+  "candidate_task": "cola",
+  "causal_confirmation_allowed": false,
+  "causal_if_condition": "either split abs(FULL-HEAD_ONLY)>=0.10 (exploratory; not E4)",
+  "claimed_training_time_base_provenance": "train_meta producer claim, not independently reconstructed",
+  "code_sha256": "a322169039a8a5d206d5cd1bc4b4284c0b5d2b261766c470d287ee525fee8c70",
+  "condition_order": [
+    "BASE",
+    "HEAD_ONLY",
+    "LORA_ONLY",
+    "FULL",
+    "SHUFFLED",
+    "RANDOM",
+    "HALF",
+    "HIGH"
+  ],
+  "discovery_data_must_not_be_promoted": true,
+  "independent_worker_replay_required": true,
+  "new_external_causal_claim": 0,
+  "no_adjustment_after_output": true,
+  "positive_admission_allowed": false,
+  "project": "LUCIA_ADAPTER_ARCHAEOLOGY",
+  "repo": "october25kim/lora-merge-prereg-roberta-base",
+  "schema": "LAA129_PREOUTPUT_LOCK_V1",
+  "seed_sources": {
+    "0": {
+      "config_sha256": "92f8c16b159e55ee3e01f593c7a2262fee64892a80cda4841a8b9fe389a57755",
+      "sha256": "7d235f630a78d9f9008db6587715c99f5ac455564b93d553617bfdbb4ac528a5",
+      "size": 7697800,
+      "train_meta_sha256": "1ae7b516b9ed7e2570c58e1417c4ea5676f4684e5aaec4204ad672d5b5df2b5d"
+    },
+    "1": {
+      "config_sha256": "ea00a3ee290cc96ece03b6c7008a9630a0afa1643c562fd6a31c0eb4a7d1a9cc",
+      "sha256": "f49c66ab968421c1f6fe4e02119a991ff146b77b2d46aa6bc9eee31ed48746ad",
+      "size": 7697800,
+      "train_meta_sha256": "e0adec7beb304c0c1cca0ac85812270a0ad1429c766a5e1d3f58e6692fc014d9"
+    }
+  },
+  "seeds": [
+    0,
+    1
+  ],
+  "source_ingress_policy": "exact safe files only, two adapters one base, temporary isolated directory, delete before artifact export",
+  "splits": {
+    "CONFIRMATION": 64,
+    "DISCOVERY": 64,
+    "NEGATION_CHALLENGE": 32,
+    "OOD_FAMILY": 64
+  },
+  "suite_file_sha256": "463b3f305ac5906a848185b9604e091d4a527bdde0921c65f5bac510c21536ea",
+  "suite_semantic_digest": "db80403c3c8d20ebe7253fea31a79e18c84da04554c677b2bae3995232b1ba47",
+  "task": "CONTROLLED_ENGLISH_GRAMMAR_FRAGMENT_CLASSIFICATION"
+}
